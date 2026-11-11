@@ -104,6 +104,18 @@ jobs:
         run: |
           python -m pip install 'playwright==1.56.0'
           python -m playwright install --with-deps chromium
+      - name: Install pinned axe-core accessibility scanner
+        run: npm install --no-save --no-package-lock --ignore-scripts axe-core@4.14.0
+      - name: Check accessibility for desktop and mobile
+        run: python tests/a11y_audit.py --report accessibility-report.json
+      - name: Save accessibility findings
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-accessibility
+          path: accessibility-report.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Check desktop and mobile interactions and latency
         run: python tests/ui_smoke.py --report browser-metrics.json
       - name: Save local browser performance report
