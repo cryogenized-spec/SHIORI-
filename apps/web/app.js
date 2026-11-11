@@ -73,6 +73,7 @@
     const total=new Date(year,month+1,0).getDate();
     const taskCounts = new Map();
     tasks.filter(t=>t.status!=='done' && t.due).forEach(t=>taskCounts.set(t.due,(taskCounts.get(t.due)||0)+1));
+    const heading = new Intl.DateTimeFormat('en-GB',{month:'long',year:'numeric'}).format(calendarMonth);
     const weekdayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
     let cells='';
     for(let offset=0;offset<first;offset++) cells+='<span class="cal-empty" aria-hidden="true"></span>';
@@ -81,7 +82,6 @@
       const classes=['cal-day', key===newDate()?'is-today':'', key===calendarSelected?'is-selected':''].filter(Boolean).join(' ');
       cells+=`<button type="button" class="${classes}" data-calendar-date="${key}" aria-label="${day} ${heading}, ${n} open tasks" aria-pressed="${String(key===calendarSelected)}"><span>${day}</span>${n?`<small class="cal-count">${n}</small>`:''}</button>`;
     }
-    const heading = new Intl.DateTimeFormat('en-GB',{month:'long',year:'numeric'}).format(calendarMonth);
     wrapper.innerHTML = `<div class="calendar-top"><div><span class="section-eyebrow">AT A GLANCE</span><h3>${heading}</h3></div><div class="calendar-commands"><button type="button" data-calendar-today>Today</button><button type="button" data-calendar-shift="-1" aria-label="Previous month">‹</button><button type="button" data-calendar-shift="1" aria-label="Next month">›</button></div></div><div class="cal-grid">${weekdayNames.map(d=>`<span class="cal-weekday">${d}</span>`).join('')}${cells}</div><div class="calendar-note">Numbers show unfinished tasks due that day. Select a date to focus your list.</div>`;
   }
   function renderList(){const arr=chosen();if(!arr.length)return '<div class="empty-state">'+icon('check-circle')+'<h3>A little breathing room.</h3><p>Nothing matches this view. Try another filter or create a task.</p></div>';return `<div class="task-list">${arr.map(t=>`<article class="task-row"><button class="task-complete ${t.status==='done'?'done':''}" aria-label="${t.status==='done'?'Reopen':'Complete'} ${escapeHTML(t.title)}" data-complete="${t.id}">${t.status==='done'?icon('check'):''}</button><div class="task-info" data-detail="${t.id}"><div class="task-title ${t.status==='done'?'done':''}">${escapeHTML(t.title)}</div><div class="task-meta"><span class="project-chip">${escapeHTML(t.project)}</span><span class="task-meta-dot"></span><span>${escapeHTML(t.tags.slice(0,2).join(' / '))}</span></div></div><div class="task-end"><span class="priority-dot ${t.priority}" title="${t.priority} priority"></span><span class="due-chip">${icon('calendar')}${displayDate(t.due)}</span>${icon('chevron').replace('<svg ', '<svg class="row-arrow" data-detail="'+t.id+'" ')}</div></article>`).join('')}</div>`;}
