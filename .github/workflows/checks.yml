@@ -26,20 +26,7 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      - name: Bootstrap Cargo.lock until committed
-        shell: bash
-        run: |
-          if [[ ! -f Cargo.lock ]]; then
-            echo '::warning::Cargo.lock is not yet checked in. This is a temporary reproducibility gap.'
-            cargo generate-lockfile
-          fi
-      - name: Upload generated lockfile for maintainer to commit
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: cargo-lockfile
-          path: Cargo.lock
-          retention-days: 14
-      - name: Rust formatting
+      - name: Verify committed Cargo.lock\n        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null\n      - name: Rust formatting
         run: cargo fmt --all -- --check
       - name: Strict Rust lint (all packages and targets)
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -60,8 +47,8 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
-      - name: Resolve lockfile if not present
-        run: test -f Cargo.lock || cargo generate-lockfile
+      - name: Verify committed Cargo.lock
+        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null
       - name: Install pinned RustSec audit tool
         run: cargo install cargo-audit --version 0.23.0 --locked
       - name: Block vulnerable dependencies
@@ -77,15 +64,15 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain + LLVM
         run: rustup toolchain install 1.99.1 --profile minimal --component llvm-tools-preview
-      - name: Resolve lockfile if not present
-        run: test -f Cargo.lock || cargo generate-lockfile
+      - name: Verify committed Cargo.lock
+        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null
       - name: Install coverage tool
         run: cargo install cargo-llvm-cov --version 0.9.1 --locked
       - name: Run coverage instrumentation
         run: cargo llvm-cov --workspace --all-features --locked --lcov --output-path coverage.lcov
       - name: Store Rust coverage report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: shiori-rust-coverage
           path: coverage.lcov
@@ -119,7 +106,7 @@ jobs:
         run: python tests/ui_smoke.py --report browser-metrics.json
       - name: Save local browser performance report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: shiori-browser-metrics
           path: browser-metrics.json
@@ -136,8 +123,8 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
-      - name: Resolve lockfile if not present
-        run: test -f Cargo.lock || cargo generate-lockfile
+      - name: Verify committed Cargo.lock
+        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null
       - name: Run repeatable synthetic SQLite benchmark
         run: cargo run --release --locked -p shiori-perf -- --rows 3000 > rust-perf.json
       - name: Enforce meaningful performance budgets
@@ -146,7 +133,7 @@ jobs:
         run: python3 tests/metrics_summary.py rust-perf.json >> "$GITHUB_STEP_SUMMARY"
       - name: Archive performance measurements
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: shiori-rust-perf
           path: rust-perf.json

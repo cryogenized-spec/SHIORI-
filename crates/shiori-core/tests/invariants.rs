@@ -3,8 +3,14 @@ use shiori_core::{Priority, Task, TaskError, TaskStatus, validate_title};
 
 #[test]
 fn title_constraints_count_unicode_scalars_not_bytes() {
-    assert_eq!(validate_title(&"栞".repeat(160)).unwrap().chars().count(), 160);
-    assert_eq!(validate_title(&"栞".repeat(161)), Err(TaskError::TitleTooLong));
+    assert_eq!(
+        validate_title(&"栞".repeat(160)).unwrap().chars().count(),
+        160
+    );
+    assert_eq!(
+        validate_title(&"栞".repeat(161)),
+        Err(TaskError::TitleTooLong)
+    );
     assert_eq!(validate_title("  \n "), Err(TaskError::EmptyTitle));
 }
 
@@ -14,9 +20,15 @@ fn completion_is_reversible_and_revisions_are_monotonic() {
     let original = task.version;
     for cycle in 0..30 {
         task.change_status(TaskStatus::Done);
-        assert!(task.completed_at.is_some(), "missing completion on cycle {cycle}");
+        assert!(
+            task.completed_at.is_some(),
+            "missing completion on cycle {cycle}"
+        );
         task.change_status(TaskStatus::Todo);
-        assert!(task.completed_at.is_none(), "stale completion on cycle {cycle}");
+        assert!(
+            task.completed_at.is_none(),
+            "stale completion on cycle {cycle}"
+        );
     }
     assert_eq!(task.version, original + 60);
 }

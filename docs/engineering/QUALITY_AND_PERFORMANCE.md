@@ -6,15 +6,9 @@ synthetic SQLite latency budgets. Workflow actions are pinned to immutable SHAs;
 GitHub tokens are read-only. There is no `pull_request_target` and no unreviewed
 remote shell installer. Weekly runs retain perf artifacts for trend inspection.
 
-## Reproducibility gap to resolve before merge
+## Reproducible dependency resolution
 
-The first Rust implementation branch did not include `Cargo.lock`, and the
-container used for preparing this work has no Cargo/rustc nor external network.
-The CI bootstrap currently generates a lock and publishes it as an artifact;
-**maintainers must commit the generated Cargo.lock** and then remove the bootstrap
-fallback so all jobs fail on a missing/modified lock. Never mistake a runner-
-generated lock for fully reproducible dependency resolution. Toolchain is pinned
-at `rust-toolchain.toml` (1.99.1). The Python UI runner pins Playwright.
+`Cargo.lock` has now been committed from GitHub's Rust 1.99.1 runner. Every CI Rust job verifies the checked-in lock and uses `--locked` for builds and tests. Runtime and workflow dependencies are version-pinned. Update the lockfile through a reviewed dependency PR, not a live runner bootstrap.
 
 ## Local developer commands
 
