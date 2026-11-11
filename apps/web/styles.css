@@ -44,3 +44,6 @@
 .primary-btn:hover { background: #765070; }
 .cal-day.is-selected { background: #78445f; color: #fff; }
 .cal-day.is-selected .cal-count { background: #432135; color: #fff; }
+
+/* Ensure the dark rail footnote meets WCAG text-contrast requirements. */
+.rail-footer { color: #beafc1; }

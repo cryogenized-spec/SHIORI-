@@ -80,7 +80,7 @@
     for(let day=1;day<=total;day++) {
       const key=dateKey(year,month,day), n=taskCounts.get(key)||0;
       const classes=['cal-day', key===newDate()?'is-today':'', key===calendarSelected?'is-selected':''].filter(Boolean).join(' ');
-      cells+=`<button type="button" class="${classes}" data-calendar-date="${key}" aria-label="${day} ${heading}, ${n} open tasks" aria-pressed="${String(key===calendarSelected)}"><span>${day}</span>${n?`<small class="cal-count">${n}</small>`:''}</button>`;
+      cells+=`<button type="button" class="${classes}" data-calendar-date="${key}" aria-label="${day} ${heading}, ${n} open tasks" aria-pressed="${String(key===calendarSelected)}"><span>${day}</span>${n?`<small class="cal-count" aria-hidden="true">${n}</small>`:''}</button>`;
     }
     wrapper.innerHTML = `<div class="calendar-top"><div><span class="section-eyebrow">AT A GLANCE</span><h3>${heading}</h3></div><div class="calendar-commands"><button type="button" data-calendar-today>Today</button><button type="button" data-calendar-shift="-1" aria-label="Previous month">‹</button><button type="button" data-calendar-shift="1" aria-label="Next month">›</button></div></div><div class="cal-grid">${weekdayNames.map(d=>`<span class="cal-weekday">${d}</span>`).join('')}${cells}</div><div class="calendar-note">Numbers show unfinished tasks due that day. Select a date to focus your list.</div>`;
   }
