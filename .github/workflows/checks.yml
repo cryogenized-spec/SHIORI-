@@ -2,7 +2,7 @@ name: SHIORI quality gates
 
 on:
   push:
-    branches: [main, 'feat/**', 'fix/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -117,6 +117,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Check desktop and mobile interactions and latency
+        if: ${{ !cancelled() }}
         run: python tests/ui_smoke.py --report browser-metrics.json
       - name: Save local browser performance report
         if: always()
