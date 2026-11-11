@@ -36,3 +36,7 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 - `.github/workflows`: automated formatting, lint and tests
 
 This project follows the existing `ROADMAP.md`. Dependency and licence review remain mandatory before distribution; AGPLv3 is proposed, not yet finalized.
+
+## Quality, performance, CI
+
+See [`docs/engineering/QUALITY_AND_PERFORMANCE.md`](docs/engineering/QUALITY_AND_PERFORMANCE.md) for the strict CI pipeline, synthetic SQLite benchmarks and browser interaction tests. These produce aggregate performance reports as GitHub Actions artifacts; no real user telemetry is collected.

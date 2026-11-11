@@ -1,0 +1,5 @@
+# Security-sensitive modules and workflow changes need deliberate human review.
+/.github/workflows/ @cryogenized-spec
+/crates/shiori-core/ @cryogenized-spec
+/crates/shiori-storage/ @cryogenized-spec
+/tools/shiori-perf/ @cryogenized-spec
