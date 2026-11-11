@@ -93,7 +93,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             })? {
                 println!(
                     "{}  {:11} {:8} {}  {}",
-                    &task.id[..8],
+                    task.id,
                     task.status.as_str(),
                     task.priority.as_str(),
                     task.due_on
