@@ -54,38 +54,71 @@ fn default_database() -> Result<PathBuf, Box<dyn Error>> {
     if let Some(base) = std::env::var_os("XDG_DATA_HOME") {
         return Ok(PathBuf::from(base).join("shiori/tasks.sqlite3"));
     }
-    let home = std::env::var_os("HOME").ok_or("HOME or XDG_DATA_HOME must be set, or pass --database")?;
+    let home =
+        std::env::var_os("HOME").ok_or("HOME or XDG_DATA_HOME must be set, or pass --database")?;
     Ok(PathBuf::from(home).join(".local/share/shiori/tasks.sqlite3"))
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let path = match args.database { Some(path) => path, None => default_database()? };
+    let path = match args.database {
+        Some(path) => path,
+        None => default_database()?,
+    };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let store = SqliteStore::open(path)?;
     match args.command {
-        Command::Add { title, project, priority, due } => {
+        Command::Add {
+            title,
+            project,
+            priority,
+            due,
+        } => {
             let task = Task::new(&title, &project, priority, due)?;
             store.insert(&task)?;
             println!("Created {} [{}]", task.title, task.id);
         }
-        Command::List { project, status, search } => {
+        Command::List {
+            project,
+            status,
+            search,
+        } => {
             for task in store.list(TaskFilter {
                 project: project.as_deref(),
                 status,
                 search: search.as_deref(),
                 ..Default::default()
             })? {
-                println!("{}  {:11} {:8} {}  {}", &task.id[..8], task.status.as_str(), task.priority.as_str(), task.due_on.map(|d| d.to_string()).unwrap_or_else(|| "          ".into()), task.title);
+                println!(
+                    "{}  {:11} {:8} {}  {}",
+                    &task.id[..8],
+                    task.status.as_str(),
+                    task.priority.as_str(),
+                    task.due_on
+                        .map(|d| d.to_string())
+                        .unwrap_or_else(|| "          ".into()),
+                    task.title
+                );
             }
         }
         Command::Show { id } => println!("{:#?}", store.get(&id)?),
-        Command::Done { id } => println!("Completed {}", store.set_status(&id, TaskStatus::Done)?.title),
-        Command::Reopen { id } => println!("Reopened {}", store.set_status(&id, TaskStatus::Todo)?.title),
-        Command::Rename { id, title } => println!("Renamed to {}", store.rename(&id, &title)?.title),
-        Command::Remove { id } => { store.delete(&id)?; println!("Task moved to tombstones"); }
+        Command::Done { id } => println!(
+            "Completed {}",
+            store.set_status(&id, TaskStatus::Done)?.title
+        ),
+        Command::Reopen { id } => println!(
+            "Reopened {}",
+            store.set_status(&id, TaskStatus::Todo)?.title
+        ),
+        Command::Rename { id, title } => {
+            println!("Renamed to {}", store.rename(&id, &title)?.title)
+        }
+        Command::Remove { id } => {
+            store.delete(&id)?;
+            println!("Task moved to tombstones");
+        }
     }
     Ok(())
 }

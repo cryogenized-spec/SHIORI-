@@ -115,7 +115,12 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new(title: &str, project: &str, priority: Priority, due_on: Option<NaiveDate>) -> Result<Self, TaskError> {
+    pub fn new(
+        title: &str,
+        project: &str,
+        priority: Priority,
+        due_on: Option<NaiveDate>,
+    ) -> Result<Self, TaskError> {
         let title = validate_title(title)?;
         let project = project.trim();
         if project.is_empty() {
@@ -140,7 +145,11 @@ impl Task {
 
     pub fn change_status(&mut self, status: TaskStatus) {
         self.status = status;
-        self.completed_at = if status == TaskStatus::Done { Some(Utc::now()) } else { None };
+        self.completed_at = if status == TaskStatus::Done {
+            Some(Utc::now())
+        } else {
+            None
+        };
         self.bump();
     }
 
@@ -167,8 +176,14 @@ mod tests {
 
     #[test]
     fn rejects_empty_and_too_long_titles() {
-        assert_eq!(Task::new(" \t ", "Inbox", Priority::Low, None).unwrap_err(), TaskError::EmptyTitle);
-        assert_eq!(validate_title(&"x".repeat(161)), Err(TaskError::TitleTooLong));
+        assert_eq!(
+            Task::new(" \t ", "Inbox", Priority::Low, None).unwrap_err(),
+            TaskError::EmptyTitle
+        );
+        assert_eq!(
+            validate_title(&"x".repeat(161)),
+            Err(TaskError::TitleTooLong)
+        );
     }
 
     #[test]
@@ -186,6 +201,11 @@ mod tests {
     #[test]
     fn a_calendar_date_is_not_shifted_by_timezone_conversion() {
         let due = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
-        assert_eq!(Task::new("Task", "Inbox", Priority::Low, Some(due)).unwrap().due_on, Some(due));
+        assert_eq!(
+            Task::new("Task", "Inbox", Priority::Low, Some(due))
+                .unwrap()
+                .due_on,
+            Some(due)
+        );
     }
 }
