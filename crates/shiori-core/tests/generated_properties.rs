@@ -1,6 +1,6 @@
 //! Reproducible, dependency-free generative checks for core invariants.
 //! Each failure includes its case index. The seed is intentionally fixed for CI.
-use shiori_core::{validate_title, Priority, Task, TaskError, TaskStatus};
+use shiori_core::{Priority, Task, TaskError, TaskStatus, validate_title};
 use std::str::FromStr;
 
 fn next(state: &mut u64) -> u64 {
@@ -56,13 +56,22 @@ fn generated_status_transitions_keep_completion_and_versions_consistent() {
         let before = task.version;
         task.change_status(status);
         assert_eq!(task.version, before + 1, "step {step}");
-        assert_eq!(task.completed_at.is_some(), status == TaskStatus::Done, "step {step}");
+        assert_eq!(
+            task.completed_at.is_some(),
+            status == TaskStatus::Done,
+            "step {step}"
+        );
     }
 }
 
 #[test]
 fn persisted_enum_strings_round_trip_or_reject_unknown_values() {
-    for priority in [Priority::Low, Priority::Medium, Priority::High, Priority::Urgent] {
+    for priority in [
+        Priority::Low,
+        Priority::Medium,
+        Priority::High,
+        Priority::Urgent,
+    ] {
         assert_eq!(Priority::from_str(priority.as_str()).unwrap(), priority);
     }
     for status in [TaskStatus::Todo, TaskStatus::InProgress, TaskStatus::Done] {
