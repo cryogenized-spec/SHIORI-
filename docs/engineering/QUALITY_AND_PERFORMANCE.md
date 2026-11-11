@@ -1,7 +1,7 @@
 # SHIORI quality gates, performance and privacy
 
 CI is designed to be reviewable and fail closed on formatting, warnings, Rust tests,
-release builds, security advisories, automated browser interactions, and initial
+release builds, security advisories, automated browser interactions, a 60% aggregate Rust coverage threshold, and initial
 synthetic SQLite latency budgets. Workflow actions are pinned to immutable SHAs;
 GitHub tokens are read-only. There is no `pull_request_target` and no unreviewed
 remote shell installer. Weekly runs retain perf artifacts for trend inspection.
@@ -68,7 +68,7 @@ memory, battery, and filesystem performance on actual devices.
 The connector has no authorized branch-rules write operation. In GitHub Settings
 → Rules → Rulesets, protect `main`: require PR review, require status checks
 `Rust quality`, `Rust dependency audit`, `Rust coverage`,
-`Browser UI and accessibility smoke`, and `SQLite performance budget`; require
+`Browser UI regression`, and `SQLite performance budget`; require
 branches to be current, forbid force-push/delete, and prohibit bypass where
 possible. Avoid enforcing reviewer counts that the single maintainer cannot
 satisfy until another reviewer is available. Confirm required check names after

@@ -88,6 +88,8 @@ def run(report: Path):
                         load_ms: nav.loadEventEnd, scripts: performance.getEntriesByType('resource')
                         .filter(x => x.name.endsWith('/app.js')).length};
                     }""")
+                    require(perf["load_ms"] < 1500, f"Browser page load exceeded 1500ms: {perf['load_ms']:.2f}")
+                    require(perf["scripts"] == 1, "Expected exactly one application script")
                     widths = page.evaluate("""() => ({width: document.documentElement.scrollWidth,
                       viewport: document.documentElement.clientWidth})""")
                     require(widths["width"] <= widths["viewport"] + 2, f"Horizontal overflow at {width}px: {widths}")

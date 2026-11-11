@@ -71,7 +71,7 @@ jobs:
       - name: Install coverage tool
         run: cargo install cargo-llvm-cov --version 0.9.1 --locked
       - name: Run coverage instrumentation
-        run: cargo llvm-cov --workspace --all-features --locked --lcov --output-path coverage.lcov
+        run: cargo llvm-cov --workspace --all-features --locked --lcov --output-path coverage.lcov --fail-under-lines 60
       - name: Store Rust coverage report
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -82,7 +82,7 @@ jobs:
           retention-days: 30
 
   web-interactions:
-    name: Browser UI and accessibility smoke
+    name: Browser UI regression
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
