@@ -5,7 +5,7 @@
 - **Generative property/invariant tests:** a fixed-seed randomized Unicode title generator, status transition generator, enum round-trips, and invalid-rename atomicity. Self-contained tests use no new runtime dependencies.
 - **Cold database restore/restart:** verifies a safely closed SQLite file copy preserves active records, completion timestamps, versions and tombstones. **This is not a live backup or a migration suite**; neither capability has been implemented yet.
 - **Automated accessibility:** axe-core WCAG A/AA checks at desktop and mobile widths. Serious/critical issues fail CI and results are uploaded. A manual screen-reader/keyboard review is still required.
-- **Existing checks:** formatting, strict Clippy, unit/integration/doc tests, release builds, RustSec, coverage, interactive browser flow, and a synthetic 3,000-task SQLite performance budget.
+- **Existing checks:** formatting, strict Clippy, unit/integration/doc tests, release builds, RustSec, coverage, interactive browser flow, a **60% minimum Rust line-coverage gate**, and a synthetic 3,000-task SQLite performance budget.
 
 ## Scheduled/manual deep testing
 
