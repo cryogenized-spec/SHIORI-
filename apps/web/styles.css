@@ -26,3 +26,21 @@
 .cal-day.is-selected .cal-count{background:#ffffff35;color:#fff}
 .calendar-note{font-size:10px;color:var(--muted);margin-top:13px}
 @media(max-width:760px){.home-calendar{padding:14px 10px;margin-bottom:20px}.calendar-top h3{font-size:20px}.calendar-toggle{padding:9px;font-size:10px}.calendar-toggle span{display:none}.cal-grid{gap:3px}.cal-day{min-height:39px;display:flex;flex-direction:column;gap:1px;font-size:11px}.cal-count{font-size:8px}.calendar-note{line-height:1.45}}
+
+
+/* Accessible text and control contrast; preserves SHIORI's charcoal/plum palette. */
+:root {
+  --faint: #b9acbd;
+  --muted: #c4b7c6;
+}
+:root[data-theme=light] {
+  --faint: #685a6d;
+  --muted: #514653;
+}
+.nav-overline { color: #bcaec0; }
+.sidebar-bottom-row { color: #b7aabb; }
+.breadcrumbs { color: var(--muted); }
+.primary-btn { background: #855073; color: #fffafb; }
+.primary-btn:hover { background: #765070; }
+.cal-day.is-selected { background: #78445f; color: #fff; }
+.cal-day.is-selected .cal-count { background: #432135; color: #fff; }
