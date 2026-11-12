@@ -14,4 +14,6 @@ internal object NativeVault {
 
     external fun loadSnapshot(databasePath: String): String?
     external fun storeSnapshot(databasePath: String, backupJson: String): Boolean
+    /** A read-only migration trial for WebView users, not the active store. */
+    external fun stageLegacyBackup(shadowDatabasePath: String, backupJson: String): String?
 }
