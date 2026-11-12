@@ -59,6 +59,10 @@
       method:'POST', headers:{'Content-Type':'application/json'},
       credentials:'same-origin', body:JSON.stringify(data)
     });
+    if(response.status===409){
+      await reloadBridge();
+      throw new Error('conflict');
+    }
     if(!response.ok) throw new Error('Local task operation rejected');
     await reloadBridge();
   }
@@ -164,7 +168,42 @@
   function closeSidebar(){$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');}
   function openModal(){$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
   function closeModal(){$('#taskModal').classList.remove('open');$('#taskModal').setAttribute('aria-hidden','true');}
-  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><button class="primary-btn detail-done" data-complete="${id}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
+  function closeEdit(){
+    $('#editModal').classList.remove('open');
+    $('#editModal').setAttribute('aria-hidden','true');
+  }
+  function openEdit(){
+    const t=tasks.find(item=>item.id===activeDetail);
+    if(!t || mode==='checking' || mode==='local-error') return;
+    $('#editTaskName').value=t.title;
+    $('#editTaskDescription').value=t.description||'';
+    $('#editTaskProject').value=t.project;
+    $('#editTaskPriority').value=t.priority;
+    $('#editTaskDue').value=t.due||'';
+    $('#editTaskEstimate').value=t.mins==null?'':String(t.mins);
+    $('#editModal').classList.add('open');
+    $('#editModal').setAttribute('aria-hidden','false');
+    setTimeout(()=>$('#editTaskName').focus(),0);
+  }
+  async function removeTask(){
+    const t=tasks.find(item=>item.id===activeDetail);
+    if(!t || mode==='checking' || mode==='local-error') return;
+    if(!confirm('Move this task to deleted records?')) return;
+    if(mode==='live'){
+      try {
+        await requestBridge('/api/tasks/'+encodeURIComponent(t.id)+'/delete',{expected_version:t.version});
+      } catch(err){
+        toast(err.message==='conflict'?'Task changed elsewhere — reload and review':'Could not delete task');
+        return;
+      }
+    } else {
+      tasks=tasks.filter(item=>item.id!==t.id);save();render();
+    }
+    $('#detailOverlay').classList.remove('open');
+    activeDetail=null;
+    toast('Task moved to deleted records');
+  }
+  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
   async function toggleTask(id){
     const t=tasks.find(x=>x.id===id);if(!t)return;
     const next=t.status==='done'?'todo':'done';
@@ -191,12 +230,49 @@
     const add=e.target.closest('[data-add]');if(add){openModal();return;}
     const complete=e.target.closest('[data-complete]');if(complete){toggleTask(complete.dataset.complete);return;}
     const detail=e.target.closest('[data-detail]');if(detail){showDetail(detail.dataset.detail);return;}
+    if(e.target.closest('[data-edit-task]')){openEdit();return;}
+    if(e.target.closest('[data-remove-task]')){removeTask();return;}
+    if(e.target.closest('[data-close-edit]')){closeEdit();return;}
     const project=e.target.closest('[data-project]');if(project){setView('inbox');$('#searchInput').value=project.dataset.project;query=project.dataset.project;render();return;}
     const theme=e.target.closest('[data-theme]');if(theme){setTheme(theme.dataset.theme);return;}
     const close=e.target.closest('[data-close-modal]');if(close){closeModal();return;}
     if(e.target.closest('[data-close-detail]')){$('#detailOverlay').classList.remove('open');return;}
     if(e.target.closest('[data-preview-feature]')){toast('Feature preview only · planned for the roadmap');return;}
     if(e.target.id==='resetDemo'){if(mode!=='demo'){toast('Reset is only for demo records');return;}tasks=defaultTasks.map(t=>({...t, tags:[...t.tags]}));save();render();toast('Sample tasks restored');}
+  });
+  $('#editTaskForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const t=tasks.find(item=>item.id===activeDetail);
+    if(!t || mode==='checking' || mode==='local-error') return;
+    const estimateText=$('#editTaskEstimate').value.trim();
+    const updated={
+      title:$('#editTaskName').value.trim(),
+      notes:$('#editTaskDescription').value,
+      project:$('#editTaskProject').value.trim(),
+      priority:$('#editTaskPriority').value,
+      due_on:$('#editTaskDue').value||null,
+      estimate_minutes:estimateText===''?null:Number(estimateText),
+      expected_version:t.version
+    };
+    if(!updated.title || !updated.project) return;
+    if(mode==='live'){
+      try{
+        await requestBridge('/api/tasks/'+encodeURIComponent(t.id)+'/edit',updated);
+      }catch(err){
+        toast(err.message==='conflict'?'Task changed elsewhere — review and retry':'Could not save task edits');
+        return;
+      }
+    }else{
+      Object.assign(t,{
+        title:updated.title,description:updated.notes,project:updated.project,
+        priority:updated.priority,due:updated.due_on||'',mins:updated.estimate_minutes,
+        version:(t.version||1)+1
+      });
+      save();render();
+    }
+    closeEdit();
+    showDetail(t.id);
+    toast('Task updated');
   });
   $('#taskForm').addEventListener('submit',async e=>{
     e.preventDefault();
@@ -227,10 +303,11 @@
   $('#exploreButton').addEventListener('click',()=>setView('projects'));
   $('#notifyButton').addEventListener('click',()=>toast('Notifications will be added in a later milestone'));
   $('#taskModal').addEventListener('click',e=>{if(e.target.id==='taskModal')closeModal();});
+  $('#editModal').addEventListener('click',e=>{if(e.target.id==='editModal')closeEdit();});
   $('#detailOverlay').addEventListener('click',e=>{if(e.target.id==='detailOverlay')$('#detailOverlay').classList.remove('open');});
   function setTheme(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem('shiori-theme',t)}catch{}$('#themeToggle').innerHTML=icon(t==='dark'?'sun':'moon');}
   $('#themeToggle').addEventListener('click',()=>setTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'));
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeSidebar();$('#detailOverlay').classList.remove('open');}if(e.target.matches('input,textarea,select'))return;if(e.key==='/'){e.preventDefault();$('#searchInput').focus();}if(e.key.toLowerCase()==='n' && !e.metaKey && !e.ctrlKey){openModal();}});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeEdit();closeSidebar();$('#detailOverlay').classList.remove('open');}if(e.target.matches('input,textarea,select'))return;if(e.key==='/'){e.preventDefault();$('#searchInput').focus();}if(e.key.toLowerCase()==='n' && !e.metaKey && !e.ctrlKey){openModal();}});
   let dragged=null;document.addEventListener('dragstart',e=>{const card=e.target.closest('[data-drag]');if(card){dragged=card.dataset.drag;card.classList.add('dragging');}});document.addEventListener('dragend',()=>{$$('.dragging').forEach(c=>c.classList.remove('dragging'));dragged=null;});document.addEventListener('dragover',e=>{const col=e.target.closest('[data-drop]');if(col){e.preventDefault();col.classList.add('drag-over');}});document.addEventListener('dragleave',e=>{const col=e.target.closest('[data-drop]');if(col && !col.contains(e.relatedTarget))col.classList.remove('drag-over');});document.addEventListener('drop',e=>{const col=e.target.closest('[data-drop]');if(col && dragged){
     e.preventDefault();const t=tasks.find(x=>x.id===dragged);
     if(t){
