@@ -4,9 +4,7 @@
 //! app-private database path; there is no JavaScript/native object bridge.
 use chrono::NaiveDate;
 use serde_json::{Value, json};
-use shiori_core::{
-    Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate,
-};
+use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{error::Error, path::Path, str::FromStr};
 
@@ -89,8 +87,11 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
         "list" => {
             let all = store.list(TaskFilter::default())?;
             let total = all.len();
-            let tasks: Vec<Value> = all.into_iter().take(MAX_VISIBLE_TASKS)
-                .map(summary).collect();
+            let tasks: Vec<Value> = all
+                .into_iter()
+                .take(MAX_VISIBLE_TASKS)
+                .map(summary)
+                .collect();
             Ok(json!({"ok":true,"tasks":tasks,"total":total}))
         }
         "create" => {
@@ -165,7 +166,8 @@ mod tests {
                 "due":"", "tags":[]
             }],
             "saved_views":[], "sort":"fifo"
-        }).to_string()
+        })
+        .to_string()
     }
     fn command(op: &str) -> Value {
         json!({"protocol":PROTOCOL, "op":op})
@@ -184,53 +186,92 @@ mod tests {
         let original = send(&path, command("list")).unwrap();
         assert_eq!(original["total"], 1);
         assert_eq!(original["tasks"][0]["title"], "Legacy 栞");
-        let created = send(&path, json!({
-            "protocol":PROTOCOL, "op":"create",
-            "title":"Native record", "project":"Personal", "priority":"medium",
-            "notes":"Unicode café", "estimate_minutes":35
-        })).unwrap();
+        let created = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL, "op":"create",
+                "title":"Native record", "project":"Personal", "priority":"medium",
+                "notes":"Unicode café", "estimate_minutes":35
+            }),
+        )
+        .unwrap();
         let id = created["task"]["id"].as_str().unwrap().to_owned();
         let first_version = created["task"]["version"].as_i64().unwrap();
-        let renamed = send(&path, json!({
-            "protocol":PROTOCOL, "op":"rename",
-            "id":id, "title":"Native edited", "expected_version":first_version
-        })).unwrap();
+        let renamed = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL, "op":"rename",
+                "id":id, "title":"Native edited", "expected_version":first_version
+            }),
+        )
+        .unwrap();
         let second_version = renamed["task"]["version"].as_i64().unwrap();
         assert!(second_version > first_version);
-        assert!(send(&path, json!({
-            "protocol":PROTOCOL, "op":"delete",
-            "id":id, "expected_version":first_version
-        })).is_err());
-        let completed = send(&path, json!({
-            "protocol":PROTOCOL, "op":"status",
-            "id":id, "status":"done", "expected_version":second_version
-        })).unwrap();
+        assert!(
+            send(
+                &path,
+                json!({
+                    "protocol":PROTOCOL, "op":"delete",
+                    "id":id, "expected_version":first_version
+                })
+            )
+            .is_err()
+        );
+        let completed = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL, "op":"status",
+                "id":id, "status":"done", "expected_version":second_version
+            }),
+        )
+        .unwrap();
         let third_version = completed["task"]["version"].as_i64().unwrap();
         assert_eq!(completed["task"]["status"], "done");
-        assert!(send(&path, json!({
-            "protocol":PROTOCOL, "op":"status",
-            "id":id, "status":"todo", "expected_version":second_version
-        })).is_err());
-        send(&path, json!({
-            "protocol":PROTOCOL, "op":"delete",
-            "id":id, "expected_version":third_version
-        })).unwrap();
+        assert!(
+            send(
+                &path,
+                json!({
+                    "protocol":PROTOCOL, "op":"status",
+                    "id":id, "status":"todo", "expected_version":second_version
+                })
+            )
+            .is_err()
+        );
+        send(
+            &path,
+            json!({
+                "protocol":PROTOCOL, "op":"delete",
+                "id":id, "expected_version":third_version
+            }),
+        )
+        .unwrap();
         let records = send(&path, command("list")).unwrap();
         assert_eq!(records["total"], 1);
         let store = SqliteStore::open(&path).unwrap();
-        assert!(store
-            .list(TaskFilter { include_deleted:true, ..TaskFilter::default() })
-            .unwrap()
-            .iter()
-            .any(|task| task.id==id && task.deleted_at.is_some()));
-        assert_eq!(store.legacy_shadow_source().unwrap().as_deref(),Some(backup.as_str()));
+        assert!(
+            store
+                .list(TaskFilter {
+                    include_deleted: true,
+                    ..TaskFilter::default()
+                })
+                .unwrap()
+                .iter()
+                .any(|task| task.id == id && task.deleted_at.is_some())
+        );
+        assert_eq!(
+            store.legacy_shadow_source().unwrap().as_deref(),
+            Some(backup.as_str())
+        );
         drop(store);
         // Restart and inspect persisted user data and archived backup.
         assert_eq!(send(&path, command("list")).unwrap()["total"], 1);
         let mut new_backup: Value = serde_json::from_str(&backup).unwrap();
         new_backup["tasks"][0]["title"] = json!("Changed on phone");
         initialize_working_copy(&path, &new_backup.to_string()).unwrap();
-        assert_eq!(send(&path, command("list")).unwrap()["tasks"][0]["title"], "Legacy 栞");
+        assert_eq!(
+            send(&path, command("list")).unwrap()["tasks"][0]["title"],
+            "Legacy 栞"
+        );
         std::fs::remove_file(&path).unwrap();
     }
 
@@ -244,7 +285,7 @@ mod tests {
             json!({"protocol":PROTOCOL,"op":"create","title":"a","project":"X","priority":"invalid"}),
             json!({"protocol":PROTOCOL,"op":"create","title":"a","project":"X","priority":"low","due_on":"2026-02-30"}),
             json!({"protocol":PROTOCOL,"op":"delete","id":"u123","expected_version":-1}),
-            json!({"protocol":PROTOCOL,"op":"unknown"})
+            json!({"protocol":PROTOCOL,"op":"unknown"}),
         ] {
             assert!(send(&path, bad).is_err());
         }
