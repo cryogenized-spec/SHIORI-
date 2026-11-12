@@ -64,7 +64,8 @@ impl SqliteStore {
             // The initial unversioned schema is our v0 legacy fixture. Upgrade
             // in one IMMEDIATE transaction; an interrupted upgrade rolls back.
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            tx.execute_batch(r#"
+            tx.execute_batch(
+                r#"
             CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -82,18 +83,32 @@ impl SqliteStore {
             CREATE INDEX IF NOT EXISTS idx_tasks_active_due ON tasks(deleted_at, due_on, status);
             CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project, deleted_at);
             CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
-        "#)?;
+        "#,
+            )?;
             let columns = {
                 let mut stmt = tx.prepare("PRAGMA table_info(tasks)")?;
                 let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()?
             };
             let expected = [
-                "id", "title", "notes", "project", "priority", "status",
-                "due_on", "created_at", "updated_at", "completed_at",
-                "version", "deleted_at",
+                "id",
+                "title",
+                "notes",
+                "project",
+                "priority",
+                "status",
+                "due_on",
+                "created_at",
+                "updated_at",
+                "completed_at",
+                "version",
+                "deleted_at",
             ];
-            if !columns.iter().map(String::as_str).eq(expected.iter().copied()) {
+            if !columns
+                .iter()
+                .map(String::as_str)
+                .eq(expected.iter().copied())
+            {
                 return Err(StorageError::IncompatibleLegacySchema);
             }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
