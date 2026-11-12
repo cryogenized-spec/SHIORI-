@@ -1,0 +1,16 @@
+[package]
+name = "shiori-android-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Android private SQLite snapshot vault backed by Rust"
+
+[lib]
+name = "shiori_android_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rusqlite.workspace = true
+chrono.workspace = true
+serde_json = "1"
+jni = "0.21.1"
