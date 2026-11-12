@@ -60,16 +60,16 @@ fn dependencies_validate_full_graph_atomically_and_preserve_tombstones() {
         for task in [&a, &b, &c] {
             db.insert(task).unwrap();
         }
-        db.set_dependencies(&b.id, &[a.id.clone()]).unwrap();
-        db.set_dependencies(&c.id, &[b.id.clone()]).unwrap();
+        db.set_dependencies(&b.id, std::slice::from_ref(&a.id)).unwrap();
+        db.set_dependencies(&c.id, std::slice::from_ref(&b.id)).unwrap();
         assert_eq!(db.get_dependencies(&c.id).unwrap(), vec![b.id.clone()]);
         assert_eq!(db.get(&c.id).unwrap().version, 2);
         assert!(matches!(
-            db.set_dependencies(&a.id, &[c.id.clone()]),
+            db.set_dependencies(&a.id, std::slice::from_ref(&c.id)),
             Err(StorageError::DependencyCycle)
         ));
         assert!(matches!(
-            db.set_dependencies(&a.id, &[a.id.clone()]),
+            db.set_dependencies(&a.id, std::slice::from_ref(&a.id)),
             Err(StorageError::DependencyCycle)
         ));
         assert!(matches!(
@@ -83,11 +83,11 @@ fn dependencies_validate_full_graph_atomically_and_preserve_tombstones() {
         assert!(db.get_dependencies(&a.id).unwrap().is_empty());
         assert_eq!(db.get_dependencies(&c.id).unwrap(), vec![b.id.clone()]);
         assert_eq!(db.get(&a.id).unwrap().version, 1);
-        db.set_dependencies(&c.id, &[b.id.clone()]).unwrap();
+        db.set_dependencies(&c.id, std::slice::from_ref(&b.id)).unwrap();
         assert_eq!(db.get(&c.id).unwrap().version, 2);
         db.delete(&a.id).unwrap();
         assert!(matches!(
-            db.set_dependencies(&b.id, &[a.id.clone()]),
+            db.set_dependencies(&b.id, std::slice::from_ref(&a.id)),
             Err(StorageError::MissingDependency(_))
         ));
     }
@@ -175,7 +175,7 @@ fn done_predecessor_is_still_addressable() {
     store.insert(&after).unwrap();
     store.set_status(&before.id, TaskStatus::Done).unwrap();
     store
-        .set_dependencies(&after.id, &[before.id.clone()])
+        .set_dependencies(&after.id, std::slice::from_ref(&before.id))
         .unwrap();
     assert_eq!(store.get_dependencies(&after.id).unwrap(), vec![before.id]);
 }
