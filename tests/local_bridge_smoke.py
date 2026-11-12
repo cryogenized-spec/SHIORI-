@@ -61,6 +61,14 @@ def exercise(cli):
             assert task["status"] == "todo"
             assert task["version"] == 1
             task_id = task["id"]
+            assert task["assignee_id"] == "local"
+            status, attention = request("GET", "/api/attention")
+            assert status == 200
+            assert attention["local_identity"] == "local"
+            assert attention["fresh_at"]
+            assert len(attention["tasks"]) == 1
+            assert attention["tasks"][0]["id"] == task_id
+            assert attention["tasks"][0]["blocked"] is False
 
             assert request("POST", f"/api/tasks/{task_id}/status",
                            {"status": "in_progress"}) == (200, {"ok": True})
@@ -70,6 +78,7 @@ def exercise(cli):
             assert request("POST", f"/api/tasks/{task_id}/status",
                            {"status": "done"}) == (200, {"ok": True})
             assert request("GET", "/api/tasks")[1]["tasks"][0]["status"] == "done"
+            assert request("GET", "/api/attention")[1]["tasks"] == []
 
             editable = {
                 "title": "Edited 栞",
