@@ -210,6 +210,11 @@ def run():
             # Simulate the trusted Kotlin host's one-shot request/response
             # handshake. No actual Android runtime or JNI is claimed here.
             page.evaluate("""() => {
+                // Kotlin consumes this custom scheme on Android; browser
+                // CI simulates Kotlin's take/complete handshake directly.
+                window.addEventListener('shiori-native-request', (event) => {
+                    event.preventDefault();
+                });
                 window.shioriNativeBridgeEnabled = true;
                 window.shioriNativeWorkingReady();
             }""")
