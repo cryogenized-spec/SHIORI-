@@ -238,7 +238,9 @@ impl Task {
             || priority.is_some_and(|value| value != self.priority)
             || due_on.is_some_and(|value| value != self.due_on)
             || estimate_minutes.is_some_and(|value| value != self.estimate_minutes)
-            || assignee_id.as_ref().is_some_and(|value| value != &self.assignee_id);
+            || assignee_id
+                .as_ref()
+                .is_some_and(|value| value != &self.assignee_id);
         if !changed {
             return Ok(false);
         }
