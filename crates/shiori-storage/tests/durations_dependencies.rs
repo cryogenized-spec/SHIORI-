@@ -60,8 +60,10 @@ fn dependencies_validate_full_graph_atomically_and_preserve_tombstones() {
         for task in [&a, &b, &c] {
             db.insert(task).unwrap();
         }
-        db.set_dependencies(&b.id, std::slice::from_ref(&a.id)).unwrap();
-        db.set_dependencies(&c.id, std::slice::from_ref(&b.id)).unwrap();
+        db.set_dependencies(&b.id, std::slice::from_ref(&a.id))
+            .unwrap();
+        db.set_dependencies(&c.id, std::slice::from_ref(&b.id))
+            .unwrap();
         assert_eq!(db.get_dependencies(&c.id).unwrap(), vec![b.id.clone()]);
         assert_eq!(db.get(&c.id).unwrap().version, 2);
         assert!(matches!(
@@ -83,7 +85,8 @@ fn dependencies_validate_full_graph_atomically_and_preserve_tombstones() {
         assert!(db.get_dependencies(&a.id).unwrap().is_empty());
         assert_eq!(db.get_dependencies(&c.id).unwrap(), vec![b.id.clone()]);
         assert_eq!(db.get(&a.id).unwrap().version, 1);
-        db.set_dependencies(&c.id, std::slice::from_ref(&b.id)).unwrap();
+        db.set_dependencies(&c.id, std::slice::from_ref(&b.id))
+            .unwrap();
         assert_eq!(db.get(&c.id).unwrap().version, 2);
         db.delete(&a.id).unwrap();
         assert!(matches!(
