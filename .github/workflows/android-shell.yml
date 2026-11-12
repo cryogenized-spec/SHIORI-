@@ -29,6 +29,36 @@ jobs:
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
           yes | "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null || test "${PIPESTATUS[1]}" -eq 0
+      - name: Install Android NDK and pinned Rust cross-compilation targets
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" "ndk;27.2.12479018" >/dev/null || test "${PIPESTATUS[1]}" -eq 0
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup target add --toolchain 1.99.1 \
+            aarch64-linux-android x86_64-linux-android armv7-linux-androideabi
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Resolve native dependency lockfile during initial review
+        run: cargo generate-lockfile
+      - name: Record exact native dependency versions for commit
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-native-cargo-lock
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+      - name: Test Rust SQLite vault on host
+        run: cargo test -p shiori-android-native --locked
+      - name: Install pinned cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Compile Rust JNI library for Android ABIs
+        run: |
+          cargo ndk -t armeabi-v7a -t arm64-v8a -t x86_64 \
+            -o apps/android/app/src/main/jniLibs \
+            build --release --locked -p shiori-android-native
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            test -s "apps/android/app/src/main/jniLibs/$abi/libshiori_android_native.so"
+          done
       - name: Build APK with bundled offline assets
         run: |
           /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug --no-daemon --stacktrace
@@ -41,6 +71,9 @@ jobs:
             unzip -Z1 "$APK" | grep -Fxq "$asset"
           done
           unzip -p "$APK" assets/app.js | grep -Fq "android-local"
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            unzip -Z1 "$APK" | grep -Fxq "lib/$abi/libshiori_android_native.so"
+          done
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$APK" > /tmp/shiori-permissions.txt
           if grep -Fq 'android.permission.INTERNET' /tmp/shiori-permissions.txt; then
             echo "Offline shell unexpectedly declares INTERNET permission" >&2
