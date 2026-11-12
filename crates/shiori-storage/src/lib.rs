@@ -348,11 +348,7 @@ impl SqliteStore {
 
     /// Soft-delete only if the caller has seen the latest revision. Preserve
     /// tombstones for future synchronization and prevent stale UI deletions.
-    pub fn delete_if_version(
-        &self,
-        id: &str,
-        expected_version: i64,
-    ) -> Result<(), StorageError> {
+    pub fn delete_if_version(&self, id: &str, expected_version: i64) -> Result<(), StorageError> {
         let mut task = self.get(id)?;
         if task.version != expected_version {
             return Err(StorageError::RevisionConflict);
