@@ -183,7 +183,12 @@
         }
       },NATIVE_COMMAND_TIMEOUT_MS);
       nativeInFlight={id,request,resolve,reject,timer,taken:false};
-      window.location.href='shiori-vault://command?request_id='+encodeURIComponent(id);
+      // Native Android intercepts the custom URL. A cancelable signal lets
+      // browser-level tests simulate the Kotlin host without navigating away.
+      const signal=new Event('shiori-native-request',{cancelable:true});
+      window.dispatchEvent(signal);
+      if(!signal.defaultPrevented)
+        window.location.href='shiori-vault://command?request_id='+encodeURIComponent(id);
     });
   }
   function nativePreviewRender(){
