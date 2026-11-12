@@ -34,11 +34,26 @@ Rust JNI libraries are compiled into the APK for armv7, arm64 and x86_64. Cross-
 
 Use Android Studio with JDK 17, Android SDK API 36 and Android Gradle Plugin 9.4. The project is rooted at `apps/android` and uses Gradle 9.9.1. It links `apps/web` as a **packaged asset source** at build time; do not copy a second stale UI.
 
-If you already have Gradle 9.9.1 installed, from the repository root:
+The Android APK must include Rust JNI libraries. From the repository root,
+with NDK 27.2.12479018 installed through Android Studio, install Rust 1.99.1,
+the Android targets and pinned `cargo-ndk` before running Gradle:
 
 ```bash
+rustup toolchain install 1.99.1 --profile minimal
+rustup target add --toolchain 1.99.1 \
+  armv7-linux-androideabi aarch64-linux-android x86_64-linux-android
+cargo install cargo-ndk --version 4.1.2 --locked
+export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/27.2.12479018"
+cargo ndk -t armeabi-v7a -t arm64-v8a -t x86_64 \
+  -o apps/android/app/src/main/jniLibs \
+  build --release --locked -p shiori-android-native
 gradle -p apps/android :app:assembleDebug
 ```
+
+The project uses a committed `Cargo.lock`, and CI verifies that all three
+Android libraries are embedded in the APK. Running Gradle **without** building
+the Rust libraries first may produce a shell where the safety vault is absent;
+keep the manual JSON export until a release build and device tests have passed.
 
 The debug APK will be under `apps/android/app/build/outputs/apk/debug/` after a successful build. Android Studio can import the project directly. The CI Android build uses the official Gradle binary and verifies its SHA-256 before building.
 
