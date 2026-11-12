@@ -88,6 +88,13 @@ pub enum TaskError {
     InvalidEstimate,
 }
 
+pub fn validate_estimate(minutes: i64) -> Result<i64, TaskError> {
+    if !(1..=1440).contains(&minutes) {
+        return Err(TaskError::InvalidEstimate);
+    }
+    Ok(minutes)
+}
+
 pub fn validate_project(value: &str) -> Result<String, TaskError> {
     let project = value.trim();
     if project.is_empty() {
@@ -198,9 +205,7 @@ impl Task {
         let title = title.as_deref().map(validate_title).transpose()?;
         let project = project.as_deref().map(validate_project).transpose()?;
         if let Some(Some(minutes)) = estimate_minutes {
-            if !(1..=1440).contains(&minutes) {
-                return Err(TaskError::InvalidEstimate);
-            }
+            validate_estimate(minutes)?;
         }
         let changed = title.as_ref().is_some_and(|value| value != &self.title)
             || notes.as_ref().is_some_and(|value| value != &self.notes)
