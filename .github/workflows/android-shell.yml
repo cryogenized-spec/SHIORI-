@@ -32,6 +32,25 @@ jobs:
       - name: Build APK with bundled offline assets
         run: |
           /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug --no-daemon --stacktrace
+      - name: Assert the APK is self-contained and network-permission-free
+        run: |
+          set -euo pipefail
+          APK=apps/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          for asset in assets/index.html assets/app.js assets/styles.css assets/assets/shiori-muse.webp; do
+            unzip -Z1 "$APK" | grep -Fxq "$asset"
+          done
+          unzip -p "$APK" assets/app.js | grep -Fq "android-local"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$APK" > /tmp/shiori-permissions.txt
+          if grep -Fq 'android.permission.INTERNET' /tmp/shiori-permissions.txt; then
+            echo "Offline shell unexpectedly declares INTERNET permission" >&2
+            exit 1
+          fi
+          if grep -Fq 'android.permission.READ_EXTERNAL_STORAGE' /tmp/shiori-permissions.txt; then
+            echo "Offline shell unexpectedly declares external storage access" >&2
+            exit 1
+          fi
+          echo "Bundled assets and offline permissions verified."
       - name: Archive debug APK
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
