@@ -47,6 +47,12 @@ jobs:
           path: Cargo.lock
           if-no-files-found: error
           retention-days: 7
+      - name: Emit reviewed Cargo.lock for deterministic commit
+        run: |
+          echo SHIORI_LOCK_BEGIN
+          base64 -w0 Cargo.lock
+          echo
+          echo SHIORI_LOCK_END
       - name: Test Rust SQLite vault on host
         run: cargo test -p shiori-android-native --locked
       - name: Install pinned cargo-ndk
