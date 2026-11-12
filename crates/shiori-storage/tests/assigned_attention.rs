@@ -19,12 +19,16 @@ fn local_assignments_are_indexed_and_report_blockers() {
         .unwrap();
     let assignments = store.assigned_attention("local").unwrap();
     assert_eq!(assignments.len(), 2);
-    assert!(assignments.iter().any(|(task, blocked)| {
-        task.id == publish.id && *blocked
-    }));
-    assert!(assignments.iter().any(|(task, blocked)| {
-        task.id == prepare.id && !*blocked
-    }));
+    assert!(
+        assignments
+            .iter()
+            .any(|(task, blocked)| { task.id == publish.id && *blocked })
+    );
+    assert!(
+        assignments
+            .iter()
+            .any(|(task, blocked)| { task.id == prepare.id && !*blocked })
+    );
     store.set_status(&prepare.id, TaskStatus::Done).unwrap();
     let assignments = store.assigned_attention("local").unwrap();
     assert_eq!(assignments.len(), 1);
