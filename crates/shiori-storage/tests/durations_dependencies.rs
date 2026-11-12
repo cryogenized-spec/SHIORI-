@@ -166,7 +166,7 @@ fn version_one_database_upgrades_without_losing_existing_or_deleted_tasks() {
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
 }
 
 #[test]
