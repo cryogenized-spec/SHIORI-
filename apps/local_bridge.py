@@ -24,6 +24,42 @@ MAX_BODY = 8192
 MAX_EXPORT = 16 * 1024 * 1024
 
 
+class RevisionConflict(ValueError):
+    """The submitted revision is no longer current."""
+
+
+def valid_version(value):
+    if type(value) is not int or not 1 <= value <= 2**63 - 1:
+        raise ValueError("a valid expected_version is required")
+    return value
+
+
+def valid_fields(data):
+    """Validate the editable snapshot and return safe CLI flag values."""
+    title = data.get("title")
+    project = data.get("project")
+    notes = data.get("notes")
+    priority = data.get("priority")
+    due = data.get("due_on")
+    minutes = data.get("estimate_minutes")
+    if not isinstance(title, str) or not 0 < len(title.strip()) <= 120:
+        raise ValueError("invalid title")
+    if not isinstance(project, str) or not 0 < len(project.strip()) <= 160:
+        raise ValueError("invalid project")
+    if not isinstance(notes, str) or len(notes) > 6000:
+        raise ValueError("invalid notes")
+    if priority not in ("low", "medium", "high", "urgent"):
+        raise ValueError("invalid priority")
+    if due is not None:
+        if not isinstance(due, str) or date.fromisoformat(due).isoformat() != due:
+            raise ValueError("invalid due date")
+    if minutes is not None and (
+        type(minutes) is not int or not 1 <= minutes <= 1440
+    ):
+        raise ValueError("invalid estimate")
+    return title.strip(), project.strip(), notes, priority, due, minutes
+
+
 def decode_snapshot(data):
     """Fail closed if a CLI/API version changes the machine protocol."""
     if len(data) > MAX_EXPORT or not data.startswith(MAGIC):
@@ -97,6 +133,8 @@ def make_server(port, cli, database):
                 args, capture_output=True, timeout=15, check=False
             )
             if result.returncode:
+                if b"task was changed by another writer" in result.stderr:
+                    raise RevisionConflict("task was changed; reload before saving")
                 raise ValueError("Rust task command was rejected")
             if len(result.stdout) > MAX_EXPORT:
                 raise ValueError("task snapshot exceeds local bridge limit")
@@ -179,7 +217,45 @@ def make_server(port, cli, database):
                     self.run_cli("status", identifier, status)
                     self.response(200, {"ok": True})
                     return
+                edit = re.fullmatch(r"/api/tasks/([^/]+)/(edit|delete)", path)
+                if edit:
+                    identifier, action = edit.groups()
+                    if not UUID.fullmatch(identifier):
+                        raise ValueError("invalid task ID")
+                    revision = valid_version(data.get("expected_version"))
+                    if action == "delete":
+                        if set(data) != {"expected_version"}:
+                            raise ValueError("delete accepts only expected_version")
+                        self.run_cli(
+                            "remove", identifier, "--if-version", str(revision)
+                        )
+                        self.response(200, {"ok": True})
+                        return
+                    if set(data) != {
+                        "title", "project", "notes", "priority",
+                        "due_on", "estimate_minutes", "expected_version"
+                    }:
+                        raise ValueError("edit requires the complete task snapshot")
+                    title, project, notes, priority, due, minutes = valid_fields(data)
+                    command = [
+                        "edit", identifier, "--if-version", str(revision),
+                        "--title", title, "--notes", notes,
+                        "--project", project, "--priority", priority,
+                    ]
+                    if due is None:
+                        command.append("--clear-due")
+                    else:
+                        command.extend(["--due", due])
+                    if minutes is None:
+                        command.append("--clear-minutes")
+                    else:
+                        command.extend(["--minutes", str(minutes)])
+                    self.run_cli(*command)
+                    self.response(200, {"ok": True})
+                    return
                 self.response(404, {"error": "unknown API route"})
+            except RevisionConflict as exc:
+                self.response(409, {"error": str(exc)})
             except (ValueError, TypeError, OverflowError) as exc:
                 self.response(400, {"error": str(exc)[:140]})
             except (OSError, subprocess.TimeoutExpired):
