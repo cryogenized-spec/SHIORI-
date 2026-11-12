@@ -190,6 +190,11 @@ def run():
                 "document.querySelector('[data-view=settings]').click()"
             )
             assert page.locator("#stageCanonicalShadow").count() == 1
+            assert page.locator("#auditCanonicalShadow").count() == 1
+            assert page.locator("#auditCanonicalShadow").is_visible()
+            # The audit only signals an Android-local custom scheme; never
+            # performs a browser-side migration or starts on page load.
+            assert page.evaluate("localStorage.getItem(\'shiori-android-local-tasks\')") == "[]"
             assert page.locator("#saveNativeVault").count() == 1
             assert not failures, failures
             assert not external_requests, external_requests
