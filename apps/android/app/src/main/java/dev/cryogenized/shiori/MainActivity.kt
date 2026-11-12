@@ -65,6 +65,7 @@ class MainActivity : Activity() {
                             "save" -> persistVaultCopy(true)
                             "recover" -> recoverVaultCopy()
                             "stage" -> confirmCanonicalShadowStage()
+                            "audit" -> auditCanonicalShadow()
                         }
                     }
                     return true
@@ -258,6 +259,41 @@ class MainActivity : Activity() {
                         notifyUser(
                             report ?: "Migration preview failed or conflicts with a prior stage"
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Read-only comparison of the separate canonical preview against its
+     * original archived snapshot and the phone's current tasks. Never
+     * promotes the preview or edits either store.
+     */
+    private fun auditCanonicalShadow() {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript("window.shioriExportBackup()") { result ->
+            val snapshot = try {
+                val json = JSONArray("[$result]").getString(0)
+                if (json.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(json).optString("format") != BACKUP_FORMAT
+                ) throw IllegalArgumentException("Invalid backup")
+                json
+            } catch (_: Exception) {
+                notifyUser("Could not read a valid offline task snapshot")
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                val report = runCatching {
+                    NativeVault.auditLegacyShadow(shadowPath(), snapshot)
+                }.getOrNull() ?: "Rust preview audit is unavailable; no tasks were changed."
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Rust migration audit")
+                            .setMessage(report)
+                            .setPositiveButton("OK", null)
+                            .show()
                     }
                 }
             }
