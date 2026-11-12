@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "dev.cryogenized.shiori"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.cryogenized.shiori"
