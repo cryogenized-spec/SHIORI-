@@ -94,6 +94,22 @@
     if (['focus','fifo','due','priority'].includes(savedOrder)) sortMode = savedOrder;
   } catch {}
   $('#sortMode').value = sortMode;
+  let savedViews=[];
+  try {
+    const parsed=JSON.parse(localStorage.getItem('shiori-saved-views')||'[]');
+    if(Array.isArray(parsed))savedViews=parsed.filter(x=>x && typeof x.name==='string' && ['today','attention','inbox','board'].includes(x.view) && ['all','high','medium','low','urgent'].includes(x.filter) && ['focus','fifo','due','priority'].includes(x.sort) && typeof x.query==='string').slice(0,30);
+  }catch{}
+  function renderSavedViews(){
+    const dropdown=$('#savedViewSelect'),selected=dropdown.value;
+    dropdown.replaceChildren(new Option('Saved views',''));
+    savedViews.forEach(entry=>dropdown.add(new Option(entry.name,entry.name)));
+    dropdown.value=savedViews.some(x=>x.name===selected)?selected:'';
+  }
+  function persistSavedViews(){
+    try{localStorage.setItem('shiori-saved-views',JSON.stringify(savedViews));}catch{}
+    renderSavedViews();
+  }
+  renderSavedViews();
   let calendarExpanded = true;
   try { calendarExpanded = localStorage.getItem('shiori-calendar-expanded') !== 'false'; } catch {}
   let calendarSelected = null;
@@ -295,6 +311,39 @@
     sortMode=e.target.value;
     try {localStorage.setItem('shiori-demo-sort',sortMode);} catch {}
     render();
+  });
+  $('#savedViewSelect').addEventListener('change',e=>{
+    const chosenView=savedViews.find(item=>item.name===e.target.value);if(!chosenView)return;
+    setView(chosenView.view);
+    filter=chosenView.filter;
+    sortMode=chosenView.sort;
+    query=chosenView.query;
+    $('#sortMode').value=sortMode;
+    $('#searchInput').value=query;
+    render();
+  });
+  $('#saveView').addEventListener('click',()=>{
+    if(!['today','attention','inbox','board'].includes(view)){toast('Open a task list before saving a view');return;}
+    const name=prompt('Name for this saved view (up to 40 characters):','My focus');
+    if(name===null)return;
+    const normalized=name.trim();
+    if(!normalized || normalized.length>40){toast('Enter a name with up to 40 characters');return;}
+    const entry={name:normalized,view,filter,sort:sortMode,query};
+    const index=savedViews.findIndex(x=>x.name===normalized);
+    if(index>=0)savedViews[index]=entry;
+    else{
+      if(savedViews.length>=30){toast('30 saved views maximum');return;}
+      savedViews.push(entry);
+    }
+    persistSavedViews();
+    $('#savedViewSelect').value=normalized;
+    toast('Saved view: '+normalized);
+  });
+  $('#removeView').addEventListener('click',()=>{
+    const name=$('#savedViewSelect').value;if(!name){toast('Select a saved view first');return;}
+    savedViews=savedViews.filter(v=>v.name!==name);
+    persistSavedViews();
+    toast('Saved view removed');
   });
   $('#viewSwitch').addEventListener('click',()=>setView(view==='board'?'today':'board'));
   $('#openSidebar').addEventListener('click',()=>{$('#sidebar').classList.add('open');$('#scrim').classList.add('open');});
