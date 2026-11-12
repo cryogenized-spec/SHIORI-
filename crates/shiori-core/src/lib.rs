@@ -84,6 +84,25 @@ pub enum TaskError {
     InvalidStatus,
 }
 
+pub fn validate_project(value: &str) -> Result<String, TaskError> {
+    let project = value.trim();
+    if project.is_empty() {
+        return Err(TaskError::EmptyProject);
+    }
+    Ok(project.to_owned())
+}
+
+/// A partial task edit. `None` means leave a field unchanged; `Some(None)`
+/// explicitly clears the optional due date.
+#[derive(Debug, Default)]
+pub struct TaskPatch {
+    pub title: Option<String>,
+    pub notes: Option<String>,
+    pub project: Option<String>,
+    pub priority: Option<Priority>,
+    pub due_on: Option<Option<NaiveDate>>,
+}
+
 pub fn validate_title(value: &str) -> Result<String, TaskError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -122,16 +141,13 @@ impl Task {
         due_on: Option<NaiveDate>,
     ) -> Result<Self, TaskError> {
         let title = validate_title(title)?;
-        let project = project.trim();
-        if project.is_empty() {
-            return Err(TaskError::EmptyProject);
-        }
+        let project = validate_project(project)?;
         let now = Utc::now();
         Ok(Self {
             id: Uuid::now_v7().to_string(),
             title,
             notes: String::new(),
-            project: project.to_owned(),
+            project,
             priority,
             status: TaskStatus::Todo,
             due_on,
@@ -157,6 +173,46 @@ impl Task {
         self.title = validate_title(title)?;
         self.bump();
         Ok(())
+    }
+
+    /// Validate all requested fields before applying any mutation. A no-op edit
+    /// must not advance the revision, which is important for future sync.
+    pub fn apply_patch(&mut self, patch: TaskPatch) -> Result<bool, TaskError> {
+        let TaskPatch {
+            title,
+            notes,
+            project,
+            priority,
+            due_on,
+        } = patch;
+        let title = title.as_deref().map(validate_title).transpose()?;
+        let project = project.as_deref().map(validate_project).transpose()?;
+        let changed = title.as_ref().is_some_and(|value| value != &self.title)
+            || notes.as_ref().is_some_and(|value| value != &self.notes)
+            || project.as_ref().is_some_and(|value| value != &self.project)
+            || priority.is_some_and(|value| value != self.priority)
+            || due_on.is_some_and(|value| value != self.due_on);
+        if !changed {
+            return Ok(false);
+        }
+
+        if let Some(value) = title {
+            self.title = value;
+        }
+        if let Some(value) = notes {
+            self.notes = value;
+        }
+        if let Some(value) = project {
+            self.project = value;
+        }
+        if let Some(value) = priority {
+            self.priority = value;
+        }
+        if let Some(value) = due_on {
+            self.due_on = value;
+        }
+        self.bump();
+        Ok(true)
     }
 
     pub fn soft_delete(&mut self) {
