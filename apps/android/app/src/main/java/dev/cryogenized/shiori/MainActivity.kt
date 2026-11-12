@@ -6,7 +6,6 @@ import android.util.Log
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import android.widget.EditText
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -68,6 +67,7 @@ class MainActivity : Activity() {
                             "stage" -> confirmCanonicalShadowStage()
                             "audit" -> auditCanonicalShadow()
                             "working" -> openOrCreateWorkingCopy()
+                            "command" -> receiveNativeWorkingCommand()
                         }
                     }
                     return true
@@ -118,6 +118,9 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (url != "https://$HOST/index.html") return
+                // The bridge only becomes available for the bundled trusted page.
+                // No addJavascriptInterface, network endpoint or arbitrary path.
+                webView.evaluateJavascript("window.shioriNativeBridgeEnabled=true", null)
                 // Read the native vault before creating the initial copy.
                 // Never overwrite an older snapshot merely because WebView
                 // happens to start with an empty/missing localStorage store.
@@ -311,22 +314,31 @@ class MainActivity : Activity() {
      * user-confirmed, one-time copy of current Android records into a THIRD
      * private SQLite file. Native edits never propagate into WebView tasks.
      */
+
     private fun openOrCreateWorkingCopy() {
+        if (isFinishing || isDestroyed) return
         if (File(workingPath()).exists()) {
-            showWorkingCopy()
+            notifyWebWorkingReady()
             return
         }
         AlertDialog.Builder(this)
-            .setTitle("Create an editable Rust working copy?")
+            .setTitle("Create a separate Rust working copy?")
             .setMessage(
-                "Make a separate experimental copy of your current tasks to test " +
-                    "native Rust task editing. Your existing Android task list, " +
-                    "JSON backups and migration preview will remain unchanged. " +
-                    "Changes in this working copy will NOT appear in your normal list."
+                "This creates an experimental, editable SQLite copy of your " +
+                    "current Android tasks. The normal task list, saved backups " +
+                    "and migration shadow are unchanged. Edits here will NOT " +
+                    "appear in your normal task list."
             )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Create separate copy") { _, _ -> createWorkingCopy() }
             .show()
+    }
+
+    private fun notifyWebWorkingReady() {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript(
+            "window.shioriNativeWorkingReady && window.shioriNativeWorkingReady()", null
+        )
     }
 
     private fun createWorkingCopy() {
@@ -349,169 +361,79 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (message == null) {
-                        notifyUser("Could not create a safe Rust working copy; original tasks unchanged")
+                        notifyUser(
+                            "Could not create the Rust working copy; original tasks unchanged"
+                        )
                     } else {
                         notifyUser(message)
-                        showWorkingCopy()
+                        notifyWebWorkingReady()
                     }
                 }
             }
         }
     }
 
-    private fun workingCommand(action: JSONObject): JSONObject {
-        action.put("protocol", "shiori-native-working-v1")
-        val raw = NativeVault.workingCopyRequest(workingPath(), action.toString())
-            ?: throw IOException("Native task engine is unavailable")
-        return JSONObject(raw)
-    }
+    /**
+     * One-at-a-time, typed request/response bridge for the appassets origin.
+     * Web content signals a fixed custom URL; Kotlin pulls the request from
+     * the bundled JS and runs allowlisted operations on its serial I/O worker.
+     * No arbitrary SQLite paths, JNI objects, file access or web requests
+     * are exposed to JavaScript.
+     */
+    private fun receiveNativeWorkingCommand() {
+        if (isFinishing || isDestroyed ||
+            webView.url != "https://$HOST/index.html"
+        ) return
+        webView.evaluateJavascript("window.shioriNativeTakeRequest()") { encoded ->
+            val request = try {
+                val raw = JSONArray("[$encoded]").getString(0)
+                if (raw.toByteArray(Charsets.UTF_8).size > MAX_NATIVE_COMMAND_BYTES) {
+                    throw IllegalArgumentException("Native command exceeds size limit")
+                }
+                JSONObject(raw)
+            } catch (_: Exception) {
+                return@evaluateJavascript
+            }
+            val requestId = request.optString("request_id")
+            if (!requestId.matches(Regex("[1-9][0-9]{0,11}"))) return@evaluateJavascript
 
-    /** All native task I/O is serialized away from Android's UI thread. */
-    private fun showWorkingCopy() {
-        vaultExecutor.execute {
-            val result = runCatching {
-                workingCommand(JSONObject().put("op", "list"))
-            }.getOrElse { JSONObject().put("ok", false).put("error", "Could not read native tasks") }
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (!result.optBoolean("ok")) {
-                    AlertDialog.Builder(this)
-                        .setTitle("Native working copy unavailable")
-                        .setMessage(
-                            result.optString("error", "Unknown error") +
-                                ". Original Android tasks were not changed."
-                        )
-                        .setPositiveButton("OK", null)
-                        .show()
-                    return@runOnUiThread
-                }
-                val rows = result.optJSONArray("tasks") ?: JSONArray()
-                val labels = Array(rows.length()) { index ->
-                    val task = rows.getJSONObject(index)
-                    val status = task.optString("status")
-                    val mark = if (status == "done") "✓ " else "○ "
-                    mark + task.optString("title") + " · " + task.optString("project")
-                }
-                val total = result.optInt("total")
-                val builder = AlertDialog.Builder(this)
-                    .setTitle("Rust working copy · ${rows.length()} of $total")
-                    .setNeutralButton("Add task") { _, _ -> promptNativeTask() }
-                    .setNegativeButton("Close", null)
-                    .setPositiveButton("Refresh") { _, _ -> showWorkingCopy() }
-                if (labels.isNotEmpty()) {
-                    // Android AlertDialog cannot display a message and a
-                    // selectable list simultaneously on all OS versions.
-                    builder.setItems(labels) { _, index ->
-                        showNativeTaskActions(rows.getJSONObject(index))
-                    }
+            val action = request.optString("op")
+            val supported = action in setOf("list", "create", "rename", "status", "delete")
+            if (request.optString("protocol") != "shiori-native-working-v1" || !supported) {
+                completeNativeWorkingCommand(
+                    requestId, JSONObject().put("ok", false)
+                        .put("error", "Unsupported native task command").toString()
+                )
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                val answer = runCatching {
+                    NativeVault.workingCopyRequest(workingPath(), request.toString())
+                }.getOrNull()
+                val result = if (answer == null ||
+                    answer.toByteArray(Charsets.UTF_8).size > MAX_NATIVE_RESPONSE_BYTES
+                ) {
+                    JSONObject().put("ok", false)
+                        .put("error", "Native operation failed or response too large")
+                        .toString()
                 } else {
-                    builder.setMessage(
-                        "No native tasks in this separate experimental SQLite working copy."
-                    )
+                    answer
                 }
-                builder.show()
+                runOnUiThread {
+                    completeNativeWorkingCommand(requestId, result)
+                }
             }
         }
     }
 
-    private fun promptNativeTask() {
-        val input = EditText(this).apply {
-            hint = "Native task title"
-            isSingleLine = true
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Add to Rust working copy")
-            .setView(input)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Add") { _, _ ->
-                val title = input.text.toString().trim()
-                if (title.isEmpty()) {
-                    notifyUser("Task title cannot be empty")
-                } else {
-                    sendWorkingMutation(JSONObject()
-                        .put("op", "create")
-                        .put("title", title)
-                        .put("project", "Native preview")
-                        .put("priority", "medium"))
-                }
-            }
-            .show()
-    }
-
-    private fun showNativeTaskActions(task: JSONObject) {
-        val complete = task.optString("status") == "done"
-        val actions = arrayOf(
-            "Rename in working copy",
-            if (complete) "Reopen in working copy" else "Complete in working copy",
-            "Soft-delete from working copy"
+    private fun completeNativeWorkingCommand(requestId: String, json: String) {
+        if (isFinishing || isDestroyed ||
+            webView.url != "https://$HOST/index.html"
+        ) return
+        webView.evaluateJavascript(
+            "window.shioriNativeComplete(" +
+                JSONObject.quote(requestId) + "," + JSONObject.quote(json) + ")", null
         )
-        AlertDialog.Builder(this)
-            .setTitle(task.optString("title"))
-            .setMessage("These actions affect only the separate Rust working copy.")
-            .setItems(actions) { _, selected ->
-                val id = task.getString("id")
-                val version = task.getLong("version")
-                when (selected) {
-                    0 -> {
-                        val input = EditText(this).apply {
-                            setText(task.optString("title"))
-                            isSingleLine = true
-                        }
-                        AlertDialog.Builder(this)
-                            .setTitle("Rename native task")
-                            .setView(input)
-                            .setNegativeButton("Cancel", null)
-                            .setPositiveButton("Save") { _, _ ->
-                                sendWorkingMutation(JSONObject()
-                                    .put("op", "rename")
-                                    .put("id", id)
-                                    .put("expected_version", version)
-                                    .put("title", input.text.toString().trim()))
-                            }.show()
-                    }
-                    1 -> sendWorkingMutation(JSONObject()
-                        .put("op", "status")
-                        .put("id", id)
-                        .put("expected_version", version)
-                        .put("status", if (complete) "todo" else "done"))
-                    2 -> AlertDialog.Builder(this)
-                        .setTitle("Delete from Rust working copy?")
-                        .setMessage(
-                            "This preserves a deletion record in the separate Rust database. " +
-                                "Your normal Android tasks are untouched."
-                        )
-                        .setNegativeButton("Cancel", null)
-                        .setPositiveButton("Delete from copy") { _, _ ->
-                            sendWorkingMutation(JSONObject()
-                                .put("op", "delete")
-                                .put("id", id)
-                                .put("expected_version", version))
-                        }.show()
-                }
-            }
-            .setNegativeButton("Back") { _, _ -> showWorkingCopy() }
-            .show()
-    }
-
-    private fun sendWorkingMutation(action: JSONObject) {
-        vaultExecutor.execute {
-            val result = runCatching { workingCommand(action) }.getOrElse {
-                JSONObject().put("ok", false).put("error", "Native storage unavailable")
-            }
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (result.optBoolean("ok")) {
-                    notifyUser("Saved to Rust working copy only")
-                    showWorkingCopy()
-                } else {
-                    AlertDialog.Builder(this)
-                        .setTitle("Native task not changed")
-                        .setMessage(result.optString("error", "Operation rejected"))
-                        .setPositiveButton("OK") { _, _ -> showWorkingCopy() }
-                        .show()
-                }
-            }
-        }
     }
 
     private fun recoverVaultCopy() {
@@ -684,6 +606,8 @@ class MainActivity : Activity() {
         private const val HOST = "appassets.androidplatform.net"
         private const val BACKUP_FORMAT = "shiori-android-local-v1"
         private const val MAX_BACKUP_BYTES = 2_000_000
+        private const val MAX_NATIVE_COMMAND_BYTES = 16_384
+        private const val MAX_NATIVE_RESPONSE_BYTES = 768_000
         private const val EXPORT_REQUEST = 4001
         private const val IMPORT_REQUEST = 4002
     }
