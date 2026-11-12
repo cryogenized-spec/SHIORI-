@@ -22,6 +22,11 @@ cargo run -p shiori-cli -- edit <task-id> --title "Revised" --if-version 2
 cargo run -p shiori-cli -- depends <task-id> --on <prerequisite-task-id>
 cargo run -p shiori-cli -- edit <task-id> --minutes 75
 cargo run -p shiori-cli -- show <task-id>
+# Single-user local assignment identity (not a login or permission model):
+cargo run -p shiori-cli -- edit <task-id> --assign-to local
+cargo run -p shiori-cli -- edit <task-id> --unassign
+# The browser's Assigned to me panel reads indexed SQLite assignments,
+# distinguishing waiting-on-prerequisite tasks from actionable work.
 # Local-only attention and a side-effect-free scheduling preview:
 cargo run -p shiori-cli -- attention --on 2026-11-12
 cargo run -p shiori-cli -- plan 2026-11-12 --start 08:00 --end 17:00 --break-start 13:00 --break-end 14:00 --utc-offset-minutes 120 --default-minutes 30
@@ -42,7 +47,7 @@ cargo build --locked -p shiori-cli
 python3 apps/local_bridge.py --cli target/debug/shiori-cli --port 8765
 ```
 
-Open `http://127.0.0.1:8765`. The footer changes to **LOCAL RUST / SQLITE** when connected. The bridge binds only to loopback, invokes Rust CLI operations, and does not import demonstration tasks. **Development only:** it is not an authenticated remote service; do not expose it to your LAN, a proxy or a tunnel. For the threat model, limitations and `--database` override see [local web bridge](docs/engineering/LOCAL_WEB_BRIDGE.md).
+Open `http://127.0.0.1:8765`. The footer changes to **LOCAL RUST / SQLITE** when connected. The bridge binds only to loopback, invokes Rust CLI operations, and does not import demonstration tasks. The local **Assigned to me** view uses an indexed SQLite query for the `local` identity and exposes dependency blockers and local-read freshness. Assignment IDs are not authentication or multi-user permissions; older task records remain unassigned until explicitly assigned. **Development only:** it is not an authenticated remote service; do not expose it to your LAN, a proxy or a tunnel. For the threat model, limitations and `--database` override see [local web bridge](docs/engineering/LOCAL_WEB_BRIDGE.md).
 
 The optional calendar on **My day** can be collapsed; its state is saved in local storage. Select a date to filter the task list for that day, and select **Today** to reset.
 
