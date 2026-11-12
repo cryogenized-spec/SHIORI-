@@ -82,7 +82,7 @@ fn stored_effort_and_prerequisites_drive_real_cli_preview() {
     let shown = invoke(&db, &["show", &publish]);
     assert!(shown.status.success());
     let shown_text = String::from_utf8(shown.stdout).unwrap();
-    assert!(shown_text.contains("estimate_minutes: Some(30)"));
+    assert!(shown_text.contains("Estimated effort: 30 minutes"));
     assert!(shown_text.contains(&prepare));
     std::fs::remove_dir_all(dir).unwrap();
 }
