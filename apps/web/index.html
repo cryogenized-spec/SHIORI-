@@ -46,6 +46,7 @@
     <div class="nav-overline">WORKSPACE</div>
     <nav class="main-nav" id="mainNav">
       <button class="nav-item active" data-view="today"><svg><use href="#ic-sun"/></svg><span>My day</span><small id="navTodayCount">04</small></button>
+      <button class="nav-item" data-view="attention"><svg><use href="#ic-zap"/></svg><span>My attention</span><small id="navAttentionCount">00</small></button>
       <button class="nav-item" data-view="inbox"><svg><use href="#ic-inbox"/></svg><span>Inbox</span><small>03</small></button>
       <button class="nav-item" data-view="projects"><svg><use href="#ic-folder"/></svg><span>Projects</span></button>
       <button class="nav-item" data-view="board"><svg><use href="#ic-columns"/></svg><span>Board</span></button>
@@ -84,7 +85,7 @@
       </section>
       <section class="stat-grid" id="stats"></section>
       <section id="homeCalendar" class="home-calendar" aria-label="Monthly task calendar"></section>
-      <div class="content-heading"><div><div class="section-eyebrow" id="sectionEyebrow">YOUR FOCUS</div><h2 id="sectionTitle">Today's priorities</h2></div><div class="content-actions"><button class="calendar-toggle" id="homeCalendarToggle" type="button" aria-expanded="true" aria-controls="homeCalendar"><svg><use href="#ic-calendar"/></svg><span id="calendarToggleLabel">Hide calendar</span></button><button class="filter-btn" id="filterButton" aria-labelledby="filterLabel"><svg><use href="#ic-sliders"/></svg><span id="filterLabel">All priorities</span></button><button class="view-switch" id="viewSwitch"><svg><use href="#ic-columns"/></svg> Board</button></div></div>
+      <div class="content-heading"><div><div class="section-eyebrow" id="sectionEyebrow">YOUR FOCUS</div><h2 id="sectionTitle">Today's priorities</h2></div><div class="content-actions"><button class="calendar-toggle" id="homeCalendarToggle" type="button" aria-expanded="true" aria-controls="homeCalendar"><svg><use href="#ic-calendar"/></svg><span id="calendarToggleLabel">Hide calendar</span></button><label class="sort-control" for="sortMode">Order <select id="sortMode" aria-label="Task ordering"><option value="focus">Focus</option><option value="fifo">FIFO</option><option value="due">Due date</option><option value="priority">Priority</option></select></label><button class="filter-btn" id="filterButton" aria-labelledby="filterLabel"><svg><use href="#ic-sliders"/></svg><span id="filterLabel">All priorities</span></button><button class="view-switch" id="viewSwitch"><svg><use href="#ic-columns"/></svg> Board</button></div></div>
       <div class="quick-search"><svg><use href="#ic-search"/></svg><input id="searchInput" placeholder="Search tasks, tags or projects…" aria-label="Search tasks" autocomplete="off"/><kbd>/</kbd></div>
       <section class="main-data" id="mainData" aria-live="polite"></section>
       <footer class="main-footer"><span>SHIORI <span class="footer-kanji">栞</span> · A home for the things worth remembering.</span><span>INTERACTIVE DESIGN CONCEPT · NOT CONNECTED</span></footer>
