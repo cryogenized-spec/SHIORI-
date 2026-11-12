@@ -23,8 +23,16 @@ fn created_id(output: Output) -> String {
 
 #[test]
 fn stored_effort_and_prerequisites_drive_real_cli_preview() {
-    let temp = tempfile::tempdir().unwrap();
-    let db = temp.path().join("tasks.sqlite3");
+    let dir = std::env::temp_dir().join(format!(
+        "shiori-plan-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("tasks.sqlite3");
     let prepare = created_id(invoke(
         &db,
         &["add", "Prepare", "--minutes", "45", "--priority", "low"],
@@ -53,4 +61,5 @@ fn stored_effort_and_prerequisites_drive_real_cli_preview() {
     let shown_text = String::from_utf8(shown.stdout).unwrap();
     assert!(shown_text.contains("estimate_minutes: Some(30)"));
     assert!(shown_text.contains(&prepare));
+    std::fs::remove_dir_all(dir).unwrap();
 }
