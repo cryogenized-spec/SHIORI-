@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(done.assignee_id.as_deref(), Some("local"));
         assert!(done.completed_at.is_some());
         assert_eq!(store.legacy_shadow_source().unwrap(), Some(raw.clone()));
-        assert_eq!(stage_legacy_backup(&path, &raw).unwrap().created, false);
+        assert!(!stage_legacy_backup(&path, &raw).unwrap().created);
         let mut reexport: Value = serde_json::from_str(&raw).unwrap();
         reexport["exported_at"] = Value::from("2026-11-12T20:15:00Z");
         assert!(
