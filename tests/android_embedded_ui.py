@@ -54,6 +54,46 @@ def run():
             assert page.locator("#mainData .task-row").count() == 0
             assert page.evaluate("localStorage.getItem('shiori-demo-tasks')") is None
 
+            # X and Cancel must dismiss an unsubmitted task without writing a
+            # record. These real pointer taps previously became unreachable.
+            page.locator(".mobile-fab").click()
+            page.locator("#taskName").fill("Discard by X")
+            page.locator("#taskModal .modal-head [data-close-modal]").click(timeout=4000)
+            assert page.locator("#taskModal").is_hidden()
+            page.locator(".mobile-fab").click()
+            page.locator("#taskName").fill("Discard by Cancel")
+            page.locator("#taskModal .modal-actions [data-close-modal]").click(timeout=4000)
+            assert page.locator("#taskModal").is_hidden()
+
+            # The native Android Activity dispatches this cancelable event
+            # when a hardware/gesture Back reaches the host.
+            page.locator(".mobile-fab").click()
+            page.locator("#taskName").fill("Discard by Android Back")
+            consumed = page.evaluate("""() => {
+                const event = new Event('shiori-native-back', {cancelable: true});
+                window.dispatchEvent(event);
+                return event.defaultPrevented;
+            }""")
+            assert consumed
+            assert page.locator("#taskModal").is_hidden()
+            assert page.evaluate("""() => {
+                const event = new Event('shiori-native-back', {cancelable: true});
+                window.dispatchEvent(event);
+                return event.defaultPrevented;
+            }""") is False
+
+            # A compressed viewport approximates the visual space left when
+            # the on-screen keyboard appears. The X stays tappable.
+            page.set_viewport_size({"width": 390, "height": 470})
+            page.locator(".mobile-fab").click()
+            page.locator("#taskName").fill("Discard with keyboard")
+            page.locator("#taskModal .modal-head [data-close-modal]").click(timeout=4000)
+            assert page.locator("#taskModal").is_hidden()
+            page.set_viewport_size({"width": 390, "height": 844})
+            assert page.evaluate(
+                "JSON.parse(localStorage.getItem('shiori-android-local-tasks') || '[]')"
+            ) == []
+
             # Capture a task, then reopen the Android-origin page and verify
             # the user's record is private to the device storage key.
             page.locator(".mobile-fab").click()
@@ -72,6 +112,12 @@ def run():
             assert page.get_by_text("Offline field check 栞").count() >= 1
 
             page.locator("#mainData [data-detail]").first.click()
+            # Even with the inspector open underneath, a creation dialog's
+            # close button must receive pointer events rather than the drawer.
+            page.evaluate("document.querySelector('.mobile-fab').click()")
+            page.locator("#taskModal .modal-head [data-close-modal]").click(timeout=4000)
+            assert page.locator("#taskModal").is_hidden()
+            assert page.locator("#detailOverlay").is_visible()
             page.locator("#detailPane [data-edit-task]").click()
             page.locator("#editTaskName").fill("Revised offline check 栞")
             page.locator("#editTaskProject").fill("Android local")
