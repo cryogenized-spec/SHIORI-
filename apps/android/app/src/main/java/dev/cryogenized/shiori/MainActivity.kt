@@ -2,6 +2,9 @@ package dev.cryogenized.shiori
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Build
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -20,6 +23,7 @@ import java.io.InputStream
  */
 class MainActivity : Activity() {
     private lateinit var webView: WebView
+    private var backCallback: OnBackInvokedCallback? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,6 +81,13 @@ class MainActivity : Activity() {
         }
 
         setContentView(webView)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val callback = OnBackInvokedCallback { navigateBack() }
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback
+            )
+            backCallback = callback
+        }
         webView.loadUrl("https://$HOST/index.html")
     }
 
@@ -106,12 +117,39 @@ class MainActivity : Activity() {
         ByteArrayInputStream(ByteArray(0))
     )
 
+    /**
+     * Hardware/gesture Back first dismisses an open SHIORI dialog. The web UI
+     * tells Android whether the event was consumed before navigating away.
+     */
+    private fun navigateBack() {
+        if (!::webView.isInitialized) {
+            finish()
+            return
+        }
+        webView.evaluateJavascript(
+            "(function(){const event=new Event('shiori-native-back'," +
+                "{cancelable:true});window.dispatchEvent(event);" +
+                "return event.defaultPrevented;})()"
+        ) { consumed ->
+            if (isFinishing || isDestroyed) return@evaluateJavascript
+            if (consumed != "true") {
+                if (webView.canGoBack()) webView.goBack() else finish()
+            }
+        }
+    }
+
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+        navigateBack()
     }
 
     override fun onDestroy() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            backCallback?.let {
+                onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it)
+            }
+            backCallback = null
+        }
         webView.destroy()
         super.onDestroy()
     }
