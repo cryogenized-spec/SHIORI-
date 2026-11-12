@@ -132,6 +132,152 @@
       window.location.href='shiori-vault://sync';
     }
   }
+
+  // M2 opt-in native bridge. Only the installed Android shell can service
+  // these requests. This never changes the regular WebView task array.
+  const nativeWorking = {
+    open:false, busy:false, error:'', items:[], total:0,
+    editId:null, deleteId:null
+  };
+  let nativeInFlight=null;
+  let nativeNextId=0;
+  const NATIVE_COMMAND_TIMEOUT_MS=15000;
+
+  window.shioriNativeTakeRequest=()=>{
+    if(mode!=='android-local'||!nativeInFlight||nativeInFlight.taken) return null;
+    nativeInFlight.taken=true;
+    return JSON.stringify(nativeInFlight.request);
+  };
+  window.shioriNativeComplete=(requestId, raw)=>{
+    const pending=nativeInFlight;
+    if(!pending || pending.id!==String(requestId)) return false;
+    clearTimeout(pending.timer);
+    nativeInFlight=null;
+    try {
+      const response=JSON.parse(raw);
+      if(!response || typeof response!=='object' || typeof response.ok!=='boolean')
+        throw new Error('Invalid native task response');
+      pending.resolve(response);
+    } catch(error) {
+      pending.reject(error);
+    }
+    return true;
+  };
+  function nativeWorkingRequest(command){
+    if(mode!=='android-local'||window.shioriNativeBridgeEnabled!==true)
+      return Promise.reject(new Error('Native Rust bridge unavailable in this preview'));
+    if(nativeInFlight)
+      return Promise.reject(new Error('Another native operation is in progress'));
+    const allowed=['list','create','rename','status','delete'];
+    if(!command || !allowed.includes(command.op))
+      return Promise.reject(new Error('Unsupported native operation'));
+    const id=String(++nativeNextId);
+    const request=Object.assign({protocol:'shiori-native-working-v1',request_id:id},command);
+    if(JSON.stringify(request).length>16000)
+      return Promise.reject(new Error('Native request is too large'));
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{
+        if(nativeInFlight && nativeInFlight.id===id) {
+          nativeInFlight=null;
+          reject(new Error('Native response timed out; refresh before retrying an edit'));
+        }
+      },NATIVE_COMMAND_TIMEOUT_MS);
+      nativeInFlight={id,request,resolve,reject,timer,taken:false};
+      window.location.href='shiori-vault://command?request_id='+encodeURIComponent(id);
+    });
+  }
+  function nativePreviewRender(){
+    if(!nativeWorking.open) return '';
+    let html='<article class="settings-card native-working-panel" id="nativeWorkingPanel" aria-label="Experimental Rust task preview">';
+    html+='<h3>Rust task workspace · separate copy</h3>';
+    html+='<p>These are records in the experimental native SQLite working copy, NOT your normal Android task list. Changes here do not sync back. Keep an independent JSON backup.</p>';
+    html+='<div class="settings-actions"><button type="button" data-native-op="refresh"'+(nativeWorking.busy?' disabled':'')+'>Refresh native tasks</button></div>';
+    if(nativeWorking.busy) html+='<p role="status">Reading native task database…</p>';
+    if(nativeWorking.error) html+='<p role="alert" class="native-working-error">'+escapeHTML(nativeWorking.error)+'</p>';
+    html+='<form id="nativeWorkingCreate" class="native-working-create"><label for="nativeWorkingTitle">New task in Rust working copy</label>';
+    html+='<input id="nativeWorkingTitle" name="title" maxlength="120" autocomplete="off" placeholder="Task title" required>';
+    html+='<button type="submit"'+(nativeWorking.busy?' disabled':'')+'>Add native task</button></form>';
+    html+='<p class="settings-hint">Showing '+nativeWorking.items.length+' of '+nativeWorking.total+' native records (up to 50 per page; pagination pending).</p>';
+    html+='<div class="native-working-items">';
+    for(const task of nativeWorking.items) {
+      const id=escapeHTML(task.id);
+      const version=Number(task.version);
+      if(!Number.isInteger(version)||version<1) continue;
+      const busy=nativeWorking.busy?' disabled':'';
+      html+='<div class="native-working-row">';
+      html+='<div><strong>'+escapeHTML(task.title)+'</strong><p>'+escapeHTML(task.project)+' · '+escapeHTML(task.status.replace(/_/g,' '))+' · revision '+version+'</p></div>';
+      if(nativeWorking.editId===task.id) {
+        html+='<label for="nativeWorkingRename">Rename this native task</label><input id="nativeWorkingRename" maxlength="120" value="'+escapeHTML(task.title)+'">';
+        html+='<div class="settings-actions"><button type="button" data-native-op="rename-save" data-native-id="'+id+'"'+busy+'>Save title</button>';
+        html+='<button type="button" data-native-op="rename-cancel">Cancel</button></div>';
+      } else {
+        html+='<div class="settings-actions"><button type="button" data-native-op="rename" data-native-id="'+id+'"'+busy+'>Rename</button>';
+        html+='<button type="button" data-native-op="status" data-native-id="'+id+'"'+busy+'>'+(task.status==='done'?'Reopen':'Complete')+'</button>';
+        if(nativeWorking.deleteId===task.id) {
+          html+='<button type="button" data-native-op="delete-confirm" data-native-id="'+id+'"'+busy+'>Confirm delete from copy</button>';
+          html+='<button type="button" data-native-op="delete-cancel">Keep</button>';
+        } else {
+          html+='<button type="button" data-native-op="delete" data-native-id="'+id+'"'+busy+'>Delete</button>';
+        }
+        html+='</div>';
+      }
+      html+='</div>';
+    }
+    html+='</div></article>';
+    return html;
+  }
+  function nativePreviewUpdate(){
+    if(view==='settings')render();
+  }
+  async function nativePreviewRefresh(){
+    if(nativeWorking.busy) return;
+    nativeWorking.busy=true;
+    nativeWorking.error='';
+    nativePreviewUpdate();
+    try {
+      const response=await nativeWorkingRequest({op:'list'});
+      if(!response.ok) throw new Error(String(response.error||'Cannot read native tasks'));
+      if(!Array.isArray(response.tasks)||!Number.isInteger(response.total))
+        throw new Error('Unrecognized native task list');
+      nativeWorking.items=response.tasks.filter(task=>
+        task && typeof task.id==='string' && typeof task.title==='string' &&
+        typeof task.project==='string' && typeof task.status==='string');
+      nativeWorking.total=response.total;
+    } catch(error) {
+      nativeWorking.error=error.message||'Native preview unavailable';
+    } finally {
+      nativeWorking.busy=false;
+      nativePreviewUpdate();
+    }
+  }
+  async function nativePreviewMutate(command){
+    if(nativeWorking.busy) return;
+    nativeWorking.busy=true;
+    nativeWorking.error='';
+    nativePreviewUpdate();
+    try {
+      const result=await nativeWorkingRequest(command);
+      if(!result.ok) throw new Error(String(result.error||'Native change was rejected'));
+      nativeWorking.editId=null;
+      nativeWorking.deleteId=null;
+    } catch(error) {
+      nativeWorking.error=(error.message||'Native change failed')+
+        '. Check or refresh the working copy before trying again.';
+      nativeWorking.busy=false;
+      nativePreviewUpdate();
+      return;
+    }
+    nativeWorking.busy=false;
+    await nativePreviewRefresh();
+  }
+  window.shioriNativeWorkingReady=()=>{
+    if(mode!=='android-local') return;
+    nativeWorking.open=true;
+    nativeWorking.error='';
+    if(view!=='settings')setView('settings');
+    nativePreviewRefresh();
+  };
+
   const ANDROID_BACKUP_FORMAT='shiori-android-local-v1';
   const MAX_BACKUP_CHARS=1000000;
   window.shioriExportBackup=()=>{
@@ -286,7 +432,7 @@
   function renderTimeline(){return `<div class="timeline">${Array.from({length:7},(_,i)=>{let d=new Date(`${newDate(i)}T12:00:00`);let matches=tasks.filter(t=>t.due===newDate(i));return `<section class="timeline-day"><header>${new Intl.DateTimeFormat('en-GB',{weekday:'short'}).format(d)}<b>${d.getDate()}</b></header>${matches.map(t=>`<div class="timeline-pill" data-detail="${escapeHTML(t.id)}">${escapeHTML(t.title)}</div>`).join('')}${!matches.length?'<div style="font-size:10px;color:var(--faint);margin-top:14px">Open space</div>':''}</section>`}).join('')}</div>`;}
   function renderReports(){const c=count(),pct=c.all?Math.round(c.done/c.all*100):0;const projects=mode==='demo'?Object.keys(projectDescriptions):[...new Set(tasks.map(t=>t.project))];return `<div class="report-grid"><article class="report-card"><div class="section-eyebrow">COMPLETION RATE</div><div class="report-big">${pct}%</div><p>${c.done} tasks complete across ${c.all} ${mode==='demo'?'demo':'local'} tasks.</p><div class="report-line"><span>Progress</span><div><span style="width:${pct}%"></span></div><b>${pct}%</b></div></article><article class="report-card"><div class="section-eyebrow">PORTFOLIO HEALTH</div><div class="report-big">${projects.length.toString().padStart(2,'0')}</div><p>Projects in progress. All enterprise report types should eventually be freely accessible.</p>${projects.map(p=>{let a=tasks.filter(t=>t.project===p);let n=Math.round(a.filter(t=>t.status==='done').length/(a.length||1)*100);return `<div class="report-line"><span>${escapeHTML(p)}</span><div><span style="width:${n}%"></span></div><b>${n}%</b></div>`}).join('')}</article></div>`;}
   function renderAutomations(){return `<div class="settings-list">${[['Recurring work','Automatic task generation from repeat rules.','Planned'],['Rules & triggers','When status, date or project changes, take a defined action.','Planned'],['Webhooks','Connect external services through auditable, permission-controlled events.','Planned'],['MCP actions','Let authorized AI assistants work with tasks through typed tools.','Planned']].map(([n,d,s])=>`<article class="automation-card"><div><h3>${n}</h3><p>${d}</p><span class="status-tag">${s.toUpperCase()} · NOT IMPLEMENTED</span></div><button data-preview-feature="${n}">Preview</button></article>`).join('')}</div>`;}
-  function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='android-local'?'<div class="settings-actions"><button type="button" id="exportAndroidBackup">Export JSON backup</button><button type="button" id="importAndroidBackup">Restore backup</button></div><p class="settings-hint">Experimental Rust SQLite safety copy: a separate, private on-device copy. The current task store remains WebView-based while we validate migration.</p><div class="settings-actions"><button type="button" id="saveNativeVault">Save native safety copy</button><button type="button" id="recoverNativeVault">Recover native safety copy</button></div><p class="settings-hint">Migration preview: stage a copy of your current tasks into SHIORI’s canonical Rust/SQLite format. Your current tasks remain in WebView storage; this does not enable native editing or sync.</p><div class="settings-actions"><button type="button" id="stageCanonicalShadow">Stage Rust migration preview</button><button type="button" id="auditCanonicalShadow">Audit staged Rust preview</button></div><p class="settings-hint">Experimental native Rust task editor: creates a third, independent SQLite working copy. Tasks added or changed there do not appear in the normal Android list. Use it only to test the native engine.</p><div class="settings-actions"><button type="button" id="openNativeWorkingCopy">Open native Rust task workspace</button></div>':''}${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
+  function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='android-local'?'<div class="settings-actions"><button type="button" id="exportAndroidBackup">Export JSON backup</button><button type="button" id="importAndroidBackup">Restore backup</button></div><p class="settings-hint">Experimental Rust SQLite safety copy: a separate, private on-device copy. The current task store remains WebView-based while we validate migration.</p><div class="settings-actions"><button type="button" id="saveNativeVault">Save native safety copy</button><button type="button" id="recoverNativeVault">Recover native safety copy</button></div><p class="settings-hint">Migration preview: stage a copy of your current tasks into SHIORI’s canonical Rust/SQLite format. Your current tasks remain in WebView storage; this does not enable native editing or sync.</p><div class="settings-actions"><button type="button" id="stageCanonicalShadow">Stage Rust migration preview</button><button type="button" id="auditCanonicalShadow">Audit staged Rust preview</button></div><p class="settings-hint">Experimental native Rust task editor: creates a third, independent SQLite working copy. Tasks added or changed there do not appear in the normal Android list. Use it only to test the native engine.</p><div class="settings-actions"><button type="button" id="openNativeWorkingCopy">Open native Rust task workspace</button></div>'+nativePreviewRender()+'':''}${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
   function renderUpcoming(){let upcoming=[...tasks].filter(t=>t.status!=='done' && t.due>=newDate()).sort((a,b)=>a.due.localeCompare(b.due)).slice(0,3);$('#upcoming').innerHTML=upcoming.map(t=>{const d=new Date(`${t.due}T12:00:00`);return `<div class="upcoming-item"><div class="upcoming-date"><div>${d.getDate()}<small>${new Intl.DateTimeFormat('en-GB',{month:'short'}).format(d).toUpperCase()}</small></div></div><div class="upcoming-main"><b>${escapeHTML(t.title)}</b><span>${escapeHTML(t.project)} · ${t.mins==null?'No estimate':t.mins+' min estimate'}</span></div></div>`}).join('');}
   function setView(next){view=next;query='';$('#searchInput').value='';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const v=views[view];$('#breadcrumbCurrent').textContent=v[0];$('#pageTitle').innerHTML=escapeHTML(v[1].replace(/\.$/,''))+'<span class="period">.</span>';$('#pageSubtitle').textContent=v[2];$('#sectionEyebrow').textContent=v[3];$('#sectionTitle').textContent=v[4];const regular=['today','attention','inbox','board'];$('#hero').style.display=view==='today'?'flex':'none';$('#stats').style.display=view==='today'||view==='reports'?'grid':'none';$('.quick-search').style.display=regular.includes(view)?'flex':'none';$('#filterButton').style.display=regular.includes(view)?'flex':'none';$('.sort-control').style.display=regular.includes(view)?'inline-flex':'none';$('#viewSwitch').style.display=regular.includes(view)?'flex':'none';$('#viewSwitch').innerHTML=view==='board'?`${icon('check-circle')} List`:`${icon('columns')} Board`;render();closeSidebar();window.scrollTo({top:0,behavior:'instant'});}
   function render(){renderStats();renderUpcoming();renderCalendar();if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=html;$('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
@@ -419,6 +565,35 @@
     if(e.target.id==='openNativeWorkingCopy'&&mode==='android-local'){
       window.location.href='shiori-vault://working';return;
     }
+    const nativeButton=e.target.closest('[data-native-op]');
+    if(nativeButton&&mode==='android-local'){
+      const op=nativeButton.dataset.nativeOp;
+      if(op==='refresh'){nativePreviewRefresh();return;}
+      if(op==='rename-cancel'){nativeWorking.editId=null;nativePreviewUpdate();return;}
+      if(op==='delete-cancel'){nativeWorking.deleteId=null;nativePreviewUpdate();return;}
+      const task=nativeWorking.items.find(item=>item.id===nativeButton.dataset.nativeId);
+      if(!task || nativeWorking.busy)return;
+      if(op==='rename'){nativeWorking.editId=task.id;nativeWorking.deleteId=null;nativePreviewUpdate();return;}
+      if(op==='delete'){nativeWorking.deleteId=task.id;nativeWorking.editId=null;nativePreviewUpdate();return;}
+      if(op==='rename-save'){
+        const field=$('#nativeWorkingRename');
+        const title=field?field.value.trim():'';
+        if(!title||title.length>120){nativeWorking.error='Enter a title of 1–120 characters';nativePreviewUpdate();return;}
+        nativePreviewMutate({op:'rename',id:task.id,title,expected_version:task.version});
+        return;
+      }
+      if(op==='status'){
+        nativePreviewMutate({
+          op:'status',id:task.id,expected_version:task.version,
+          status:task.status==='done'?'todo':'done'
+        });return;
+      }
+      if(op==='delete-confirm'){
+        nativePreviewMutate({op:'delete',id:task.id,expected_version:task.version});
+        return;
+      }
+    }
+
     if(e.target.id==='exportAndroidBackup'&&mode==='android-local'){
       window.location.href='shiori-backup://export';return;
     }
@@ -463,6 +638,20 @@
     showDetail(t.id);
     toast('Task updated');
   });
+  document.addEventListener('submit',event=>{
+    if(event.target.id!=='nativeWorkingCreate')return;
+    event.preventDefault();
+    if(mode!=='android-local'||nativeWorking.busy)return;
+    const field=$('#nativeWorkingTitle');
+    const title=field?field.value.trim():'';
+    if(!title||title.length>120){
+      nativeWorking.error='Enter a title of 1–120 characters';
+      nativePreviewUpdate();
+      return;
+    }
+    nativePreviewMutate({op:'create',title,project:'Native preview',priority:'medium'});
+  });
+
   $('#taskForm').addEventListener('submit',async e=>{
     e.preventDefault();
     const title=$('#taskName').value.trim();if(!title)return;
