@@ -457,6 +457,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn assigned_to_me_lookup_uses_the_local_index() {
+        let store = SqliteStore::in_memory().unwrap();
+        let mut statement = store
+            .db
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM tasks
+                 WHERE assignee_id=?1 AND deleted_at IS NULL AND status!='done'",
+            )
+            .unwrap();
+        let plans = statement
+            .query_map(params!["local"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plans.iter().any(|plan| plan.contains("idx_tasks_assignee_active")),
+            "assigned-to-me must use its dedicated index: {plans:?}"
+        );
+    }
+
+    #[test]
     fn roundtrip_filter_complete_rename_and_tombstone() {
         let store = SqliteStore::in_memory().unwrap();
         let date = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
