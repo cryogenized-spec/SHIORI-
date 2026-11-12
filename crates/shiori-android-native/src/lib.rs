@@ -227,7 +227,11 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_stageLegacyBackup
     let message = format!(
         "{} canonical tasks {}; {} inferred timestamp fields; original backup retained",
         report.imported,
-        if report.created { "staged" } else { "already staged" },
+        if report.created {
+            "staged"
+        } else {
+            "already staged"
+        },
         report.inferred_timestamps
     );
     env.new_string(message)
