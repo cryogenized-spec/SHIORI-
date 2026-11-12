@@ -2,7 +2,7 @@
 //! that future desktop, Android, API and MCP adapters will call.
 use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
-use shiori_core::{Priority, Task, TaskStatus};
+use shiori_core::{Priority, Task, TaskPatch, TaskStatus};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{error::Error, path::PathBuf};
 
@@ -46,6 +46,27 @@ enum Command {
     Reopen { id: String },
     /// Rename a task
     Rename { id: String, title: String },
+    /// Edit task fields; omit a flag to leave that field unchanged
+    Edit {
+        id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        priority: Option<Priority>,
+        /// Set a due date (YYYY-MM-DD)
+        #[arg(long, conflicts_with = "clear_due")]
+        due: Option<NaiveDate>,
+        /// Remove the current due date
+        #[arg(long)]
+        clear_due: bool,
+        /// Reject if the task changed since this revision was read
+        #[arg(long)]
+        if_version: Option<i64>,
+    },
     /// Soft-delete a task (retains a tombstone)
     Remove { id: String },
 }
@@ -114,6 +135,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
         Command::Rename { id, title } => {
             println!("Renamed to {}", store.rename(&id, &title)?.title)
+        }
+        Command::Edit {
+            id,
+            title,
+            notes,
+            project,
+            priority,
+            due,
+            clear_due,
+            if_version,
+        } => {
+            let patch = TaskPatch {
+                title,
+                notes,
+                project,
+                priority,
+                due_on: if clear_due { Some(None) } else { due.map(Some) },
+            };
+            let updated = match if_version {
+                Some(version) => store.edit_if_version(&id, version, patch)?,
+                None => store.edit(&id, patch)?,
+            };
+            println!("Updated {} [revision {}]", updated.title, updated.version);
         }
         Command::Remove { id } => {
             store.delete(&id)?;
