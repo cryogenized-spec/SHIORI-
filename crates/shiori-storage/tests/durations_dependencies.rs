@@ -174,6 +174,8 @@ fn done_predecessor_is_still_addressable() {
     store.insert(&before).unwrap();
     store.insert(&after).unwrap();
     store.set_status(&before.id, TaskStatus::Done).unwrap();
-    store.set_dependencies(&after.id, &[before.id.clone()]).unwrap();
+    store
+        .set_dependencies(&after.id, &[before.id.clone()])
+        .unwrap();
     assert_eq!(store.get_dependencies(&after.id).unwrap(), vec![before.id]);
 }
