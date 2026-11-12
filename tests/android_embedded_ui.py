@@ -5,6 +5,7 @@ This is browser-level validation of the same bundled UI resources the APK loads,
 NOT an Android WebView or native-device instrumentation test.
 """
 import mimetypes
+import json
 import shutil
 from pathlib import Path
 
@@ -136,6 +137,41 @@ def run():
             assert page.locator("#savedViewSelect").input_value() == "Daily queue"
             page.reload(wait_until="load")
             assert page.locator("#savedViewSelect option[value='Daily queue']").count() == 1
+
+            # Offline backup can roundtrip Unicode records and saved views.
+            backup = page.evaluate("window.shioriExportBackup()")
+            exported = json.loads(backup)
+            assert exported["format"] == "shiori-android-local-v1"
+            assert len(exported["tasks"]) == 1
+            assert exported["tasks"][0]["title"] == "Revised offline check 栞"
+            assert exported["saved_views"][0]["name"] == "Daily queue"
+
+            page.locator(".mobile-fab").click()
+            page.locator("#taskName").fill("Temporary second task")
+            page.locator('#taskForm button[type="submit"]').click()
+            assert len(page.evaluate(
+                "JSON.parse(localStorage.getItem('shiori-android-local-tasks'))"
+            )) == 2
+            assert page.evaluate(
+                "(payload) => window.shioriRestoreBackup(payload)", backup
+            ) is True
+            assert len(page.evaluate(
+                "JSON.parse(localStorage.getItem('shiori-android-local-tasks'))"
+            )) == 1
+            assert page.locator("#savedViewSelect option[value='Daily queue']").count() == 1
+
+            # Bad files must not replace or delete existing on-device records.
+            corrupted = json.dumps({
+                "format": "shiori-android-local-v1",
+                "tasks": [{"title": "<script>unsafe</script>"}],
+                "saved_views": [],
+            })
+            assert page.evaluate(
+                "(payload) => window.shioriRestoreBackup(payload)", corrupted
+            ) is False
+            assert page.evaluate(
+                "JSON.parse(localStorage.getItem('shiori-android-local-tasks'))"
+            )[0]["title"] == "Revised offline check 栞"
 
             # A deletion should survive another app restart, with no demo
             # records silently reappearing.
