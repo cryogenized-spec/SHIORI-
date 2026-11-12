@@ -3,6 +3,7 @@
 import argparse
 import http.client
 import json
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -70,6 +71,34 @@ def exercise(cli):
                            {"status": "done"}) == (200, {"ok": True})
             assert request("GET", "/api/tasks")[1]["tasks"][0]["status"] == "done"
 
+            editable = {
+                "title": "Edited 栞",
+                "notes": "Revised line\\nUnicode café",
+                "project": "Everyday",
+                "priority": "urgent",
+                "due_on": None,
+                "estimate_minutes": None,
+                "expected_version": 3,
+            }
+            assert request("POST", f"/api/tasks/{task_id}/edit", editable) == (
+                200, {"ok": True}
+            )
+            updated = request("GET", "/api/tasks")[1]["tasks"][0]
+            assert updated["title"] == editable["title"]
+            assert updated["notes"] == editable["notes"]
+            assert updated["project"] == "Everyday"
+            assert updated["due_on"] is None
+            assert updated["estimate_minutes"] is None
+            assert updated["version"] == 4
+
+            # A stale tab cannot overwrite recent edits or delete the task.
+            stale = dict(editable, title="Overwritten", expected_version=3)
+            assert request("POST", f"/api/tasks/{task_id}/edit", stale)[0] == 409
+            assert request(
+                "POST", f"/api/tasks/{task_id}/delete", {"expected_version": 3}
+            )[0] == 409
+            assert request("GET", "/api/tasks")[1]["tasks"][0]["title"] == "Edited 栞"
+
             # Mutating requests require a matching local Origin; DNS-rebinding
             # hostnames and form content types cannot change task records.
             assert request(
@@ -108,12 +137,40 @@ def exercise(cli):
             conn.close()
             assert stored[0]["id"] == task_id
             assert stored[0]["status"] == "done"
-            assert stored[0]["version"] == 3
-            assert stored[0]["estimate_minutes"] == 45
+            assert stored[0]["version"] == 4
+            assert stored[0]["estimate_minutes"] is None
+            assert stored[0]["title"] == "Edited 栞"
+
+            # Soft-delete through the adapter, then confirm a retained tombstone.
+            body = json.dumps({"expected_version": 4}).encode()
+            conn = http.client.HTTPConnection("127.0.0.1", again.server_port, timeout=15)
+            host = f"127.0.0.1:{again.server_port}"
+            conn.request(
+                "POST", f"/api/tasks/{task_id}/delete", body=body,
+                headers={"Host": host, "Origin": f"http://{host}",
+                         "Content-Type": "application/json"}
+            )
+            response = conn.getresponse()
+            assert response.status == 200
+            response.read()
+            conn.close()
+            conn = http.client.HTTPConnection("127.0.0.1", again.server_port, timeout=15)
+            conn.request("GET", "/api/tasks", headers={"Host": host})
+            response = conn.getresponse()
+            assert response.status == 200
+            assert json.loads(response.read()) == {"tasks": []}
+            conn.close()
         finally:
             again.shutdown()
             again.server_close()
             worker.join(timeout=4)
+
+        with sqlite3.connect(database) as db:
+            row = db.execute(
+                "SELECT title, deleted_at FROM tasks WHERE id=?", (task_id,)
+            ).fetchone()
+            assert row is not None
+            assert row[0] == "Edited 栞" and row[1] is not None
 
 
 if __name__ == "__main__":
