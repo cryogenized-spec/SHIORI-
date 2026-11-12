@@ -36,6 +36,10 @@ jobs:
         run: cargo test --workspace --all-features --locked
       - name: Rust documentation tests
         run: cargo test --doc --workspace --locked
+      - name: Local bridge Rust/SQLite HTTP regression
+        run: |
+          cargo build --locked -p shiori-cli
+          python3 tests/local_bridge_smoke.py --cli target/debug/shiori-cli
       - name: Release compile smoke test
         run: cargo build --workspace --release --locked
 
@@ -98,7 +102,7 @@ jobs:
       - name: Validate JavaScript and Python test harness
         run: |
           node --check apps/web/app.js
-          python -m compileall -q tests
+          python -m compileall -q tests apps/local_bridge.py
           python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Install pinned browser automation
         run: |
