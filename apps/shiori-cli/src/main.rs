@@ -248,8 +248,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 busy,
             })?;
             println!("PREVIEW ONLY · {date} · fixed UTC offset {utc_offset_minutes} minutes");
-            println!("Saved task estimates are used; missing estimates fall back to {default_minutes} minutes.");
-            println!("Saved prerequisite links are respected; missing/deleted prerequisites remain blocked.");
+            println!(
+                "Saved task estimates are used; missing estimates fall back to {default_minutes} minutes."
+            );
+            println!(
+                "Saved prerequisite links are respected; missing/deleted prerequisites remain blocked."
+            );
             println!("No task or calendar events were written.");
             for block in &result.blocks {
                 println!(
@@ -273,14 +277,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return Err("pass one or more --on task IDs, or use --clear".into());
             }
             let updated = store.set_dependencies(&id, &on)?;
-            println!("Updated prerequisites for {} [revision {}]", updated.title, updated.version);
+            println!(
+                "Updated prerequisites for {} [revision {}]",
+                updated.title, updated.version
+            );
             println!("Prerequisites: {}", store.get_dependencies(&id)?.join(", "));
         }
         Command::Show { id } => {
             let task = store.get(&id)?;
             println!("{task:#?}");
             println!("Prerequisites: {:?}", store.get_dependencies(&id)?);
-        },
+        }
         Command::Done { id } => println!(
             "Completed {}",
             store.set_status(&id, TaskStatus::Done)?.title
