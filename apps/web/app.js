@@ -278,14 +278,14 @@
   // Modal exit controls use direct handlers instead of relying solely on
   // document-level delegation. This remains responsive under Android WebView,
   // when tapping icons inside a nested SVG or the on-screen keyboard is open.
-  $('#taskModal [data-close-modal]').forEach(button=>{
+  document.querySelectorAll('#taskModal [data-close-modal]').forEach(button=>{
     button.addEventListener('click',event=>{
       event.preventDefault();
       event.stopPropagation();
       closeModal();
     });
   });
-  $('#editModal [data-close-edit]').forEach(button=>{
+  document.querySelectorAll('#editModal [data-close-edit]').forEach(button=>{
     button.addEventListener('click',event=>{
       event.preventDefault();
       event.stopPropagation();
