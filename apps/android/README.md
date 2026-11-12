@@ -30,6 +30,25 @@ In **Settings → Your data**, choose **Save native safety copy** to refresh the
 
 Rust JNI libraries are compiled into the APK for armv7, arm64 and x86_64. Cross-compilation and validation are covered by CI, but **phone-level JNI/recovery testing remains outstanding**. Details: [Android native vault engineering note](../../docs/engineering/ANDROID_NATIVE_VAULT.md).
 
+## Canonical Rust database migration preview (v0.1.4-dev)
+
+In **Settings → Your data**, select **Stage Rust migration preview**.
+After confirmation, Rust converts the current Android tasks into the **canonical
+SHIORI SQLite task schema**, in a separate app-private preview database.
+The migration preserves original IDs, priorities, notes, statuses, revisions,
+dates and assignments. UI-only metadata, including tags and saved views, is
+retained in an exact JSON sidecar.
+
+The normal task list continues using the previous WebView storage. The
+migration preview is **not** an authoritative store and does not clear or
+replace any existing records. It refuses a different import into the same
+preview file, rather than risking data loss. Use the existing JSON export
+before experimenting with migration, and do not uninstall an older APK unless
+you have verified that backup.
+
+See [canonical Android migration plan](../../docs/engineering/ANDROID_CANONICAL_MIGRATION.md)
+for how timestamp defaults and older hard-deleted records are handled.
+
 ## Open and build
 
 Use Android Studio with JDK 17, Android SDK API 36 and Android Gradle Plugin 9.4. The project is rooted at `apps/android` and uses Gradle 9.9.1. It links `apps/web` as a **packaged asset source** at build time; do not copy a second stale UI.
