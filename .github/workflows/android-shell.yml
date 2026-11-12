@@ -28,7 +28,7 @@ jobs:
         run: |
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
-          yes | "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0" >/dev/null || test "${PIPESTATUS[1]}" -eq 0
+          yes | "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null || test "${PIPESTATUS[1]}" -eq 0
       - name: Build APK with bundled offline assets
         run: |
           /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug --no-daemon --stacktrace
