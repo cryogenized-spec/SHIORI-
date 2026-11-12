@@ -2,9 +2,7 @@
 //! that future desktop, Android, API and MCP adapters will call.
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
-use shiori_core::scheduling::{
-    Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day,
-};
+use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{error::Error, path::PathBuf};
@@ -182,8 +180,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let seconds = utc_offset_minutes
                 .checked_mul(60)
                 .ok_or("UTC offset minutes overflow")?;
-            let offset = FixedOffset::east_opt(seconds)
-                .ok_or("UTC offset minutes must fit within a day")?;
+            let offset =
+                FixedOffset::east_opt(seconds).ok_or("UTC offset minutes must fit within a day")?;
             let local_to_utc = |clock: NaiveTime| -> Result<DateTime<Utc>, Box<dyn Error>> {
                 let local = date
                     .and_time(clock)
