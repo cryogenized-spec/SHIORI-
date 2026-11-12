@@ -88,7 +88,7 @@ def make_server(port, cli, database):
                 f"localhost:{self.server.server_port}",
             }
 
-        def command(self, *arguments):
+        def run_cli(self, *arguments):
             args = [str(cli)]
             if database is not None:
                 args.extend(["--database", str(database)])
@@ -111,7 +111,7 @@ def make_server(port, cli, database):
                 self.response(200, {"mode": "rust-sqlite", "protocol": 1})
             elif path == "/api/tasks":
                 try:
-                    self.response(200, {"tasks": decode_snapshot(self.command("bridge-dump"))})
+                    self.response(200, {"tasks": decode_snapshot(self.run_cli("bridge-dump"))})
                 except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
                     self.log_error("Rust read failed: %s", type(exc).__name__)
                     self.response(503, {"error": "local Rust storage unavailable"})
@@ -165,7 +165,7 @@ def make_server(port, cli, database):
                         if type(minutes) is not int or not 1 <= minutes <= 1440:
                             raise ValueError("invalid estimate")
                         cmd.extend(["--minutes", str(minutes)])
-                    self.command(*cmd)
+                    self.run_cli(*cmd)
                     self.response(201, {"ok": True})
                     return
                 match = re.fullmatch(r"/api/tasks/([^/]+)/status", path)
@@ -176,7 +176,7 @@ def make_server(port, cli, database):
                         raise ValueError("invalid task ID")
                     if status not in ("todo", "in_progress", "done"):
                         raise ValueError("invalid status")
-                    self.command("status", identifier, status)
+                    self.run_cli("status", identifier, status)
                     self.response(200, {"ok": True})
                     return
                 self.response(404, {"error": "unknown API route"})
