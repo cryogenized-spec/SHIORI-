@@ -30,6 +30,11 @@ def run():
         def respond(route):
             request = route.request
             url = request.url
+            if url.startswith("shiori-vault://command"):
+                # CI has no Kotlin Activity. The protocol is driven by the
+                # test below through its exact take/complete functions.
+                route.abort()
+                return
             if not url.startswith(ORIGIN + "/"):
                 external_requests.append(url)
                 route.abort()
@@ -198,6 +203,68 @@ def run():
             # performs a browser-side migration or starts on page load.
             assert page.evaluate("localStorage.getItem(\'shiori-android-local-tasks\')") == "[]"
             assert page.locator("#saveNativeVault").count() == 1
+            # The bridge is dormant by default: no startup native mutations.
+            assert page.evaluate("window.shioriNativeTakeRequest()") is None
+            assert page.locator("#nativeWorkingPanel").count() == 0
+
+            # Simulate the trusted Kotlin host's one-shot request/response
+            # handshake. No actual Android runtime or JNI is claimed here.
+            page.evaluate("""() => {
+                window.shioriNativeBridgeEnabled = true;
+                window.shioriNativeWorkingReady();
+            }""")
+            list_req = page.evaluate("window.shioriNativeTakeRequest()")
+            assert list_req is not None
+            listed = json.loads(list_req)
+            assert listed["protocol"] == "shiori-native-working-v1"
+            assert listed["op"] == "list"
+            assert page.evaluate("window.shioriNativeTakeRequest()") is None
+            assert page.evaluate("""() =>
+                window.shioriNativeComplete("9999", JSON.stringify({ok:true}))
+            """) is False
+
+            # Native titles are escaped and cannot inject browser markup.
+            page.evaluate("""({rid}) => window.shioriNativeComplete(
+                rid, JSON.stringify({ok:true,total:1,tasks:[{
+                    id:"native-1",title:"<img src=x onerror=alert(1)>",
+                    project:"Rust",status:"todo",version:2
+                }]})
+            )""", {"rid":listed["request_id"]})
+            page.locator('#nativeWorkingPanel .native-working-row').wait_for()
+            assert page.locator("#nativeWorkingPanel img").count() == 0
+            assert page.locator("#nativeWorkingPanel").get_by_text(
+                "<img src=x onerror=alert(1)>"
+            ).count() == 1
+
+            # Task status changes use optimistic revision checks and stay
+            # separate from the existing Android WebView local task store.
+            page.locator('[data-native-op="status"]').click()
+            update_req = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
+            assert update_req["op"] == "status"
+            assert update_req["id"] == "native-1"
+            assert update_req["expected_version"] == 2
+            assert update_req["status"] == "done"
+            page.evaluate("""(rid) => window.shioriNativeComplete(
+                rid, JSON.stringify({ok:true,task:{
+                    id:"native-1",version:3,status:"done"}})
+            )""", update_req["request_id"])
+            # Successful writes trigger a read-after-write from SQLite.
+            refreshed_req = json.loads(
+                page.evaluate("window.shioriNativeTakeRequest()")
+            )
+            assert refreshed_req["op"] == "list"
+            page.evaluate("""(rid) => window.shioriNativeComplete(
+                rid, JSON.stringify({ok:true,total:1,tasks:[{
+                    id:"native-1",title:"Native status update",project:"Rust",
+                    status:"done",version:3
+                }]})
+            )""", refreshed_req["request_id"])
+            page.get_by_text("Native status update").wait_for()
+            assert page.evaluate(
+                "localStorage.getItem('shiori-android-local-tasks')"
+            ) == "[]"
+            assert page.evaluate("localStorage.getItem('shiori-demo-tasks')") is None
+
             assert not failures, failures
             assert not external_requests, external_requests
             print("Android-origin offline UI: create, edit, persistence, saved views, delete passed")
