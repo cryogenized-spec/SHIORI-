@@ -10,7 +10,7 @@ On Android, `app.js` enters `android-local` mode. It starts with an **empty pers
 
 ## Open and build
 
-Use Android Studio with JDK 17, Android SDK API 37 and Android Gradle Plugin 9.4. The project is rooted at `apps/android` and uses Gradle 9.9.1. It links `apps/web` as a **packaged asset source** at build time; do not copy a second stale UI.
+Use Android Studio with JDK 17, Android SDK API 36 and Android Gradle Plugin 9.4. The project is rooted at `apps/android` and uses Gradle 9.9.1. It links `apps/web` as a **packaged asset source** at build time; do not copy a second stale UI.
 
 If you already have Gradle 9.9.1 installed, from the repository root:
 
