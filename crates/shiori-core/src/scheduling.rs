@@ -230,7 +230,7 @@ mod tests {
         let planned = plan_day(request(vec![
             task("low", Priority::Low, 60),
             task("urgent", Priority::Urgent, 60),
-            task("medium", Priority::Medium, 120),
+            task("medium", Priority::Medium, 150),
         ]))
         .unwrap();
         assert_eq!(planned.blocks.len(), 2);
