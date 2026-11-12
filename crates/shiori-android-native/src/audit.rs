@@ -82,7 +82,8 @@ pub fn audit_legacy_shadow(
         return Err("staged canonical task count mismatch".into());
     }
 
-    let source_export = source.get("exported_at")
+    let source_export = source
+        .get("exported_at")
         .and_then(Value::as_str)
         .map(utc_timestamp)
         .transpose()?;
@@ -98,25 +99,32 @@ pub fn audit_legacy_shadow(
         };
         let due = field("due");
         let due_on = if due.is_empty() { None } else { Some(due) };
-        let assignee = original.get("assigneeId")
+        let assignee = original
+            .get("assigneeId")
             .and_then(Value::as_str)
             .map(str::trim);
         let minutes = original.get("mins").and_then(Value::as_i64);
         let version = match original.get("version").filter(|v| !v.is_null()) {
             None => 1,
-            Some(v) => v.as_i64().filter(|v| *v > 0).ok_or("invalid archived revision")?,
+            Some(v) => v
+                .as_i64()
+                .filter(|v| *v > 0)
+                .ok_or("invalid archived revision")?,
         };
 
-        let created = optional_time(original, "createdAt")?
-            .or_else(|| source_export.clone());
-        if created.is_none() { unverified_timestamps += 1; }
-        let updated = optional_time(original, "updatedAt")?
-            .or_else(|| created.clone());
-        if updated.is_none() { unverified_timestamps += 1; }
+        let created = optional_time(original, "createdAt")?.or_else(|| source_export.clone());
+        if created.is_none() {
+            unverified_timestamps += 1;
+        }
+        let updated = optional_time(original, "updatedAt")?.or_else(|| created.clone());
+        if updated.is_none() {
+            unverified_timestamps += 1;
+        }
         let completed = if status == "done" {
-            let value = optional_time(original, "completedAt")?
-                .or_else(|| updated.clone());
-            if value.is_none() { unverified_timestamps += 1; }
+            let value = optional_time(original, "completedAt")?.or_else(|| updated.clone());
+            if value.is_none() {
+                unverified_timestamps += 1;
+            }
             value
         } else {
             None
@@ -182,7 +190,8 @@ mod tests {
                 "tags":["mobile"], "version":3
             }],
             "saved_views":[], "sort":"fifo"
-        }).to_string()
+        })
+        .to_string()
     }
 
     fn path() -> std::path::PathBuf {
@@ -221,7 +230,10 @@ mod tests {
         same["tasks"][0]["title"] = Value::from("New edit not yet staged");
         assert!(matches!(
             audit_legacy_shadow(&path, &same.to_string()).unwrap(),
-            ShadowAudit::Verified {current_matches: false, ..}
+            ShadowAudit::Verified {
+                current_matches: false,
+                ..
+            }
         ));
         std::fs::remove_file(path).unwrap();
     }
@@ -232,15 +244,16 @@ mod tests {
         let raw = fixture();
         stage_legacy_backup(&path, &raw).unwrap();
         let db = Connection::open(&path).unwrap();
-        db.execute(
-            "UPDATE tasks SET priority='low' WHERE id='u1001'", []
-        ).unwrap();
+        db.execute("UPDATE tasks SET priority='low' WHERE id='u1001'", [])
+            .unwrap();
         drop(db);
         assert!(audit_legacy_shadow(&path, &raw).is_err());
         let db = Connection::open(&path).unwrap();
-        let priority: String = db.query_row(
-            "SELECT priority FROM tasks WHERE id='u1001'", [], |r| r.get(0)
-        ).unwrap();
+        let priority: String = db
+            .query_row("SELECT priority FROM tasks WHERE id='u1001'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(priority, "low");
         drop(db);
         std::fs::remove_file(path).unwrap();
