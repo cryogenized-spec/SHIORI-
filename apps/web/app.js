@@ -1,4 +1,4 @@
-/* SHIORI visual prototype. All information is local DEMO DATA; no server, MCP or AI is connected. */
+/* SHIORI web prototype: local Rust/SQLite bridge or explicitly separate static demo. */
 (() => {
   'use strict';
   const $ = (s) => document.querySelector(s);
@@ -6,7 +6,7 @@
   const icon = (name) => `<svg aria-hidden="true"><use href="#ic-${name}"/></svg>`;
   const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const newDate = (offset=0) => {const d = new Date();d.setHours(12,0,0,0);d.setDate(d.getDate()+offset);return d.toISOString().slice(0,10);};
-  const displayDate = (date) => {const d = new Date(`${date}T12:00:00`);return new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short'}).format(d);};
+  const displayDate = (date) => {if(!date)return 'No due date';const d = new Date(`${date}T12:00:00`);return Number.isNaN(d.getTime())?'Invalid date':new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short'}).format(d);};
   const defaultTasks = [
     {id:'t01',title:'Review the MCP tool contracts',description:'Make sure every operation has a narrow responsibility, an explicit schema, and an auditable permission boundary.',project:'Core',priority:'high',status:'progress',due:newDate(0),tags:['MCP','Architecture'],mins:45},
     {id:'t02',title:'Refine the Android quick-capture flow',description:'Keep capture under two taps. Document the notification shortcut, widget, and one-handed affordances.',project:'Interface',priority:'high',status:'todo',due:newDate(0),tags:['Android','UX'],mins:30},
@@ -38,7 +38,50 @@
     settings:['Settings','Made to be yours.','Control the workspace, your information and appearance.','PREFERENCES','Workspace settings']
   };
   let tasks;
+  let mode = 'demo'; // demo, live (local Rust/SQLite), or local-error
   try {const saved = JSON.parse(localStorage.getItem('shiori-demo-tasks') || 'null');tasks = Array.isArray(saved) ? saved : defaultTasks;} catch {tasks = defaultTasks;}
+  const fromStoredTask = (t) => ({
+    id:t.id, title:t.title, description:t.notes||'', project:t.project,
+    priority:t.priority, status:t.status==='in_progress'?'progress':t.status,
+    due:t.due_on||'', tags:[], mins:t.estimate_minutes,
+    createdAt:t.created_at, updatedAt:t.updated_at, version:t.version
+  });
+  async function reloadBridge() {
+    const response = await fetch('/api/tasks', {cache:'no-store'});
+    if(!response.ok) throw new Error('Local Rust storage could not be read');
+    const payload = await response.json();
+    if(!Array.isArray(payload.tasks)) throw new Error('Unexpected task response');
+    tasks = payload.tasks.map(fromStoredTask);
+    render();
+  }
+  async function requestBridge(path, data) {
+    const response = await fetch(path, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      credentials:'same-origin', body:JSON.stringify(data)
+    });
+    if(!response.ok) throw new Error('Local task operation rejected');
+    await reloadBridge();
+  }
+  async function bootstrapBridge() {
+    if(location.protocol!=='http:' || !['localhost','127.0.0.1'].includes(location.hostname)) return;
+    try {
+      const response = await fetch('/api/health', {cache:'no-store'});
+      if(!response.ok) return;
+      const health = await response.json();
+      if(health.mode!=='rust-sqlite' || health.protocol!==1) return;
+      mode='live';
+      tasks=[]; // Never silently modify demo records after discovering a live DB.
+      $('#footerMode').textContent='LOCAL RUST / SQLITE · OFFLINE';
+      $('#railMode').textContent='● LOCAL DATABASE';
+      await reloadBridge();
+    } catch {
+      if(mode==='live') {
+        mode='local-error';tasks=[];render();
+        $('#footerMode').textContent='LOCAL DATABASE UNAVAILABLE · NO DEMO FALLBACK';
+        toast('Local database unavailable — no changes were made');
+      }
+    }
+  }
   let view = 'today', filter = 'all', query = '', activeDetail = null;
   let sortMode = 'focus';
   try {
@@ -60,9 +103,9 @@
     let result=tasks;
     if(view==='today') result=result.filter(t=>calendarSelected ? t.due===calendarSelected : (t.due<=newDate() || t.status==='progress'));
     if(view==='inbox') result=result.filter(t=>t.status!=='done');
-    if(view==='attention') result=result.filter(t=>t.status!=='done' && (t.due<=newDate() || t.priority==='high' || t.status==='progress'));
+    if(view==='attention') result=result.filter(t=>t.status!=='done' && ((t.due && t.due<=newDate()) || ['high','urgent'].includes(t.priority) || t.status==='progress'));
     if(filter!=='all') result=result.filter(t=>t.priority===filter);
-    if(query.trim()) {const q=query.trim().toLowerCase();result=result.filter(t=>[t.title,t.project,t.description,...t.tags].join(' ').toLowerCase().includes(q));}
+    if(query.trim()) {const q=query.trim().toLowerCase();result=result.filter(t=>[t.title,t.project,t.description,...(t.tags||[])].join(' ').toLowerCase().includes(q));}
     const priorityRank = (p) => ({urgent:0,high:1,medium:2,low:3}[p] ?? 4);
     return [...result].sort((a,b) => {
       if (sortMode==='fifo') {
@@ -81,7 +124,7 @@
     });
   };
   function toast(msg){$('#toast').textContent=msg;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),2400);}
-  function renderStats(){const c=count();const cards=[['Open tasks',c.open,'across all projects','check-circle'],['Due today',c.today,'needs your attention','calendar'],['Completed',c.done,'small wins add up','check'],['Workspaces',4,'sample project spaces','folder']];$('#stats').innerHTML=cards.map(([label,value,note,glyph])=>`<article class="stat-card"><div class="stat-head">${escapeHTML(label)}${icon(glyph)}</div><div class="stat-value">${value.toString().padStart(2,'0')}</div><div class="stat-foot">${escapeHTML(note)}</div></article>`).join('');const today=tasks.filter(t=>t.due<=newDate());const pct=today.length?Math.round(today.filter(t=>t.status==='done').length/today.length*100):0;$('#momentumNumber').innerHTML=`${pct}<span>%</span>`;$('#momentumFill').style.width=pct+'%';$('#navTodayCount').textContent=String(c.today).padStart(2,'0');$('#navAttentionCount').textContent=String(tasks.filter(t=>t.status!=='done' && (t.due<=newDate() || t.priority==='high' || t.status==='progress')).length).padStart(2,'0');}
+  function renderStats(){const c=count();const cards=[['Open tasks',c.open,'across all projects','check-circle'],['Due today',c.today,'needs your attention','calendar'],['Completed',c.done,'small wins add up','check'],['Workspaces',4,'sample project spaces','folder']];$('#stats').innerHTML=cards.map(([label,value,note,glyph])=>`<article class="stat-card"><div class="stat-head">${escapeHTML(label)}${icon(glyph)}</div><div class="stat-value">${value.toString().padStart(2,'0')}</div><div class="stat-foot">${escapeHTML(note)}</div></article>`).join('');const today=tasks.filter(t=>t.due<=newDate());const pct=today.length?Math.round(today.filter(t=>t.status==='done').length/today.length*100):0;$('#momentumNumber').innerHTML=`${pct}<span>%</span>`;$('#momentumFill').style.width=pct+'%';$('#navTodayCount').textContent=String(c.today).padStart(2,'0');$('#navAttentionCount').textContent=String(tasks.filter(t=>t.status!=='done' && ((t.due && t.due<=newDate()) || ['high','urgent'].includes(t.priority) || t.status==='progress')).length).padStart(2,'0');}
   function renderCalendar() {
     const wrapper = $('#homeCalendar');
     const toggle = $('#homeCalendarToggle');
@@ -107,10 +150,10 @@
     }
     wrapper.innerHTML = `<div class="calendar-top"><div><span class="section-eyebrow">AT A GLANCE</span><h3 id="calendarMonthHeading">${heading}</h3></div><div class="calendar-commands"><button type="button" data-calendar-today>Today</button><button type="button" data-calendar-shift="-1" aria-label="Previous month">‹</button><button type="button" data-calendar-shift="1" aria-label="Next month">›</button></div></div><div class="cal-grid">${weekdayNames.map(d=>`<span class="cal-weekday">${d}</span>`).join('')}${cells}</div><div class="calendar-note" id="calendarLegend">Numbers show unfinished tasks due that day. Select a date to focus your list.</div>`;
   }
-  function renderList(){const arr=chosen();const note=view==='attention'?'<div class="attention-note">Local attention preview · due, high-priority and in-progress tasks. No user assignments or remote sync are available yet.</div>':'';if(!arr.length)return note+'<div class="empty-state">'+icon('check-circle')+'<h3>A little breathing room.</h3><p>Nothing matches this view. Try another filter or create a task.</p></div>';return note+`<div class="task-list">${arr.map(t=>`<article class="task-row"><button class="task-complete ${t.status==='done'?'done':''}" aria-label="${t.status==='done'?'Reopen':'Complete'} ${escapeHTML(t.title)}" data-complete="${t.id}">${t.status==='done'?icon('check'):''}</button><div class="task-info" data-detail="${t.id}"><div class="task-title ${t.status==='done'?'done':''}">${escapeHTML(t.title)}</div><div class="task-meta"><span class="project-chip">${escapeHTML(t.project)}</span><span class="task-meta-dot"></span><span>${escapeHTML(t.tags.slice(0,2).join(' / '))}</span></div></div><div class="task-end"><span class="priority-dot ${t.priority}" title="${t.priority} priority"></span><span class="due-chip">${icon('calendar')}${displayDate(t.due)}</span>${icon('chevron').replace('<svg ', '<svg class="row-arrow" data-detail="'+t.id+'" ')}</div></article>`).join('')}</div>`;}
-  function renderBoard(){const statuses=[['todo','To do'],['progress','In progress'],['done','Completed']];const list=chosen();return `<div class="board">${statuses.map(([status,label])=>{const group=list.filter(t=>t.status===status);return `<section class="board-col" data-drop="${status}"><div class="board-head"><b>${label}</b><span class="board-count">${group.length}</span></div>${group.map(t=>`<article class="board-card" draggable="true" data-drag="${t.id}" data-detail="${t.id}"><b>${escapeHTML(t.title)}</b><div class="task-meta"><span class="project-chip">${escapeHTML(t.project)}</span><span>${displayDate(t.due)}</span></div></article>`).join('')}${group.length?'':'<div style="font-size:11px;color:var(--faint);padding:8px">Drop tasks here</div>'}</section>`}).join('')}</div>`;}
+  function renderList(){const arr=chosen();const note=view==='attention'?'<div class="attention-note">Attention · due, high-priority and in-progress tasks. Assignment tracking and remote sync are not available yet.</div>':'';if(!arr.length)return note+'<div class="empty-state">'+icon('check-circle')+'<h3>A little breathing room.</h3><p>Nothing matches this view. Try another filter or create a task.</p></div>';return note+`<div class="task-list">${arr.map(t=>`<article class="task-row"><button class="task-complete ${t.status==='done'?'done':''}" aria-label="${t.status==='done'?'Reopen':'Complete'} ${escapeHTML(t.title)}" data-complete="${escapeHTML(t.id)}">${t.status==='done'?icon('check'):''}</button><div class="task-info" data-detail="${escapeHTML(t.id)}"><div class="task-title ${t.status==='done'?'done':''}">${escapeHTML(t.title)}</div><div class="task-meta"><span class="project-chip">${escapeHTML(t.project)}</span><span class="task-meta-dot"></span><span>${escapeHTML((t.tags||[]).slice(0,2).join(' / '))}</span></div></div><div class="task-end"><span class="priority-dot ${t.priority}" title="${t.priority} priority"></span><span class="due-chip">${icon('calendar')}${displayDate(t.due)}</span>${icon('chevron').replace('<svg ', '<svg class="row-arrow" data-detail="'+escapeHTML(t.id)+'" ')}</div></article>`).join('')}</div>`;}
+  function renderBoard(){const statuses=[['todo','To do'],['progress','In progress'],['done','Completed']];const list=chosen();return `<div class="board">${statuses.map(([status,label])=>{const group=list.filter(t=>t.status===status);return `<section class="board-col" data-drop="${status}"><div class="board-head"><b>${label}</b><span class="board-count">${group.length}</span></div>${group.map(t=>`<article class="board-card" draggable="true" data-drag="${escapeHTML(t.id)}" data-detail="${escapeHTML(t.id)}"><b>${escapeHTML(t.title)}</b><div class="task-meta"><span class="project-chip">${escapeHTML(t.project)}</span><span>${displayDate(t.due)}</span></div></article>`).join('')}${group.length?'':'<div style="font-size:11px;color:var(--faint);padding:8px">Drop tasks here</div>'}</section>`}).join('')}</div>`;}
   function renderProjects(){const projects=Object.keys(projectDescriptions);return `<div class="project-grid">${projects.map(p=>{const all=tasks.filter(t=>t.project===p),done=all.filter(t=>t.status==='done').length,pct=all.length?Math.round(done/all.length*100):0;return `<article class="project-card" data-project="${p}"><div class="project-card-top"><span>${projectGlyphs[p]}</span><span>${all.length} tasks ${icon('chevron')}</span></div><h3>${p==='Core'?'Core platform':p==='Interface'?'Interface design':p}</h3><p>${projectDescriptions[p]}</p><div class="project-progress"><span>${done} of ${all.length} completed</span><strong>${pct}%</strong></div><div class="project-bar"><div style="width:${pct}%"></div></div></article>`}).join('')}</div>`;}
-  function renderTimeline(){return `<div class="timeline">${Array.from({length:7},(_,i)=>{let d=new Date(`${newDate(i)}T12:00:00`);let matches=tasks.filter(t=>t.due===newDate(i));return `<section class="timeline-day"><header>${new Intl.DateTimeFormat('en-GB',{weekday:'short'}).format(d)}<b>${d.getDate()}</b></header>${matches.map(t=>`<div class="timeline-pill" data-detail="${t.id}">${escapeHTML(t.title)}</div>`).join('')}${!matches.length?'<div style="font-size:10px;color:var(--faint);margin-top:14px">Open space</div>':''}</section>`}).join('')}</div>`;}
+  function renderTimeline(){return `<div class="timeline">${Array.from({length:7},(_,i)=>{let d=new Date(`${newDate(i)}T12:00:00`);let matches=tasks.filter(t=>t.due===newDate(i));return `<section class="timeline-day"><header>${new Intl.DateTimeFormat('en-GB',{weekday:'short'}).format(d)}<b>${d.getDate()}</b></header>${matches.map(t=>`<div class="timeline-pill" data-detail="${escapeHTML(t.id)}">${escapeHTML(t.title)}</div>`).join('')}${!matches.length?'<div style="font-size:10px;color:var(--faint);margin-top:14px">Open space</div>':''}</section>`}).join('')}</div>`;}
   function renderReports(){const c=count(),pct=Math.round(c.done/c.all*100);const projects=Object.keys(projectDescriptions);return `<div class="report-grid"><article class="report-card"><div class="section-eyebrow">COMPLETION RATE</div><div class="report-big">${pct}%</div><p>${c.done} tasks complete across ${c.all} sample tasks. This is local demo data only.</p><div class="report-line"><span>Progress</span><div><span style="width:${pct}%"></span></div><b>${pct}%</b></div></article><article class="report-card"><div class="section-eyebrow">PORTFOLIO HEALTH</div><div class="report-big">04</div><p>Projects in progress. All enterprise report types should eventually be freely accessible.</p>${projects.map(p=>{let a=tasks.filter(t=>t.project===p);let n=Math.round(a.filter(t=>t.status==='done').length/(a.length||1)*100);return `<div class="report-line"><span>${p}</span><div><span style="width:${n}%"></span></div><b>${n}%</b></div>`}).join('')}</article></div>`;}
   function renderAutomations(){return `<div class="settings-list">${[['Recurring work','Automatic task generation from repeat rules.','Planned'],['Rules & triggers','When status, date or project changes, take a defined action.','Planned'],['Webhooks','Connect external services through auditable, permission-controlled events.','Planned'],['MCP actions','Let authorized AI assistants work with tasks through typed tools.','Planned']].map(([n,d,s])=>`<article class="automation-card"><div><h3>${n}</h3><p>${d}</p><span class="status-tag">${s.toUpperCase()} · NOT IMPLEMENTED</span></div><button data-preview-feature="${n}">Preview</button></article>`).join('')}</div>`;}
   function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>This concept keeps sample task changes inside your browser using localStorage. Nothing is sent to a server. Production SHIORI will add local databases, secure backups and portable export formats.</p><div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div></article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
