@@ -5,7 +5,11 @@ use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_estimate};
 use shiori_storage::{SqliteStore, TaskFilter};
-use std::{error::Error, io::{self, Write}, path::PathBuf};
+use std::{
+    error::Error,
+    io::{self, Write},
+    path::PathBuf,
+};
 
 #[derive(Parser)]
 #[command(name = "shiori", version, about = "SHIORI — offline task management")]
@@ -82,10 +86,7 @@ enum Command {
     /// View one task by its ID
     Show { id: String },
     /// Change a task's status, including in progress
-    Status {
-        id: String,
-        status: TaskStatus,
-    },
+    Status { id: String, status: TaskStatus },
     /// Private length-prefixed machine protocol for the local development UI
     #[command(hide = true)]
     BridgeDump,
@@ -152,7 +153,9 @@ fn bridge_dump(tasks: &[Task]) -> Result<(), Box<dyn Error>> {
             task.due_on.map(|d| d.to_string()).unwrap_or_default(),
             task.created_at.to_rfc3339(),
             task.updated_at.to_rfc3339(),
-            task.estimate_minutes.map(|n| n.to_string()).unwrap_or_default(),
+            task.estimate_minutes
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
             task.version.to_string(),
         ];
         for field in &fields {
@@ -327,10 +330,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
         Command::Status { id, status } => {
-            println!(
-                "Updated {}",
-                store.set_status(&id, status)?.title
-            );
+            println!("Updated {}", store.set_status(&id, status)?.title);
         }
         Command::Show { id } => {
             let task = store.get(&id)?;
