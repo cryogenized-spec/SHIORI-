@@ -72,6 +72,26 @@ def run(report: Path):
                     # Reload resets the view to Today; sample task is due today.
                     require(page.get_by_text("SHIORI browser regression test").count() >= 1, "Task not persisted across reload")
 
+                    # M2 attention is explicitly local-only: do not imply
+                    # assignment tracking or a synced attention inbox.
+                    page.evaluate("""() => document.querySelector('#mainNav [data-view="attention"]').click()""")
+                    require(page.locator(".attention-note").count() == 1,
+                            "Local attention limitation was not shown")
+                    require(page.locator("#mainData .task-row").count() > 0,
+                            "Attention view unexpectedly empty")
+
+                    # Saved FIFO choice should survive a reload on mobile and desktop.
+                    page.evaluate("""() => {
+                      const el = document.querySelector('#sortMode');
+                      el.value = 'fifo';
+                      el.dispatchEvent(new Event('change', {bubbles: true}));
+                    }""")
+                    page.reload(wait_until="load")
+                    require(page.locator("#sortMode").input_value() == "fifo",
+                            "Task-order preference was not persisted")
+                    require(page.locator("#homeCalendarToggle").get_attribute("aria-expanded") == "true",
+                            "Returning to My day should preserve expanded calendar")
+
                     # Measure synchronous render work rather than round-trip CDP click overhead.
                     render_times = page.evaluate("""() => {
                       const button = document.querySelector('#homeCalendarToggle');
