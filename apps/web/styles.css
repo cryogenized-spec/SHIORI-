@@ -54,3 +54,13 @@
 .sort-control select:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
 .attention-note{margin-bottom:15px;padding:12px 14px;border:1px solid var(--line);background:var(--panel2);border-radius:10px;color:var(--muted);font-size:12px;line-height:1.5}
 @media(max-width:720px){.sort-control{font-size:10px}.sort-control select{max-width:82px;padding:8px 4px}}
+
+/* Avoid narrow-screen overflow when the calendar, filter and ordering controls
+   share the heading. Wrap the toolbar instead of expanding the viewport. */
+@media(max-width:760px){
+  .content-heading{flex-wrap:wrap;align-items:flex-start}
+  .content-heading>div:first-child{min-width:0;flex:1 1 165px}
+  .content-actions{min-width:0;flex:1 1 auto;flex-wrap:wrap;justify-content:flex-end}
+  .sort-control{min-width:0}
+  .sort-control select{min-width:0}
+}
