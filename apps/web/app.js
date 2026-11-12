@@ -306,7 +306,8 @@
     if(e.target.closest('[data-remove-task]')){removeTask();return;}
     if(e.target.closest('[data-close-edit]')){closeEdit();return;}
     const project=e.target.closest('[data-project]');if(project){setView('inbox');$('#searchInput').value=project.dataset.project;query=project.dataset.project;render();return;}
-    const theme=e.target.closest('[data-theme]');if(theme){setTheme(theme.dataset.theme);return;}
+    // The HTML root also has data-theme; only theme buttons can change it.
+    const theme=e.target.closest('button[data-theme]');if(theme){setTheme(theme.dataset.theme);return;}
     const close=e.target.closest('[data-close-modal]');if(close){closeModal();return;}
     if(e.target.closest('[data-close-detail]')){$('#detailOverlay').classList.remove('open');return;}
     if(e.target.closest('[data-preview-feature]')){toast('Feature preview only · planned for the roadmap');return;}
