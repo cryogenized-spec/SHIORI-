@@ -6,7 +6,7 @@
 use chrono::NaiveDate;
 use jni::{
     JNIEnv,
-    objects::{JClass, JString},
+    objects::{JObject, JString},
     sys::{JNI_FALSE, JNI_TRUE, jboolean, jstring},
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -153,13 +153,13 @@ pub fn load_snapshot(db_path: &Path) -> Result<Option<String>, Box<dyn std::erro
         .optional()?)
 }
 
-// Static JNI methods live on dev.cryogenized.shiori.NativeVault.
+// JNI instance methods live on the Kotlin singleton NativeVault.
 // Keep Java-facing operations limited to private-path snapshot read/write;
 // the only caller is the app's Kotlin Activity. No JS JNI object is exposed.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_loadSnapshot(
     mut env: JNIEnv,
-    _class: JClass,
+    _object: JObject,
     path: JString,
 ) -> jstring {
     let Ok(path) = env.get_string(&path) else {
@@ -176,7 +176,7 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_loadSnapshot(
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_storeSnapshot(
     mut env: JNIEnv,
-    _class: JClass,
+    _object: JObject,
     path: JString,
     payload: JString,
 ) -> jboolean {
@@ -238,7 +238,8 @@ mod tests {
         payload["tasks"][0]["due"] = Value::String("2026-02-30".into());
         assert!(validate_snapshot(&payload.to_string()).is_err());
         payload["tasks"][0]["due"] = Value::String("2026-11-12".into());
-        payload["tasks"].as_array_mut().unwrap().push(payload["tasks"][0].clone());
+        let original = payload["tasks"][0].clone();
+        payload["tasks"].as_array_mut().unwrap().push(original);
         assert!(validate_snapshot(&payload.to_string()).is_err());
         assert!(validate_snapshot(&"x".repeat(MAX_SNAPSHOT_BYTES + 1)).is_err());
     }
