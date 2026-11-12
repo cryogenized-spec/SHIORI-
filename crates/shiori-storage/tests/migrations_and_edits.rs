@@ -26,6 +26,7 @@ fn edits_survive_reopen_clear_dates_and_preserve_existing_identity() {
                     priority: Some(Priority::Urgent),
                     due_on: Some(None),
                     estimate_minutes: None,
+                    assignee_id: None,
                 },
             )
             .unwrap();
@@ -143,7 +144,7 @@ fn unversioned_legacy_database_upgrades_without_dropping_tombstones() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 }
 
 #[test]
@@ -157,7 +158,7 @@ fn refuses_unknown_newer_schema_without_modifying_database() {
         SqliteStore::open(&path),
         Err(StorageError::UnsupportedSchemaVersion {
             found: 42,
-            supported: 2
+            supported: 3
         })
     ));
     let db = Connection::open(&path).unwrap();
