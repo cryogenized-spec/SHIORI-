@@ -17,18 +17,24 @@ fn patch_validates_before_mutating_and_does_not_bump_noop() {
     assert!(!task.apply_patch(TaskPatch::default()).unwrap());
     assert_eq!(task.version, original.version);
     let due = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
-    assert!(task.apply_patch(TaskPatch {
-        due_on: Some(Some(due)),
-        project: Some("  Work  ".into()),
-        ..Default::default()
-    }).unwrap());
+    assert!(
+        task.apply_patch(TaskPatch {
+            due_on: Some(Some(due)),
+            project: Some("  Work  ".into()),
+            ..Default::default()
+        })
+        .unwrap()
+    );
     assert_eq!(task.project, "Work");
     assert_eq!(task.due_on, Some(due));
     assert_eq!(task.version, 2);
-    assert!(task.apply_patch(TaskPatch {
-        due_on: Some(None),
-        ..Default::default()
-    }).unwrap());
+    assert!(
+        task.apply_patch(TaskPatch {
+            due_on: Some(None),
+            ..Default::default()
+        })
+        .unwrap()
+    );
     assert_eq!(task.due_on, None);
     assert_eq!(task.version, 3);
 }
