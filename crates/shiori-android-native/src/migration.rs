@@ -25,10 +25,7 @@ fn timestamp(s: &str) -> Result<DateTime<Utc>, Box<dyn Error>> {
 
 /// Converts a legacy Android JSON snapshot and archives that exact source.
 /// A failure never partially imports tasks, nor changes the WebView database.
-pub fn stage_legacy_backup(
-    db_path: &Path,
-    raw: &str,
-) -> Result<ShadowReport, Box<dyn Error>> {
+pub fn stage_legacy_backup(db_path: &Path, raw: &str) -> Result<ShadowReport, Box<dyn Error>> {
     validate_snapshot(raw)?;
     let mut store = SqliteStore::open(db_path)?;
 
@@ -44,12 +41,18 @@ pub fn stage_legacy_backup(
             old.remove("exported_at");
             current.remove("exported_at");
         }
-        if old == current { previous.as_str() } else { raw }
+        if old == current {
+            previous.as_str()
+        } else {
+            raw
+        }
     } else {
         raw
     };
     let snapshot: Value = serde_json::from_str(chosen_source)?;
-    let root = snapshot.as_object().ok_or("backup root must be an object")?;
+    let root = snapshot
+        .as_object()
+        .ok_or("backup root must be an object")?;
     let data = root
         .get("tasks")
         .and_then(Value::as_array)
@@ -65,7 +68,10 @@ pub fn stage_legacy_backup(
     for legacy in data {
         let map = legacy.as_object().ok_or("invalid legacy task object")?;
         let required = |key: &str| -> Result<&str, Box<dyn Error>> {
-            Ok(map.get(key).and_then(Value::as_str).ok_or("missing task field")?)
+            Ok(map
+                .get(key)
+                .and_then(Value::as_str)
+                .ok_or("missing task field")?)
         };
         let due = map.get("due").and_then(Value::as_str).unwrap_or("");
         let due_on = if due.is_empty() {
@@ -216,13 +222,14 @@ mod tests {
         assert_eq!(done.assignee_id.as_deref(), Some("local"));
         assert!(done.completed_at.is_some());
         assert_eq!(store.legacy_shadow_source().unwrap(), Some(raw.clone()));
-        assert_eq!(
-            stage_legacy_backup(&path, &raw).unwrap().created,
-            false
-        );
+        assert_eq!(stage_legacy_backup(&path, &raw).unwrap().created, false);
         let mut reexport: Value = serde_json::from_str(&raw).unwrap();
         reexport["exported_at"] = Value::from("2026-11-12T20:15:00Z");
-        assert!(!stage_legacy_backup(&path, &reexport.to_string()).unwrap().created);
+        assert!(
+            !stage_legacy_backup(&path, &reexport.to_string())
+                .unwrap()
+                .created
+        );
         let mut changed: Value = serde_json::from_str(&raw).unwrap();
         changed["tasks"][0]["title"] = Value::from("Newer record");
         assert!(stage_legacy_backup(&path, &changed.to_string()).is_err());
