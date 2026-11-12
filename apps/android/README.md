@@ -2,6 +2,12 @@
 
 This is an **actual native Android Activity**, deliberately small and self-contained. It serves the **same** responsive SHIORI web UI assets from the APK through a private HTTPS-like WebView origin. It has **no INTERNET permission**, no JavaScript bridge, and blocks outbound navigation.
 
+## Mobile navigation and cancellation
+
+The task-capture modal has an explicit X and Cancel button. Android gesture/hardware Back closes the topmost SHIORI modal or drawer before leaving the Activity. Exit controls remain at least 44×44 px and the forms scroll when the on-screen keyboard reduces the available height.
+
+This was corrected in the M2 v0.1.1-dev build after testing real pointer taps on the private Android app-assets origin. Browser-origin tests are not a substitute for physical phone validation.
+
 ## Offline behaviour
 
 On Android, `app.js` enters `android-local` mode. It starts with an **empty personal task list** rather than the demonstration fixture. Task creation, edits, completion, deletion, FIFO views and filters are saved only in this device's **WebView DOM storage**. The experience works without a server, Cloudflare, ChatGPT, an account or an Internet connection.
