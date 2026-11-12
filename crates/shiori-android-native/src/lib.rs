@@ -72,16 +72,16 @@ fn validate_snapshot(raw: &str) -> Result<(), &'static str> {
             let id = assignee.as_str().ok_or("invalid assignee")?;
             if id.is_empty()
                 || id.len() > 64
-                || !id.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.:".contains(&c))
+                || !id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"-_.:".contains(&c))
             {
                 return Err("invalid assignee ID");
             }
         }
         if let Some(tags) = task.get("tags") {
             let tags = tags.as_array().ok_or("invalid tags")?;
-            if tags.len() > 16
-                || tags.iter().any(|t| t.as_str().is_none_or(|s| s.len() > 50))
-            {
+            if tags.len() > 16 || tags.iter().any(|t| t.as_str().is_none_or(|s| s.len() > 50)) {
                 return Err("invalid tags");
             }
         }
@@ -92,8 +92,14 @@ fn validate_snapshot(raw: &str) -> Result<(), &'static str> {
         let name = field("name").ok_or("missing view name")?;
         if name.trim().is_empty()
             || name.len() > 40
-            || !matches!(field("view"), Some("today" | "attention" | "inbox" | "board"))
-            || !matches!(field("filter"), Some("all" | "urgent" | "high" | "medium" | "low"))
+            || !matches!(
+                field("view"),
+                Some("today" | "attention" | "inbox" | "board")
+            )
+            || !matches!(
+                field("filter"),
+                Some("all" | "urgent" | "high" | "medium" | "low")
+            )
             || !matches!(field("sort"), Some("focus" | "fifo" | "due" | "priority"))
             || field("query").is_none_or(|q| q.len() > 250)
         {
