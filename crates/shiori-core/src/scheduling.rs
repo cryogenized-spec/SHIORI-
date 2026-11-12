@@ -192,7 +192,10 @@ pub fn plan_day(mut request: PlanRequest) -> Result<PlanPreview, PlanError> {
     }
     blocks.sort_by(|a, b| a.start.cmp(&b.start).then(a.task_id.cmp(&b.task_id)));
     unscheduled.sort_by(|a, b| a.task_id.cmp(&b.task_id));
-    Ok(PlanPreview { blocks, unscheduled })
+    Ok(PlanPreview {
+        blocks,
+        unscheduled,
+    })
 }
 
 #[cfg(test)]
@@ -251,11 +254,8 @@ mod tests {
     fn dependencies_are_after_prerequisites_even_if_more_urgent() {
         let mut dependent = task("finish", Priority::Urgent, 30);
         dependent.dependencies.push("prepare".into());
-        let planned = plan_day(request(vec![
-            dependent,
-            task("prepare", Priority::Low, 30),
-        ]))
-        .unwrap();
+        let planned =
+            plan_day(request(vec![dependent, task("prepare", Priority::Low, 30)])).unwrap();
         assert_eq!(planned.blocks[0].task_id, "prepare");
         assert_eq!(planned.blocks[1].task_id, "finish");
         assert_eq!(planned.blocks[1].start, planned.blocks[0].end);
@@ -273,9 +273,12 @@ mod tests {
         let planned = plan_day(request(vec![a, b, c])).unwrap();
         assert!(planned.blocks.is_empty());
         assert_eq!(planned.unscheduled.len(), 3);
-        assert!(planned.unscheduled.iter().all(|task| {
-            task.reason == UnscheduledReason::BlockedByDependency
-        }));
+        assert!(
+            planned
+                .unscheduled
+                .iter()
+                .all(|task| { task.reason == UnscheduledReason::BlockedByDependency })
+        );
     }
 
     #[test]
@@ -288,7 +291,8 @@ mod tests {
             plan_day(request(vec![
                 task("same", Priority::Low, 30),
                 task("same", Priority::High, 30),
-            ])).unwrap_err(),
+            ]))
+            .unwrap_err(),
             PlanError::InvalidTaskId
         );
     }
