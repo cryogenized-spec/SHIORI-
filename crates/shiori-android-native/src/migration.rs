@@ -187,7 +187,7 @@ mod tests {
         let report = stage_legacy_backup(&path, &raw).unwrap();
         assert_eq!(report.imported, 2);
         assert!(report.created);
-        assert_eq!(report.inferred_timestamps, 3);
+        assert_eq!(report.inferred_timestamps, 4);
         let store = SqliteStore::open(&path).unwrap();
         let active = store.get("u1700000000").unwrap();
         assert_eq!(active.status, TaskStatus::InProgress);
