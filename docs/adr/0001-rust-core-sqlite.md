@@ -17,7 +17,7 @@ SHIORI needs dependable task operations without AI, an external server, or a pro
 
 ## Follow-up before 0.1 release
 
-1. Move embedded SQL schema into versioned migrations and add an upgrade/restore test.
+1. The initial SQLite schema now records `PRAGMA user_version = 1`, with a transactional, data-preserving v0 baseline upgrade and fail-closed future-version checks. Before v0.1 release, extract the embedded SQL into numbered migration files, test multiple real schema transitions and document a backup/recovery procedure.
 2. Make the persistence trait explicit, introduce scoped user identity and project ownership, and add transaction boundaries.
 3. Specify recurrence, dependency acyclicity, work schedules, time zones and conflict semantics.
 4. Build an authenticated loopback-first API used by desktop/Android and an independently authenticated MCP adapter.
