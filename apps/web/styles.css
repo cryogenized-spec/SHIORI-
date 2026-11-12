@@ -47,3 +47,10 @@
 
 /* Ensure the dark rail footnote meets WCAG text-contrast requirements. */
 .rail-footer { color: #beafc1; }
+
+/* M2 demo attention and saved ordering controls */
+.sort-control{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);white-space:nowrap}
+.sort-control select{max-width:112px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 7px;cursor:pointer}
+.sort-control select:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
+.attention-note{margin-bottom:15px;padding:12px 14px;border:1px solid var(--line);background:var(--panel2);border-radius:10px;color:var(--muted);font-size:12px;line-height:1.5}
+@media(max-width:720px){.sort-control{font-size:10px}.sort-control select{max-width:82px;padding:8px 4px}}
