@@ -121,6 +121,85 @@
     renderSavedViews();
   }
   renderSavedViews();
+
+  // The Android WebView JSON format is not the Rust/SQLite database format.
+  const ANDROID_BACKUP_FORMAT='shiori-android-local-v1';
+  const MAX_BACKUP_CHARS=1000000;
+  window.shioriExportBackup=()=>{
+    if(mode!=='android-local')return null;
+    const json=JSON.stringify({format:ANDROID_BACKUP_FORMAT,
+      exported_at:new Date().toISOString(),tasks,saved_views:savedViews,sort:sortMode});
+    return json.length<=MAX_BACKUP_CHARS?json:null;
+  };
+  window.shioriRestoreBackup=(raw)=>{
+    if(mode!=='android-local'||typeof raw!=='string'||raw.length>MAX_BACKUP_CHARS)return false;
+    try{
+      const data=JSON.parse(raw);
+      if(!data||data.format!==ANDROID_BACKUP_FORMAT||!Array.isArray(data.tasks)
+         ||data.tasks.length>5000||!Array.isArray(data.saved_views)
+         ||data.saved_views.length>30)return false;
+      const ids=new Set();
+      const restored=data.tasks.map(item=>{
+        if(!item||typeof item!=='object'||Array.isArray(item))throw new Error('task');
+        const title=item.title,project=item.project,notes=item.description||'';
+        const id=item.id,priority=item.priority,status=item.status;
+        const due=item.due||'';
+        if(typeof id!=='string'||!id||id.length>128||ids.has(id)
+           ||typeof title!=='string'||!title.trim()||title.length>120
+           ||typeof project!=='string'||!project.trim()||project.length>160
+           ||typeof notes!=='string'||notes.length>6000
+           ||!['low','medium','high','urgent'].includes(priority)
+           ||!['todo','progress','done'].includes(status)
+           ||typeof due!=='string'||(due!==''&&!/^\d{4}-\d{2}-\d{2}$/.test(due))
+           ||(item.mins!=null&&(!Number.isInteger(item.mins)||item.mins<1||item.mins>1440))
+           ||(item.assigneeId!=null&&(typeof item.assigneeId!=='string'
+              ||!/^[A-Za-z0-9._:-]{1,64}$/.test(item.assigneeId))))throw new Error('fields');
+        if(item.tags!=null&&(!Array.isArray(item.tags)||item.tags.length>16
+           ||item.tags.some(t=>typeof t!=='string'||t.length>50)))throw new Error('tags');
+        ids.add(id);
+        return {id,title:title.trim(),description:notes,project:project.trim(),
+          priority,status,due,tags:item.tags||[],mins:item.mins??null,
+          assigneeId:item.assigneeId??null,
+          createdAt:typeof item.createdAt==='string'&&item.createdAt.length<=64
+            ?item.createdAt:new Date().toISOString(),
+          version:Number.isInteger(item.version)&&item.version>0?item.version:1};
+      });
+      const views=data.saved_views.map(entry=>{
+        if(!entry||typeof entry!=='object'
+           ||typeof entry.name!=='string'||!entry.name.trim()||entry.name.length>40
+           ||!['today','attention','inbox','board'].includes(entry.view)
+           ||!['all','urgent','high','medium','low'].includes(entry.filter)
+           ||!['focus','fifo','due','priority'].includes(entry.sort)
+           ||typeof entry.query!=='string'||entry.query.length>250)throw new Error('view');
+        return {name:entry.name.trim(),view:entry.view,filter:entry.filter,
+          sort:entry.sort,query:entry.query};
+      });
+      const order=['focus','fifo','due','priority'].includes(data.sort)?data.sort:'focus';
+      const oldTasks=localStorage.getItem(taskStoreKey),
+        oldViews=localStorage.getItem('shiori-saved-views'),
+        oldSort=localStorage.getItem('shiori-demo-sort');
+      try{
+        localStorage.setItem(taskStoreKey,JSON.stringify(restored));
+        localStorage.setItem('shiori-saved-views',JSON.stringify(views));
+        localStorage.setItem('shiori-demo-sort',order);
+      }catch{
+        // Best-effort rollback if the Android WebView storage is out of quota.
+        try{
+          if(oldTasks===null)localStorage.removeItem(taskStoreKey);
+          else localStorage.setItem(taskStoreKey,oldTasks);
+          if(oldViews===null)localStorage.removeItem('shiori-saved-views');
+          else localStorage.setItem('shiori-saved-views',oldViews);
+          if(oldSort===null)localStorage.removeItem('shiori-demo-sort');
+          else localStorage.setItem('shiori-demo-sort',oldSort);
+        }catch{}
+        return false;
+      }
+      tasks=restored;savedViews=views;sortMode=order;
+      $('#sortMode').value=sortMode;
+      renderSavedViews();setView('today');toast('Offline backup restored');
+      return true;
+    }catch{return false;}
+  };
   let calendarExpanded = true;
   try { calendarExpanded = localStorage.getItem('shiori-calendar-expanded') !== 'false'; } catch {}
   let calendarSelected = null;
@@ -192,7 +271,7 @@
   function renderTimeline(){return `<div class="timeline">${Array.from({length:7},(_,i)=>{let d=new Date(`${newDate(i)}T12:00:00`);let matches=tasks.filter(t=>t.due===newDate(i));return `<section class="timeline-day"><header>${new Intl.DateTimeFormat('en-GB',{weekday:'short'}).format(d)}<b>${d.getDate()}</b></header>${matches.map(t=>`<div class="timeline-pill" data-detail="${escapeHTML(t.id)}">${escapeHTML(t.title)}</div>`).join('')}${!matches.length?'<div style="font-size:10px;color:var(--faint);margin-top:14px">Open space</div>':''}</section>`}).join('')}</div>`;}
   function renderReports(){const c=count(),pct=c.all?Math.round(c.done/c.all*100):0;const projects=mode==='demo'?Object.keys(projectDescriptions):[...new Set(tasks.map(t=>t.project))];return `<div class="report-grid"><article class="report-card"><div class="section-eyebrow">COMPLETION RATE</div><div class="report-big">${pct}%</div><p>${c.done} tasks complete across ${c.all} ${mode==='demo'?'demo':'local'} tasks.</p><div class="report-line"><span>Progress</span><div><span style="width:${pct}%"></span></div><b>${pct}%</b></div></article><article class="report-card"><div class="section-eyebrow">PORTFOLIO HEALTH</div><div class="report-big">${projects.length.toString().padStart(2,'0')}</div><p>Projects in progress. All enterprise report types should eventually be freely accessible.</p>${projects.map(p=>{let a=tasks.filter(t=>t.project===p);let n=Math.round(a.filter(t=>t.status==='done').length/(a.length||1)*100);return `<div class="report-line"><span>${escapeHTML(p)}</span><div><span style="width:${n}%"></span></div><b>${n}%</b></div>`}).join('')}</article></div>`;}
   function renderAutomations(){return `<div class="settings-list">${[['Recurring work','Automatic task generation from repeat rules.','Planned'],['Rules & triggers','When status, date or project changes, take a defined action.','Planned'],['Webhooks','Connect external services through auditable, permission-controlled events.','Planned'],['MCP actions','Let authorized AI assistants work with tasks through typed tools.','Planned']].map(([n,d,s])=>`<article class="automation-card"><div><h3>${n}</h3><p>${d}</p><span class="status-tag">${s.toUpperCase()} · NOT IMPLEMENTED</span></div><button data-preview-feature="${n}">Preview</button></article>`).join('')}</div>`;}
-  function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
+  function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='android-local'?'<div class="settings-actions"><button type="button" id="exportAndroidBackup">Export JSON backup</button><button type="button" id="importAndroidBackup">Restore backup</button></div>':''}${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
   function renderUpcoming(){let upcoming=[...tasks].filter(t=>t.status!=='done' && t.due>=newDate()).sort((a,b)=>a.due.localeCompare(b.due)).slice(0,3);$('#upcoming').innerHTML=upcoming.map(t=>{const d=new Date(`${t.due}T12:00:00`);return `<div class="upcoming-item"><div class="upcoming-date"><div>${d.getDate()}<small>${new Intl.DateTimeFormat('en-GB',{month:'short'}).format(d).toUpperCase()}</small></div></div><div class="upcoming-main"><b>${escapeHTML(t.title)}</b><span>${escapeHTML(t.project)} · ${t.mins==null?'No estimate':t.mins+' min estimate'}</span></div></div>`}).join('');}
   function setView(next){view=next;query='';$('#searchInput').value='';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const v=views[view];$('#breadcrumbCurrent').textContent=v[0];$('#pageTitle').innerHTML=escapeHTML(v[1].replace(/\.$/,''))+'<span class="period">.</span>';$('#pageSubtitle').textContent=v[2];$('#sectionEyebrow').textContent=v[3];$('#sectionTitle').textContent=v[4];const regular=['today','attention','inbox','board'];$('#hero').style.display=view==='today'?'flex':'none';$('#stats').style.display=view==='today'||view==='reports'?'grid':'none';$('.quick-search').style.display=regular.includes(view)?'flex':'none';$('#filterButton').style.display=regular.includes(view)?'flex':'none';$('.sort-control').style.display=regular.includes(view)?'inline-flex':'none';$('#viewSwitch').style.display=regular.includes(view)?'flex':'none';$('#viewSwitch').innerHTML=view==='board'?`${icon('check-circle')} List`:`${icon('columns')} Board`;render();closeSidebar();window.scrollTo({top:0,behavior:'instant'});}
   function render(){renderStats();renderUpcoming();renderCalendar();if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=html;$('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
@@ -310,6 +389,12 @@
     const theme=e.target.closest('button[data-theme]');if(theme){setTheme(theme.dataset.theme);return;}
     const close=e.target.closest('[data-close-modal]');if(close){closeModal();return;}
     if(e.target.closest('[data-close-detail]')){$('#detailOverlay').classList.remove('open');return;}
+    if(e.target.id==='exportAndroidBackup'&&mode==='android-local'){
+      window.location.href='shiori-backup://export';return;
+    }
+    if(e.target.id==='importAndroidBackup'&&mode==='android-local'){
+      window.location.href='shiori-backup://import';return;
+    }
     if(e.target.closest('[data-preview-feature]')){toast('Feature preview only · planned for the roadmap');return;}
     if(e.target.id==='resetDemo'){if(mode!=='demo'){toast('Reset is only for demo records');return;}tasks=defaultTasks.map(t=>({...t, tags:[...t.tags]}));save();render();toast('Sample tasks restored');}
   });
