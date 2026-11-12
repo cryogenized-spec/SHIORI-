@@ -199,6 +199,21 @@
   function closeSidebar(){$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');}
   function openModal(){$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
   function closeModal(){$('#taskModal').classList.remove('open');$('#taskModal').setAttribute('aria-hidden','true');}
+  // Dismiss exactly one surface per Back/Escape press, topmost first.
+  // The native Android Activity sends a cancelable shiori-native-back event;
+  // this keeps the browser UI and Android system navigation in agreement.
+  function dismissTopLayer(){
+    if($('#editModal').classList.contains('open')){closeEdit();return true;}
+    if($('#taskModal').classList.contains('open')){closeModal();return true;}
+    if($('#detailOverlay').classList.contains('open')){
+      $('#detailOverlay').classList.remove('open');activeDetail=null;return true;
+    }
+    if($('#sidebar').classList.contains('open')){closeSidebar();return true;}
+    return false;
+  }
+  window.addEventListener('shiori-native-back',event=>{
+    if(dismissTopLayer())event.preventDefault();
+  });
   function closeEdit(){
     $('#editModal').classList.remove('open');
     $('#editModal').setAttribute('aria-hidden','true');
@@ -381,7 +396,15 @@
   $('#detailOverlay').addEventListener('click',e=>{if(e.target.id==='detailOverlay')$('#detailOverlay').classList.remove('open');});
   function setTheme(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem('shiori-theme',t)}catch{}$('#themeToggle').innerHTML=icon(t==='dark'?'sun':'moon');}
   $('#themeToggle').addEventListener('click',()=>setTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'));
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeEdit();closeSidebar();$('#detailOverlay').classList.remove('open');}if(e.target.matches('input,textarea,select'))return;if(e.key==='/'){e.preventDefault();$('#searchInput').focus();}if(e.key.toLowerCase()==='n' && !e.metaKey && !e.ctrlKey){openModal();}});
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){
+      if(dismissTopLayer())e.preventDefault();
+      return;
+    }
+    if(e.target.matches('input,textarea,select'))return;
+    if(e.key==='/'){e.preventDefault();$('#searchInput').focus();}
+    if(e.key.toLowerCase()==='n' && !e.metaKey && !e.ctrlKey){openModal();}
+  });
   let dragged=null;document.addEventListener('dragstart',e=>{const card=e.target.closest('[data-drag]');if(card){dragged=card.dataset.drag;card.classList.add('dragging');}});document.addEventListener('dragend',()=>{$$('.dragging').forEach(c=>c.classList.remove('dragging'));dragged=null;});document.addEventListener('dragover',e=>{const col=e.target.closest('[data-drop]');if(col){e.preventDefault();col.classList.add('drag-over');}});document.addEventListener('dragleave',e=>{const col=e.target.closest('[data-drop]');if(col && !col.contains(e.relatedTarget))col.classList.remove('drag-over');});document.addEventListener('drop',e=>{const col=e.target.closest('[data-drop]');if(col && dragged){
     e.preventDefault();const t=tasks.find(x=>x.id===dragged);
     if(t){
