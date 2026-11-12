@@ -10,6 +10,18 @@ This is a staged, reviewable prototype built on PR #1. **It does not complete M2
 
 ## M3: local one-day deterministic time-block preview
 
+For persisted task effort and prerequisites:
+
+```bash
+cargo run --locked -p shiori-cli -- add "Prepare" --minutes 45
+cargo run --locked -p shiori-cli -- add "Publish" --minutes 30
+cargo run --locked -p shiori-cli -- depends <publish-task-id> --on <prepare-task-id>
+cargo run --locked -p shiori-cli -- edit <publish-task-id> --minutes 60
+```
+
+Task records retain their IDs and revisions when estimates and dependencies change. The database v1→v2 upgrade preserves previous task rows and deletion tombstones.
+
+
 The pure Rust `shiori_core::scheduling::plan_day` accepts explicit UTC windows, occupied intervals, task IDs, duration estimates, priorities, due calendar days, and prerequisite IDs. It generates nonoverlapping proposals, schedules completed prerequisites first (or requires them in `completed_ids`), and returns all unscheduled tasks with either `NoCapacity` or `BlockedByDependency`. The operation does not write to tasks or modify calendars, and it needs no network, AI or API key.
 
 For a CLI demo using a **fixed** UTC offset (120 minutes is South African Standard Time), run:
@@ -21,10 +33,10 @@ cargo run --locked -p shiori-cli -- plan 2026-11-12 \
   --utc-offset-minutes 120 --default-minutes 30
 ```
 
-The CLI does not yet store task duration estimates or dependencies: each pending task receives the supplied default duration, and its prerequisite list is empty. The pure planner supports prerequisite sequences for later wiring. The offset flag is deliberately explicit; **a fixed UTC offset does not substitute for IANA timezone rules or DST**. The caller must supply correctly interpreted UTC windows. Never apply this preview directly to a user's calendar without review.
+The CLI now stores optional task estimates (1–1440 minutes) and prerequisite links in SQLite schema v2. The planner consumes stored estimates and prerequisite links, including completed prerequisites; tasks without estimates use the supplied `--default-minutes` value. A deleted or missing prerequisite remains blocked. New links are validated transactionally for cycles and missing tasks. This still does not implement user assignment, external calendar integration, named timezones, or automatic schedule application. The offset flag is deliberately explicit; **a fixed UTC offset does not substitute for IANA timezone rules or DST**. The caller must supply correctly interpreted UTC windows. Never apply this preview directly to a user's calendar without review.
 
 ### Validation and future work
 
 CI runs Rust formatting, strict lint, unit/integration tests, release build, browser regression, SQLite performance, coverage and dependency audit. Regression tests cover overlapping occupied time, priority ordering, unschedulable overflow, missing/cyclic prerequisites, completed prerequisites, bad IDs/durations, attention rendering and saved FIFO selection.
 
-Remaining M2/M3 exit gates: identity/assignment model with actual fast indexed Assigned to Me queries and freshness indicators; native offline client/UI wired to Rust; durable saved views and notifications; stored duration and dependency graph with cycle rejection; configurable recurring work hours per user and holiday/timezone policies; busy-time calendar adapters; splitting and pinning; preview/apply/undo with conflict handling; and end-to-end device benchmarks.
+Remaining M2/M3 exit gates: identity/assignment model with actual fast indexed Assigned to Me queries and freshness indicators; native offline client/UI wired to Rust; durable saved views and notifications; configurable recurring work hours per user and holiday/timezone policies; busy-time calendar adapters; splitting and pinning; preview/apply/undo with conflict handling; and end-to-end device benchmarks.
