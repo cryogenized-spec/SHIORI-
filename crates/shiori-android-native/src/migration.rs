@@ -30,7 +30,25 @@ pub fn stage_legacy_backup(
     raw: &str,
 ) -> Result<ShadowReport, Box<dyn Error>> {
     validate_snapshot(raw)?;
-    let snapshot: Value = serde_json::from_str(raw)?;
+    let mut store = SqliteStore::open(db_path)?;
+
+    // Browser JSON exports include a newly generated exported_at on every
+    // invocation. Treat an identical task/view snapshot with only this
+    // timestamp changed as the same import; keep the originally archived
+    // bytes, so another tap on Stage is safely idempotent.
+    let previous = store.legacy_shadow_source()?;
+    let chosen_source = if let Some(previous) = &previous {
+        let mut old: Value = serde_json::from_str(previous)?;
+        let mut current: Value = serde_json::from_str(raw)?;
+        if let (Some(old), Some(current)) = (old.as_object_mut(), current.as_object_mut()) {
+            old.remove("exported_at");
+            current.remove("exported_at");
+        }
+        if old == current { previous.as_str() } else { raw }
+    } else {
+        raw
+    };
+    let snapshot: Value = serde_json::from_str(chosen_source)?;
     let root = snapshot.as_object().ok_or("backup root must be an object")?;
     let data = root
         .get("tasks")
@@ -114,8 +132,7 @@ pub fn stage_legacy_backup(
         converted.push(task);
     }
 
-    let mut store = SqliteStore::open(db_path)?;
-    let created = store.stage_legacy_shadow(&converted, raw)?;
+    let created = store.stage_legacy_shadow(&converted, chosen_source)?;
     let rows = store.list(TaskFilter::default())?;
     if rows.len() != converted.len() {
         return Err("shadow read-back count mismatch".into());
@@ -135,7 +152,7 @@ pub fn stage_legacy_backup(
             return Err("shadow read-back task mismatch".into());
         }
     }
-    if store.legacy_shadow_source()?.as_deref() != Some(raw) {
+    if store.legacy_shadow_source()?.as_deref() != Some(chosen_source) {
         return Err("original source backup was not archived".into());
     }
     Ok(ShadowReport {
@@ -203,6 +220,9 @@ mod tests {
             stage_legacy_backup(&path, &raw).unwrap().created,
             false
         );
+        let mut reexport: Value = serde_json::from_str(&raw).unwrap();
+        reexport["exported_at"] = Value::from("2026-11-12T20:15:00Z");
+        assert!(!stage_legacy_backup(&path, &reexport.to_string()).unwrap().created);
         let mut changed: Value = serde_json::from_str(&raw).unwrap();
         changed["tasks"][0]["title"] = Value::from("Newer record");
         assert!(stage_legacy_backup(&path, &changed.to_string()).is_err());
