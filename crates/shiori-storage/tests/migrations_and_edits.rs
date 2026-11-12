@@ -67,7 +67,10 @@ fn edits_survive_reopen_clear_dates_and_preserve_existing_identity() {
                 },
             )
             .unwrap_err();
-        assert!(matches!(invalid, StorageError::Domain(TaskError::EmptyTitle)));
+        assert!(matches!(
+            invalid,
+            StorageError::Domain(TaskError::EmptyTitle)
+        ));
         assert_eq!(db.get(&task.id).unwrap().notes, "Review milestone");
     }
     let reopened = SqliteStore::open(&path).unwrap();
@@ -109,7 +112,10 @@ fn unversioned_legacy_database_upgrades_without_dropping_tombstones() {
             })
             .unwrap();
         assert_eq!(all.len(), 2);
-        assert_eq!(all.iter().filter(|task| task.deleted_at.is_some()).count(), 1);
+        assert_eq!(
+            all.iter().filter(|task| task.deleted_at.is_some()).count(),
+            1
+        );
     }
     let conn = Connection::open(&path).unwrap();
     let version: i64 = conn
