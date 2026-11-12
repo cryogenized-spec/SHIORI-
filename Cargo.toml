@@ -5,6 +5,7 @@ members = [
   "crates/shiori-storage",
   "apps/shiori-cli",
   "tools/shiori-perf",
+  "crates/shiori-android-native",
 ]
 
 [workspace.package]
