@@ -269,7 +269,9 @@ impl SqliteStore {
         if requested.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(StorageError::DuplicateDependency);
         }
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version: i64 = tx
             .query_row(
                 "SELECT version FROM tasks WHERE id=?1 AND deleted_at IS NULL",
@@ -316,7 +318,10 @@ impl SqliteStore {
             tx.commit()?;
             return self.get(id);
         }
-        tx.execute("DELETE FROM task_dependencies WHERE task_id=?1", params![id])?;
+        tx.execute(
+            "DELETE FROM task_dependencies WHERE task_id=?1",
+            params![id],
+        )?;
         for dep in &requested {
             tx.execute(
                 "INSERT INTO task_dependencies(task_id,depends_on_id) VALUES (?1,?2)",
