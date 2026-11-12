@@ -140,7 +140,7 @@ fn default_database() -> Result<PathBuf, Box<dyn Error>> {
 fn bridge_dump(tasks: &[Task]) -> Result<(), Box<dyn Error>> {
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
-    out.write_all(b"SHIORI-BRIDGE-1\\n")?;
+    out.write_all(b"SHIORI-BRIDGE-1\n")?;
     for task in tasks {
         let fields = [
             task.id.clone(),
