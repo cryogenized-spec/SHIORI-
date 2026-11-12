@@ -3,9 +3,7 @@
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
-use shiori_core::{
-    Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate,
-};
+use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{
     error::Error,
