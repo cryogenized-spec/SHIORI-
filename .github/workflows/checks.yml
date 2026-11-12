@@ -123,6 +123,9 @@ jobs:
       - name: Check desktop and mobile interactions and latency
         if: ${{ !cancelled() }}
         run: python tests/ui_smoke.py --report browser-metrics.json
+      - name: Verify embedded Android offline task flows
+        if: ${{ !cancelled() }}
+        run: python tests/android_embedded_ui.py
       - name: Save local browser performance report
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
