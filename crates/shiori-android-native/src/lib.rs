@@ -3,8 +3,8 @@
 //! This is a transitional persistence layer. It deliberately does NOT import
 //! the WebView task format into canonical shiori-storage task records yet.
 //! Never silently overwrite the last native snapshot at Activity startup.
-mod migration;
 mod audit;
+mod migration;
 
 use chrono::NaiveDate;
 use jni::{
@@ -238,7 +238,6 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_stageLegacyBackup
     env.new_string(message)
         .map_or(std::ptr::null_mut(), |value| value.into_raw())
 }
-
 
 /// Verify the staged task database without modifying it or the live WebView
 /// records. A healthy but stale copy is never presented as current.
