@@ -18,4 +18,8 @@ internal object NativeVault {
     external fun stageLegacyBackup(shadowDatabasePath: String, backupJson: String): String?
     /** Read-only audit; reports whether the staged shadow still matches live tasks. */
     external fun auditLegacyShadow(shadowDatabasePath: String, backupJson: String): String?
+    /** Create an editable *separate* task database; never switches live tasks. */
+    external fun initializeWorkingCopy(workingDatabasePath: String, backupJson: String): String?
+    /** Revision-checked Rust task commands, only called by Kotlin dialogs. */
+    external fun workingCopyRequest(workingDatabasePath: String, requestJson: String): String?
 }
