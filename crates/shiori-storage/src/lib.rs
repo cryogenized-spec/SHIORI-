@@ -286,10 +286,6 @@ impl SqliteStore {
             let rows = stmt.query_map(params![id], |row| row.get(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
-        if current == requested {
-            tx.commit()?;
-            return self.get(id);
-        }
         for dep in &requested {
             let exists: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND deleted_at IS NULL)",
@@ -315,6 +311,10 @@ impl SqliteStore {
             if cycle {
                 return Err(StorageError::DependencyCycle);
             }
+        }
+        if current == requested {
+            tx.commit()?;
+            return self.get(id);
         }
         tx.execute("DELETE FROM task_dependencies WHERE task_id=?1", params![id])?;
         for dep in &requested {
