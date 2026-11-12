@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_estimate};
 use shiori_storage::{SqliteStore, TaskFilter};
-use std::{error::Error, path::PathBuf};
+use std::{error::Error, io::{self, Write}, path::PathBuf};
 
 #[derive(Parser)]
 #[command(name = "shiori", version, about = "SHIORI — offline task management")]
@@ -32,6 +32,9 @@ enum Command {
         /// Expected effort for this task, in minutes (1–1440)
         #[arg(long)]
         minutes: Option<i64>,
+        /// Optional task notes
+        #[arg(long, default_value = "")]
+        notes: String,
     },
     /// List tasks, optionally filtered
     List {
@@ -78,6 +81,14 @@ enum Command {
     },
     /// View one task by its ID
     Show { id: String },
+    /// Change a task's status, including in progress
+    Status {
+        id: String,
+        status: TaskStatus,
+    },
+    /// Private length-prefixed machine protocol for the local development UI
+    #[command(hide = true)]
+    BridgeDump,
     /// Complete a task
     Done { id: String },
     /// Reopen a task
@@ -124,6 +135,35 @@ fn default_database() -> Result<PathBuf, Box<dyn Error>> {
     Ok(PathBuf::from(home).join(".local/share/shiori/tasks.sqlite3"))
 }
 
+/// Length-prefixed UTF-8 fields (11 per record); framing supports arbitrary
+/// notes/newlines and does not depend on error-prone text table parsing.
+fn bridge_dump(tasks: &[Task]) -> Result<(), Box<dyn Error>> {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    out.write_all(b"SHIORI-BRIDGE-1\\n")?;
+    for task in tasks {
+        let fields = [
+            task.id.clone(),
+            task.title.clone(),
+            task.notes.clone(),
+            task.project.clone(),
+            task.priority.as_str().to_owned(),
+            task.status.as_str().to_owned(),
+            task.due_on.map(|d| d.to_string()).unwrap_or_default(),
+            task.created_at.to_rfc3339(),
+            task.updated_at.to_rfc3339(),
+            task.estimate_minutes.map(|n| n.to_string()).unwrap_or_default(),
+            task.version.to_string(),
+        ];
+        for field in &fields {
+            out.write_all(&u32::try_from(field.len())?.to_be_bytes())?;
+            out.write_all(field.as_bytes())?;
+        }
+    }
+    out.flush()?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let path = match args.database {
@@ -141,9 +181,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             priority,
             due,
             minutes,
+            notes,
         } => {
             let mut task = Task::new(&title, &project, priority, due)?;
             task.estimate_minutes = minutes.map(validate_estimate).transpose()?;
+            task.notes = notes;
             store.insert(&task)?;
             println!("Created {} [{}]", task.title, task.id);
         }
@@ -282,6 +324,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 updated.title, updated.version
             );
             println!("Prerequisites: {}", store.get_dependencies(&id)?.join(", "));
+        }
+        Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
+        Command::Status { id, status } => {
+            println!(
+                "Updated {}",
+                store.set_status(&id, status)?.title
+            );
         }
         Command::Show { id } => {
             let task = store.get(&id)?;
