@@ -325,6 +325,23 @@ impl SqliteStore {
         Ok(task)
     }
 
+    /// Status transition with optimistic concurrency for mobile/remote
+    /// clients. Stale versions must never overwrite a newer task update.
+    pub fn set_status_if_version(
+        &self,
+        id: &str,
+        expected_version: i64,
+        status: TaskStatus,
+    ) -> Result<Task, StorageError> {
+        let mut task = self.get(id)?;
+        if task.version != expected_version {
+            return Err(StorageError::RevisionConflict);
+        }
+        task.change_status(status);
+        self.update_existing(&task)?;
+        Ok(task)
+    }
+
     pub fn rename(&self, id: &str, title: &str) -> Result<Task, StorageError> {
         let mut task = self.get(id)?;
         task.rename(title)?;
