@@ -64,6 +64,7 @@ class MainActivity : Activity() {
                             "sync" -> persistVaultCopy(false)
                             "save" -> persistVaultCopy(true)
                             "recover" -> recoverVaultCopy()
+                            "stage" -> confirmCanonicalShadowStage()
                         }
                     }
                     return true
@@ -177,6 +178,9 @@ class MainActivity : Activity() {
     private fun vaultPath(): String =
         File(filesDir, "shiori-rust-snapshot.sqlite3").absolutePath
 
+    private fun shadowPath(): String =
+        File(filesDir, "shiori-canonical-preview.sqlite3").absolutePath
+
     /**
      * The bundled page only signals a custom-scheme navigation; Kotlin pulls
      * the current complete snapshot on the UI thread and passes it to Rust on
@@ -205,6 +209,54 @@ class MainActivity : Activity() {
                         if (!isFinishing && !isDestroyed) notifyUser(
                             if (saved) "Native SQLite safety copy saved"
                             else "Native safety copy could not be saved"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Explicit migration dry run only: canonical Rust tasks are written to a
+     * separate SQLite file, never to the working WebView store. A failure
+     * leaves both the browser data and native safety vault unchanged.
+     */
+    private fun confirmCanonicalShadowStage() {
+        AlertDialog.Builder(this)
+            .setTitle("Stage a Rust database preview?")
+            .setMessage(
+                "Create a separate, read-only migration preview using the current " +
+                    "offline tasks? SHIORI will not switch task storage or remove " +
+                    "your existing records. Export a JSON backup independently."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Stage preview") { _, _ ->
+                stageCanonicalShadow()
+            }
+            .show()
+    }
+
+    private fun stageCanonicalShadow() {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript("window.shioriExportBackup()") { result ->
+            val snapshot = try {
+                val json = JSONArray("[$result]").getString(0)
+                if (json.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(json).optString("format") != BACKUP_FORMAT
+                ) throw IllegalArgumentException("Unsupported backup")
+                json
+            } catch (_: Exception) {
+                notifyUser("Could not read a valid offline task snapshot")
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                val report = runCatching {
+                    NativeVault.stageLegacyBackup(shadowPath(), snapshot)
+                }.getOrNull()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        notifyUser(
+                            report ?: "Migration preview failed or conflicts with a prior stage"
                         )
                     }
                 }
