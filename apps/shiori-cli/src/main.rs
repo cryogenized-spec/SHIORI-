@@ -3,7 +3,7 @@
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
-use shiori_core::{Priority, Task, TaskPatch, TaskStatus};
+use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_estimate};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{error::Error, path::PathBuf};
 
@@ -29,6 +29,9 @@ enum Command {
         /// Due calendar day (YYYY-MM-DD)
         #[arg(long)]
         due: Option<NaiveDate>,
+        /// Expected effort for this task, in minutes (1–1440)
+        #[arg(long)]
+        minutes: Option<i64>,
     },
     /// List tasks, optionally filtered
     List {
@@ -59,9 +62,19 @@ enum Command {
         /// This preview does not yet implement named timezones or DST.
         #[arg(long, default_value_t = 120)]
         utc_offset_minutes: i32,
-        /// Estimate applied to every task until duration is stored on tasks.
+        /// Fallback estimate when a task has no saved duration (1–1440)
         #[arg(long, default_value_t = 30)]
         default_minutes: i64,
+    },
+    /// Replace a task's prerequisites. Use --clear to remove all.
+    Depends {
+        id: String,
+        /// Prerequisite task ID; repeat for more than one
+        #[arg(long = "on", conflicts_with = "clear")]
+        on: Vec<String>,
+        /// Clear all prerequisites
+        #[arg(long)]
+        clear: bool,
     },
     /// View one task by its ID
     Show { id: String },
@@ -88,6 +101,12 @@ enum Command {
         /// Remove the current due date
         #[arg(long)]
         clear_due: bool,
+        /// Expected effort in minutes (1–1440)
+        #[arg(long, conflicts_with = "clear_minutes")]
+        minutes: Option<i64>,
+        /// Clear the saved effort estimate
+        #[arg(long)]
+        clear_minutes: bool,
         /// Reject if the task changed since this revision was read
         #[arg(long)]
         if_version: Option<i64>,
@@ -114,15 +133,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let store = SqliteStore::open(path)?;
+    let mut store = SqliteStore::open(path)?;
     match args.command {
         Command::Add {
             title,
             project,
             priority,
             due,
+            minutes,
         } => {
-            let task = Task::new(&title, &project, priority, due)?;
+            let mut task = Task::new(&title, &project, priority, due)?;
+            task.estimate_minutes = minutes.map(validate_estimate).transpose()?;
             store.insert(&task)?;
             println!("Created {} [{}]", task.title, task.id);
         }
@@ -198,28 +219,37 @@ fn main() -> Result<(), Box<dyn Error>> {
                 (None, None) => Vec::new(),
                 _ => return Err("provide both break-start and break-end".into()),
             };
-            let pending: Vec<PlanningTask> = store
-                .list(TaskFilter::default())?
+            validate_estimate(default_minutes)?;
+            let all = store.list(TaskFilter::default())?;
+            let completed_ids: Vec<String> = all
+                .iter()
+                .filter(|task| task.status == TaskStatus::Done)
+                .map(|task| task.id.clone())
+                .collect();
+            let pending: Vec<PlanningTask> = all
                 .into_iter()
                 .filter(|task| task.status != TaskStatus::Done)
-                .map(|task| PlanningTask {
-                    id: task.id,
-                    title: task.title,
-                    priority: task.priority,
-                    due_on: task.due_on,
-                    minutes: default_minutes,
-                    dependencies: Vec::new(),
+                .map(|task| {
+                    Ok(PlanningTask {
+                        dependencies: store.get_dependencies(&task.id)?,
+                        minutes: task.estimate_minutes.unwrap_or(default_minutes),
+                        id: task.id,
+                        title: task.title,
+                        priority: task.priority,
+                        due_on: task.due_on,
+                    })
                 })
-                .collect();
+                .collect::<Result<_, shiori_storage::StorageError>>()?;
             let result = plan_day(PlanRequest {
                 day: date,
                 tasks: pending,
-                completed_ids: Vec::new(),
+                completed_ids,
                 availability,
                 busy,
             })?;
             println!("PREVIEW ONLY · {date} · fixed UTC offset {utc_offset_minutes} minutes");
-            println!("Each task uses a {default_minutes}-minute placeholder estimate.");
+            println!("Saved task estimates are used; missing estimates fall back to {default_minutes} minutes.");
+            println!("Saved prerequisite links are respected; missing/deleted prerequisites remain blocked.");
             println!("No task or calendar events were written.");
             for block in &result.blocks {
                 println!(
@@ -238,7 +268,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 println!("UNSCHEDULED {} · {}", item.task_id, reason);
             }
         }
-        Command::Show { id } => println!("{:#?}", store.get(&id)?),
+        Command::Depends { id, on, clear } => {
+            if !clear && on.is_empty() {
+                return Err("pass one or more --on task IDs, or use --clear".into());
+            }
+            let updated = store.set_dependencies(&id, &on)?;
+            println!("Updated prerequisites for {} [revision {}]", updated.title, updated.version);
+            println!("Prerequisites: {}", store.get_dependencies(&id)?.join(", "));
+        }
+        Command::Show { id } => {
+            let task = store.get(&id)?;
+            println!("{task:#?}");
+            println!("Prerequisites: {:?}", store.get_dependencies(&id)?);
+        },
         Command::Done { id } => println!(
             "Completed {}",
             store.set_status(&id, TaskStatus::Done)?.title
@@ -258,6 +300,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             priority,
             due,
             clear_due,
+            minutes,
+            clear_minutes,
             if_version,
         } => {
             let patch = TaskPatch {
@@ -266,6 +310,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 project,
                 priority,
                 due_on: if clear_due { Some(None) } else { due.map(Some) },
+                estimate_minutes: if clear_minutes {
+                    Some(None)
+                } else {
+                    minutes.map(Some)
+                },
             };
             let updated = match if_version {
                 Some(version) => store.edit_if_version(&id, version, patch)?,
