@@ -2,6 +2,7 @@ package dev.cryogenized.shiori
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.util.Log
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -9,6 +10,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.File
+import java.util.concurrent.Executors
 import android.os.Bundle
 import android.os.Build
 import android.window.OnBackInvokedCallback
@@ -33,6 +36,7 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private var backCallback: OnBackInvokedCallback? = null
     private var pendingExportJson: String? = null
+    private val vaultExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,6 +58,16 @@ class MainActivity : Activity() {
                 request: WebResourceRequest?
             ): Boolean {
                 val uri = request?.url ?: return true
+                if (uri.scheme == "shiori-vault") {
+                    if (request.isForMainFrame) {
+                        when (uri.host) {
+                            "sync" -> persistVaultCopy(false)
+                            "save" -> persistVaultCopy(true)
+                            "recover" -> recoverVaultCopy()
+                        }
+                    }
+                    return true
+                }
                 if (uri.scheme == "shiori-backup") {
                     if (request.isForMainFrame) {
                         when (uri.host) {
@@ -96,6 +110,29 @@ class MainActivity : Activity() {
                     )
                 }
             }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                if (url != "https://$HOST/index.html") return
+                // Read the native vault before creating the initial copy.
+                // Never overwrite an older snapshot merely because WebView
+                // happens to start with an empty/missing localStorage store.
+                vaultExecutor.execute {
+                    val result = runCatching { NativeVault.loadSnapshot(vaultPath()) }
+                    if (result.isFailure) {
+                        Log.w("SHIORI", "Native vault unavailable", result.exceptionOrNull())
+                        return@execute
+                    }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            webView.evaluateJavascript(
+                                "window.shioriNativeVaultEnabled=true", null
+                            )
+                            if (result.getOrNull() == null) persistVaultCopy(false)
+                        }
+                    }
+                }
+            }
         }
 
         setContentView(webView)
@@ -135,6 +172,63 @@ class MainActivity : Activity() {
         ByteArrayInputStream(ByteArray(0))
     )
 
+
+    /** Private path is supplied by the native app, never by web content. */
+    private fun vaultPath(): String =
+        File(filesDir, "shiori-rust-snapshot.sqlite3").absolutePath
+
+    /**
+     * The bundled page only signals a custom-scheme navigation; Kotlin pulls
+     * the current complete snapshot on the UI thread and passes it to Rust on
+     * a single I/O worker. There is no addJavascriptInterface.
+     */
+    private fun persistVaultCopy(showFeedback: Boolean) {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript("window.shioriExportBackup()") { result ->
+            val snapshot = try {
+                val json = JSONArray("[$result]").getString(0)
+                if (json.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(json).optString("format") != BACKUP_FORMAT
+                ) throw IllegalArgumentException("Not a supported snapshot")
+                json
+            } catch (_: Exception) {
+                if (showFeedback) notifyUser("No valid offline snapshot to save")
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                val saved = runCatching {
+                    NativeVault.storeSnapshot(vaultPath(), snapshot)
+                }.getOrDefault(false)
+                if (!saved) Log.w("SHIORI", "Rust SQLite safety-copy write failed")
+                if (showFeedback) {
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) notifyUser(
+                            if (saved) "Native SQLite safety copy saved"
+                            else "Native safety copy could not be saved"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun recoverVaultCopy() {
+        vaultExecutor.execute {
+            val snapshot = runCatching { NativeVault.loadSnapshot(vaultPath()) }.getOrNull()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (snapshot == null) {
+                    notifyUser("No native SQLite safety copy is available")
+                } else {
+                    try {
+                        askToRestore(snapshot)
+                    } catch (_: Exception) {
+                        notifyUser("Native safety copy could not be read")
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * Backup uses Storage Access Framework document pickers, not broad storage
@@ -273,6 +367,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        vaultExecutor.shutdown()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backCallback?.let {
                 onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it)
