@@ -34,6 +34,10 @@ pub enum StorageError {
     DuplicateDependency,
     #[error("this prerequisite would create a task cycle")]
     DependencyCycle,
+    #[error("legacy shadow import exists with different source records")]
+    LegacyShadowConflict,
+    #[error("legacy shadow import requires an empty canonical task database")]
+    LegacyShadowNotEmpty,
 }
 
 #[derive(Default)]
@@ -160,6 +164,85 @@ impl SqliteStore {
             params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(), task.completed_at.map(|t| t.to_rfc3339()), task.version, task.deleted_at.map(|t| t.to_rfc3339()), task.estimate_minutes, task.assignee_id]
         )?;
         Ok(())
+    }
+
+    /// Import a legacy Android backup into a *separate* canonical database,
+    /// preserving the raw source in the same transaction as all task rows.
+    ///
+    /// This is staging only: no existing task database, source backup, or
+    /// WebView storage is mutated. Importing the same source is idempotent;
+    /// different content is rejected rather than silently rewriting records.
+    pub fn stage_legacy_shadow(
+        &mut self,
+        imported: &[Task],
+        source_backup: &str,
+    ) -> Result<bool, StorageError> {
+        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS legacy_shadow_source (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                payload TEXT NOT NULL,
+                imported_at TEXT NOT NULL
+            );",
+        )?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT payload FROM legacy_shadow_source WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing == source_backup {
+                return Ok(false);
+            }
+            return Err(StorageError::LegacyShadowConflict);
+        }
+        let task_count: i64 = tx.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
+        if task_count != 0 {
+            return Err(StorageError::LegacyShadowNotEmpty);
+        }
+        for task in imported {
+            tx.execute(
+                "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes,assignee_id)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                params![
+                    task.id, task.title, task.notes, task.project,
+                    task.priority.as_str(), task.status.as_str(),
+                    task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(),
+                    task.updated_at.to_rfc3339(),
+                    task.completed_at.map(|t| t.to_rfc3339()),
+                    task.version, task.deleted_at.map(|t| t.to_rfc3339()),
+                    task.estimate_minutes, task.assignee_id
+                ],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO legacy_shadow_source(id,payload,imported_at)
+             VALUES(1,?1,datetime('now'))",
+            params![source_backup],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Full legacy JSON sidecar, including fields not present in canonical
+    /// task records (tags, saved views, sort mode, original timestamps).
+    pub fn legacy_shadow_source(&self) -> Result<Option<String>, StorageError> {
+        let exists: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type='table' AND name='legacy_shadow_source'",
+            [],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Ok(None);
+        }
+        Ok(self.db.query_row(
+            "SELECT payload FROM legacy_shadow_source WHERE id=1",
+            [],
+            |row| row.get(0),
+        ).optional()?)
     }
 
     pub fn get(&self, id: &str) -> Result<Task, StorageError> {
