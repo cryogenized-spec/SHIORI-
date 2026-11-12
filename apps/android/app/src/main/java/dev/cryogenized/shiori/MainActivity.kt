@@ -6,6 +6,7 @@ import android.util.Log
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import android.widget.EditText
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -66,6 +67,7 @@ class MainActivity : Activity() {
                             "recover" -> recoverVaultCopy()
                             "stage" -> confirmCanonicalShadowStage()
                             "audit" -> auditCanonicalShadow()
+                            "working" -> openOrCreateWorkingCopy()
                         }
                     }
                     return true
@@ -182,6 +184,10 @@ class MainActivity : Activity() {
     private fun shadowPath(): String =
         File(filesDir, "shiori-canonical-preview.sqlite3").absolutePath
 
+    /** Separate from the live WebView store, vault and immutable audit shadow. */
+    private fun workingPath(): String =
+        File(filesDir, "shiori-native-working-v1.sqlite3").absolutePath
+
     /**
      * The bundled page only signals a custom-scheme navigation; Kotlin pulls
      * the current complete snapshot on the UI thread and passes it to Rust on
@@ -295,6 +301,212 @@ class MainActivity : Activity() {
                             .setPositiveButton("OK", null)
                             .show()
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * Experimental native task workspace. It starts with an explicit,
+     * user-confirmed, one-time copy of current Android records into a THIRD
+     * private SQLite file. Native edits never propagate into WebView tasks.
+     */
+    private fun openOrCreateWorkingCopy() {
+        if (File(workingPath()).exists()) {
+            showWorkingCopy()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Create an editable Rust working copy?")
+            .setMessage(
+                "Make a separate experimental copy of your current tasks to test " +
+                    "native Rust task editing. Your existing Android task list, " +
+                    "JSON backups and migration preview will remain unchanged. " +
+                    "Changes in this working copy will NOT appear in your normal list."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Create separate copy") { _, _ -> createWorkingCopy() }
+            .show()
+    }
+
+    private fun createWorkingCopy() {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript("window.shioriExportBackup()") { rawResult ->
+            val snapshot = try {
+                val json = JSONArray("[$rawResult]").getString(0)
+                if (json.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(json).optString("format") != BACKUP_FORMAT
+                ) throw IllegalArgumentException("Unsupported backup")
+                json
+            } catch (_: Exception) {
+                notifyUser("Could not read the current Android task records")
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                val message = runCatching {
+                    NativeVault.initializeWorkingCopy(workingPath(), snapshot)
+                }.getOrNull()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (message == null) {
+                        notifyUser("Could not create a safe Rust working copy; original tasks unchanged")
+                    } else {
+                        notifyUser(message)
+                        showWorkingCopy()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun workingCommand(action: JSONObject): JSONObject {
+        action.put("protocol", "shiori-native-working-v1")
+        val raw = NativeVault.workingCopyRequest(workingPath(), action.toString())
+            ?: throw IOException("Native task engine is unavailable")
+        return JSONObject(raw)
+    }
+
+    /** All native task I/O is serialized away from Android's UI thread. */
+    private fun showWorkingCopy() {
+        vaultExecutor.execute {
+            val result = runCatching {
+                workingCommand(JSONObject().put("op", "list"))
+            }.getOrElse { JSONObject().put("ok", false).put("error", "Could not read native tasks") }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (!result.optBoolean("ok")) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Native working copy unavailable")
+                        .setMessage(
+                            result.optString("error", "Unknown error") +
+                                ". Original Android tasks were not changed."
+                        )
+                        .setPositiveButton("OK", null)
+                        .show()
+                    return@runOnUiThread
+                }
+                val rows = result.optJSONArray("tasks") ?: JSONArray()
+                val labels = Array(rows.length()) { index ->
+                    val task = rows.getJSONObject(index)
+                    val status = task.optString("status")
+                    val mark = if (status == "done") "✓ " else "○ "
+                    mark + task.optString("title") + " · " + task.optString("project")
+                }
+                val total = result.optInt("total")
+                val builder = AlertDialog.Builder(this)
+                    .setTitle("Native Rust tasks · working copy")
+                    .setMessage(
+                        "Experimental, separate SQLite copy. These edits do not affect your " +
+                            "normal Android tasks. Showing ${rows.length()} of $total records."
+                    )
+                    .setNeutralButton("Add task") { _, _ -> promptNativeTask() }
+                    .setNegativeButton("Close", null)
+                    .setPositiveButton("Refresh") { _, _ -> showWorkingCopy() }
+                if (labels.isNotEmpty()) {
+                    builder.setItems(labels) { _, index ->
+                        showNativeTaskActions(rows.getJSONObject(index))
+                    }
+                }
+                builder.show()
+            }
+        }
+    }
+
+    private fun promptNativeTask() {
+        val input = EditText(this).apply {
+            hint = "Native task title"
+            isSingleLine = true
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Add to Rust working copy")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Add") { _, _ ->
+                val title = input.text.toString().trim()
+                if (title.isEmpty()) {
+                    notifyUser("Task title cannot be empty")
+                } else {
+                    sendWorkingMutation(JSONObject()
+                        .put("op", "create")
+                        .put("title", title)
+                        .put("project", "Native preview")
+                        .put("priority", "medium"))
+                }
+            }
+            .show()
+    }
+
+    private fun showNativeTaskActions(task: JSONObject) {
+        val complete = task.optString("status") == "done"
+        val actions = arrayOf(
+            "Rename in working copy",
+            if (complete) "Reopen in working copy" else "Complete in working copy",
+            "Soft-delete from working copy"
+        )
+        AlertDialog.Builder(this)
+            .setTitle(task.optString("title"))
+            .setMessage("These actions affect only the separate Rust working copy.")
+            .setItems(actions) { _, selected ->
+                val id = task.getString("id")
+                val version = task.getLong("version")
+                when (selected) {
+                    0 -> {
+                        val input = EditText(this).apply {
+                            setText(task.optString("title"))
+                            isSingleLine = true
+                        }
+                        AlertDialog.Builder(this)
+                            .setTitle("Rename native task")
+                            .setView(input)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Save") { _, _ ->
+                                sendWorkingMutation(JSONObject()
+                                    .put("op", "rename")
+                                    .put("id", id)
+                                    .put("expected_version", version)
+                                    .put("title", input.text.toString().trim()))
+                            }.show()
+                    }
+                    1 -> sendWorkingMutation(JSONObject()
+                        .put("op", "status")
+                        .put("id", id)
+                        .put("expected_version", version)
+                        .put("status", if (complete) "todo" else "done"))
+                    2 -> AlertDialog.Builder(this)
+                        .setTitle("Delete from Rust working copy?")
+                        .setMessage(
+                            "This preserves a deletion record in the separate Rust database. " +
+                                "Your normal Android tasks are untouched."
+                        )
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Delete from copy") { _, _ ->
+                            sendWorkingMutation(JSONObject()
+                                .put("op", "delete")
+                                .put("id", id)
+                                .put("expected_version", version))
+                        }.show()
+                }
+            }
+            .setNegativeButton("Back") { _, _ -> showWorkingCopy() }
+            .show()
+    }
+
+    private fun sendWorkingMutation(action: JSONObject) {
+        vaultExecutor.execute {
+            val result = runCatching { workingCommand(action) }.getOrElse {
+                JSONObject().put("ok", false).put("error", "Native storage unavailable")
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (result.optBoolean("ok")) {
+                    notifyUser("Saved to Rust working copy only")
+                    showWorkingCopy()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Native task not changed")
+                        .setMessage(result.optString("error", "Operation rejected"))
+                        .setPositiveButton("OK") { _, _ -> showWorkingCopy() }
+                        .show()
                 }
             }
         }
