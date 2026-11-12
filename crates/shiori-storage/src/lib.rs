@@ -1,12 +1,14 @@
 //! SQLite persistence adapter. Domain validation stays in `shiori-core`.
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{
-    Connection, OptionalExtension, Row, params, params_from_iter,
+    Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter,
     types::{Type, Value},
 };
-use shiori_core::{Priority, Task, TaskError, TaskStatus};
+use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus};
 use std::{path::Path, str::FromStr};
 use thiserror::Error;
+
+const SCHEMA_VERSION: i64 = 1;
 
 const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at FROM tasks";
 
@@ -18,6 +20,12 @@ pub enum StorageError {
     Domain(#[from] TaskError),
     #[error("task not found")]
     NotFound,
+    #[error("task was changed by another writer")]
+    RevisionConflict,
+    #[error("unsupported SQLite schema version {found} (latest supported: {supported})")]
+    UnsupportedSchemaVersion { found: i64, supported: i64 },
+    #[error("unversioned SQLite database has an incompatible task schema")]
+    IncompatibleLegacySchema,
 }
 
 #[derive(Default)]
@@ -43,11 +51,20 @@ impl SqliteStore {
         Self::initialize(Connection::open_in_memory()?)
     }
 
-    fn initialize(db: Connection) -> Result<Self, StorageError> {
-        db.execute_batch(
-            r#"
-            PRAGMA foreign_keys = ON;
-            PRAGMA busy_timeout = 4000;
+    fn initialize(mut db: Connection) -> Result<Self, StorageError> {
+        db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 4000;")?;
+        let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version != 0 && version != SCHEMA_VERSION {
+            return Err(StorageError::UnsupportedSchemaVersion {
+                found: version,
+                supported: SCHEMA_VERSION,
+            });
+        }
+        if version == 0 {
+            // The initial unversioned schema is our v0 legacy fixture. Upgrade
+            // in one IMMEDIATE transaction; an interrupted upgrade rolls back.
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute_batch(r#"
             CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -65,8 +82,23 @@ impl SqliteStore {
             CREATE INDEX IF NOT EXISTS idx_tasks_active_due ON tasks(deleted_at, due_on, status);
             CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project, deleted_at);
             CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
-        "#,
-        )?;
+        "#)?;
+            let columns = {
+                let mut stmt = tx.prepare("PRAGMA table_info(tasks)")?;
+                stmt.query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let expected = [
+                "id", "title", "notes", "project", "priority", "status",
+                "due_on", "created_at", "updated_at", "completed_at",
+                "version", "deleted_at",
+            ];
+            if columns.iter().map(String::as_str).collect::<Vec<_>>() != expected {
+                return Err(StorageError::IncompatibleLegacySchema);
+            }
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
+        }
         Ok(Self { db })
     }
 
@@ -137,6 +169,33 @@ impl SqliteStore {
         Ok(task)
     }
 
+    /// Edit persisted fields without losing task identity or timestamps.
+    /// Existing revisions are checked by the update's SQL WHERE clause.
+    pub fn edit(&self, id: &str, patch: TaskPatch) -> Result<Task, StorageError> {
+        let mut task = self.get(id)?;
+        if task.apply_patch(patch)? {
+            self.update_existing(&task)?;
+        }
+        Ok(task)
+    }
+
+    /// Explicit optimistic-concurrency contract for future REST/MCP adapters.
+    pub fn edit_if_version(
+        &self,
+        id: &str,
+        expected_version: i64,
+        patch: TaskPatch,
+    ) -> Result<Task, StorageError> {
+        let mut task = self.get(id)?;
+        if task.version != expected_version {
+            return Err(StorageError::RevisionConflict);
+        }
+        if task.apply_patch(patch)? {
+            self.update_existing(&task)?;
+        }
+        Ok(task)
+    }
+
     pub fn delete(&self, id: &str) -> Result<(), StorageError> {
         let mut task = self.get(id)?;
         task.soft_delete();
@@ -145,11 +204,18 @@ impl SqliteStore {
 
     fn update_existing(&self, task: &Task) -> Result<(), StorageError> {
         let changed = self.db.execute(
-            "UPDATE tasks SET title=?2, status=?3, updated_at=?4, completed_at=?5, version=?6, deleted_at=?7 WHERE id=?1 AND version=?8",
-            params![task.id, task.title, task.status.as_str(), task.updated_at.to_rfc3339(), task.completed_at.map(|t|t.to_rfc3339()), task.version, task.deleted_at.map(|t|t.to_rfc3339()), task.version - 1]
+            "UPDATE tasks SET title=?2, notes=?3, project=?4, priority=?5, status=?6, due_on=?7, updated_at=?8, completed_at=?9, version=?10, deleted_at=?11 WHERE id=?1 AND version=?12 AND deleted_at IS NULL",
+            params![
+                task.id, task.title, task.notes, task.project, task.priority.as_str(),
+                task.status.as_str(), task.due_on.map(|d| d.to_string()),
+                task.updated_at.to_rfc3339(),
+                task.completed_at.map(|t| t.to_rfc3339()),
+                task.version, task.deleted_at.map(|t| t.to_rfc3339()),
+                task.version - 1
+            ]
         )?;
         if changed == 0 {
-            return Err(StorageError::NotFound);
+            return Err(StorageError::RevisionConflict);
         }
         Ok(())
     }
