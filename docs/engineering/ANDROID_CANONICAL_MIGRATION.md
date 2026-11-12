@@ -68,6 +68,39 @@ write canonical tombstones.
   real Android device. Physical-device testing of JNI and lifecycle operations
   is still required.
 
+## Read-only staged-migration audit (next M2 increment)
+
+Once a preview has been staged, **Settings → Your data → Audit staged Rust preview**
+performs an explicit on-demand audit. This action does **not** create a shadow
+database if one is missing, update staged tasks, overwrite the separate safety
+vault, or mutate WebView localStorage.
+
+The native Rust audit opens SQLite with read-only flags, runs an integrity
+check, verifies the expected schema version, loads the original archived
+backup, and compares canonical row count and task fields: IDs, titles, notes,
+projects, priorities, statuses, due dates, effort, assignments, revisions,
+no tombstones and reconstructable timestamps. Tags and saved views remain
+preserved in the archived source JSON but are not yet canonical tables.
+
+The current phone export is compared with the original source, ignoring only
+the changing export timestamp. Results distinguish:
+
+- **Missing preview:** a migration preview has not been staged.
+- **Verified and current:** canonical fields agree; the phone still matches.
+- **Verified but stale:** canonical data is internally sound, but live phone
+  data changed since staging. **Do not activate this copy.**
+- **Audit failed:** the database is invalid, missing data or inconsistent
+  with the archived source. Existing WebView tasks remain unchanged.
+
+Old backups without export/created timestamps can have inferred historical
+times that cannot be reconstructed; the audit explicitly reports how many
+timestamp fields were not fully verifiable.
+
+**Not a migration cutover, a restore method, or a release-gate pass.** The
+audit does not repair a stale or corrupt shadow file. Future promotion
+requires a separate, reviewed staging/rollback path. Physical-device
+verification for JNI, corrupted storage and process death is still needed.
+
 ## M2 exit work remaining
 
 1. Test preview staging and recovery on an actual Android device, including
