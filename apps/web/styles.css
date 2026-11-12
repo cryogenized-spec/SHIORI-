@@ -70,6 +70,7 @@
 .detail-actions .secondary-btn{flex:1;min-width:115px}
 .delete-task-btn{border-color:#ad6565!important;color:#da9696!important}
 .edit-revision-hint{font-size:11px;color:var(--muted);line-height:1.5;margin:14px 0 0}
+#editModal{z-index:95} /* Task editor must stay above the open detail drawer */
 #editModal .task-modal{max-height:calc(100dvh - 34px);overflow-y:auto}
 #editModal input:focus-visible,#editModal textarea:focus-visible,#editModal select:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
 
