@@ -100,10 +100,7 @@ fn find_free(
         let mut cursor = earliest
             .map(|time| time.max(window.start))
             .unwrap_or(window.start);
-        loop {
-            let Some(end) = cursor.checked_add_signed(length) else {
-                break;
-            };
+        while let Some(end) = cursor.checked_add_signed(length) {
             if end > window.end {
                 break;
             }
