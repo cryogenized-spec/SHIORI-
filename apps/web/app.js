@@ -209,7 +209,15 @@
     $('#editTaskPriority').value=t.priority;
     $('#editTaskDue').value=t.due||'';
     $('#editTaskEstimate').value=t.mins==null?'':String(t.mins);
-    $('#editTaskAssignee').value=t.assigneeId==='local'?'local':'';
+    const assigneeSelect=$('#editTaskAssignee');
+    assigneeSelect.replaceChildren(
+      new Option('Me · local workspace','local'),
+      new Option('Unassigned','')
+    );
+    if(t.assigneeId && t.assigneeId!=='local'){
+      assigneeSelect.add(new Option('Other: '+t.assigneeId,t.assigneeId));
+    }
+    assigneeSelect.value=t.assigneeId||'';
     $('#editModal').classList.add('open');
     $('#editModal').setAttribute('aria-hidden','false');
     setTimeout(()=>$('#editTaskName').focus(),0);
