@@ -85,15 +85,15 @@ impl SqliteStore {
         "#)?;
             let columns = {
                 let mut stmt = tx.prepare("PRAGMA table_info(tasks)")?;
-                stmt.query_map([], |row| row.get::<_, String>(1))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
+                let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
             };
             let expected = [
                 "id", "title", "notes", "project", "priority", "status",
                 "due_on", "created_at", "updated_at", "completed_at",
                 "version", "deleted_at",
             ];
-            if columns.iter().map(String::as_str).collect::<Vec<_>>() != expected {
+            if !columns.iter().map(String::as_str).eq(expected.iter().copied()) {
                 return Err(StorageError::IncompatibleLegacySchema);
             }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
