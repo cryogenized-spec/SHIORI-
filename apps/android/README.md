@@ -14,6 +14,14 @@ On Android, `app.js` enters `android-local` mode. It starts with an **empty pers
 
 **Architectural limitation:** this is a *native Android shell using an embedded browser storage backend*, **not yet the same Rust/SQLite database** as desktop. The task UI is shared, but storage engines are not; there is no sync between Android and desktop. WebView localStorage is not an adequate long-term backup mechanism. Do not describe this as the finished native Rust client, production backup system, or a distributable release.
 
+## On-device backup and restore (v0.1.2-dev)
+
+In **Settings → Your data**, choose **Export JSON backup**. Android opens the system document picker, where you save the JSON file in a location you control. To restore, select **Restore backup** and choose that file. SHIORI shows a native confirmation that restoration will replace the offline task list; Cancel leaves it unchanged.
+
+The backup includes offline tasks, saved views, and list sorting. Titles and notes are stored **in plain text**, so protect the exported document. Android's Storage Access Framework supplies the chosen file without Internet or broad external-storage permissions. Only the `shiori-android-local-v1` format is accepted; imports are validated before overwriting local data, with a 2 MB native file limit.
+
+**Limitations:** the file pickers still need real-phone testing. Rollback of WebView quota failures is best-effort, not a full database transaction. There is still no background/cloud backup or shared Rust/SQLite storage. Verify that an exported document exists before uninstalling a debug build.
+
 ## Open and build
 
 Use Android Studio with JDK 17, Android SDK API 36 and Android Gradle Plugin 9.4. The project is rooted at `apps/android` and uses Gradle 9.9.1. It links `apps/web` as a **packaged asset source** at build time; do not copy a second stale UI.
