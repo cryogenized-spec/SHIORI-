@@ -3,6 +3,8 @@
 //! This is a transitional persistence layer. It deliberately does NOT import
 //! the WebView task format into canonical shiori-storage task records yet.
 //! Never silently overwrite the last native snapshot at Activity startup.
+mod migration;
+
 use chrono::NaiveDate;
 use jni::{
     JNIEnv,
@@ -199,6 +201,37 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_storeSnapshot(
     } else {
         JNI_FALSE
     }
+}
+
+/// Stage the legacy backup into the canonical task schema in a *separate*
+/// private shadow database. Neither the active WebView store nor the existing
+/// native snapshot vault is modified. Return a short report for Kotlin.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_stageLegacyBackup(
+    mut env: JNIEnv,
+    _object: JObject,
+    target_path: JString,
+    raw: JString,
+) -> jstring {
+    let Ok(path) = env.get_string(&target_path) else {
+        return std::ptr::null_mut();
+    };
+    let path = String::from(path);
+    let Ok(raw) = env.get_string(&raw) else {
+        return std::ptr::null_mut();
+    };
+    let raw = String::from(raw);
+    let Ok(report) = migration::stage_legacy_backup(Path::new(&path), &raw) else {
+        return std::ptr::null_mut();
+    };
+    let message = format!(
+        "{} canonical tasks {}; {} inferred timestamp fields; original backup retained",
+        report.imported,
+        if report.created { "staged" } else { "already staged" },
+        report.inferred_timestamps
+    );
+    env.new_string(message)
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
 }
 
 #[cfg(test)]
