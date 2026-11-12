@@ -286,6 +286,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Show { id } => {
             let task = store.get(&id)?;
             println!("{task:#?}");
+            if let Some(minutes) = task.estimate_minutes {
+                println!("Estimated effort: {minutes} minutes");
+            } else {
+                println!("Estimated effort: not set");
+            }
             println!("Prerequisites: {:?}", store.get_dependencies(&id)?);
         }
         Command::Done { id } => println!(
