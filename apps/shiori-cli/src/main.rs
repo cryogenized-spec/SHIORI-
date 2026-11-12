@@ -3,7 +3,9 @@
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
-use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_estimate};
+use shiori_core::{
+    Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate,
+};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{
     error::Error,
@@ -39,6 +41,9 @@ enum Command {
         /// Optional task notes
         #[arg(long, default_value = "")]
         notes: String,
+        /// Local assignment identity (not authentication)
+        #[arg(long, default_value = "local")]
+        assign_to: String,
     },
     /// List tasks, optionally filtered
     List {
@@ -90,6 +95,9 @@ enum Command {
     /// Private length-prefixed machine protocol for the local development UI
     #[command(hide = true)]
     BridgeDump,
+    /// Local-only indexed assignment snapshot with blocker state
+    #[command(hide = true)]
+    BridgeAttention,
     /// Complete a task
     Done { id: String },
     /// Reopen a task
@@ -122,6 +130,12 @@ enum Command {
         /// Reject if the task changed since this revision was read
         #[arg(long)]
         if_version: Option<i64>,
+        /// Set local assignee identity
+        #[arg(long, conflicts_with = "unassign")]
+        assign_to: Option<String>,
+        /// Clear assignment
+        #[arg(long)]
+        unassign: bool,
     },
     /// Soft-delete a task (retains a tombstone)
     Remove {
@@ -146,7 +160,7 @@ fn default_database() -> Result<PathBuf, Box<dyn Error>> {
 fn bridge_dump(tasks: &[Task]) -> Result<(), Box<dyn Error>> {
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
-    out.write_all(b"SHIORI-BRIDGE-1\n")?;
+    out.write_all(b"SHIORI-BRIDGE-2\n")?;
     for task in tasks {
         let fields = [
             task.id.clone(),
@@ -162,6 +176,40 @@ fn bridge_dump(tasks: &[Task]) -> Result<(), Box<dyn Error>> {
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             task.version.to_string(),
+            task.assignee_id.clone().unwrap_or_default(),
+        ];
+        for field in &fields {
+            out.write_all(&u32::try_from(field.len())?.to_be_bytes())?;
+            out.write_all(field.as_bytes())?;
+        }
+    }
+    out.flush()?;
+    Ok(())
+}
+
+/// Separate indexed attention export; each record has the full task snapshot
+/// plus a final blocked flag, so the client cannot guess prerequisite state.
+fn bridge_attention(items: &[(Task, bool)]) -> Result<(), Box<dyn Error>> {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    out.write_all(b"SHIORI-ATTENTION-1\n")?;
+    for (task, blocked) in items {
+        let fields = [
+            task.id.clone(),
+            task.title.clone(),
+            task.notes.clone(),
+            task.project.clone(),
+            task.priority.as_str().to_owned(),
+            task.status.as_str().to_owned(),
+            task.due_on.map(|date| date.to_string()).unwrap_or_default(),
+            task.created_at.to_rfc3339(),
+            task.updated_at.to_rfc3339(),
+            task.estimate_minutes
+                .map(|minutes| minutes.to_string())
+                .unwrap_or_default(),
+            task.version.to_string(),
+            task.assignee_id.clone().unwrap_or_default(),
+            blocked.to_string(),
         ];
         for field in &fields {
             out.write_all(&u32::try_from(field.len())?.to_be_bytes())?;
@@ -190,9 +238,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             due,
             minutes,
             notes,
+            assign_to,
         } => {
             let mut task = Task::new(&title, &project, priority, due)?;
             task.estimate_minutes = minutes.map(validate_estimate).transpose()?;
+            task.assignee_id = Some(validate_assignee_id(&assign_to)?);
             task.notes = notes;
             store.insert(&task)?;
             println!("Created {} [{}]", task.title, task.id);
@@ -334,6 +384,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("Prerequisites: {}", store.get_dependencies(&id)?.join(", "));
         }
         Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
+        Command::BridgeAttention => {
+            bridge_attention(&store.assigned_attention("local")?)?;
+        }
         Command::Status { id, status } => {
             println!("Updated {}", store.set_status(&id, status)?.title);
         }
@@ -369,6 +422,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             minutes,
             clear_minutes,
             if_version,
+            assign_to,
+            unassign,
         } => {
             let patch = TaskPatch {
                 title,
@@ -380,6 +435,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Some(None)
                 } else {
                     minutes.map(Some)
+                },
+                assignee_id: if unassign {
+                    Some(None)
+                } else {
+                    assign_to.map(Some)
                 },
             };
             let updated = match if_version {
