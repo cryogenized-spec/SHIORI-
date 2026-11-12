@@ -14,9 +14,13 @@ Requires Rust **1.99.1** or newer and Cargo. On Linux:
 cargo test --workspace
 cargo run -p shiori-cli -- add "Review SHIORI task model" --project Development --priority high --due 2026-11-12
 cargo run -p shiori-cli -- list
+# Edit without overwriting other fields; remove due date explicitly:
+cargo run -p shiori-cli -- edit <task-id> --notes "Review the roadmap" --project Development --priority urgent --clear-due
+# Optionally require the revision displayed by "show" or a previous edit:
+cargo run -p shiori-cli -- edit <task-id> --title "Revised" --if-version 2
 ```
 
-By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support.
+By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support. Existing pre-versioning SQLite files are baselined transactionally to schema version 1 while retaining tasks and tombstones; unknown future schema versions are refused rather than overwritten. Full multi-version migrations and safe live backup are still future work.
 
 The web design concept runs standalone in Firefox by opening `apps/web/index.html`, or via a local static server:
 
