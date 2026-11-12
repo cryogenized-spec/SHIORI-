@@ -5,6 +5,7 @@
 //! Never silently overwrite the last native snapshot at Activity startup.
 mod audit;
 mod migration;
+mod working_copy;
 
 use chrono::NaiveDate;
 use jni::{
@@ -278,6 +279,56 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_auditLegacyShadow
             "Rust preview audit FAILED: database/source could not be verified. Existing tasks were not changed.".to_owned(),
     };
     env.new_string(report)
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Explicit, opt-in seed of a separate editable Rust SQLite working copy.
+/// The live WebView store, immutable shadow and safety vault are untouched.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_initializeWorkingCopy(
+    mut env: JNIEnv,
+    _object: JObject,
+    target_path: JString,
+    raw: JString,
+) -> jstring {
+    let Ok(path) = env.get_string(&target_path) else {
+        return std::ptr::null_mut();
+    };
+    let path = String::from(path);
+    let Ok(raw) = env.get_string(&raw) else {
+        return std::ptr::null_mut();
+    };
+    let raw = String::from(raw);
+    let Ok(message) = working_copy::initialize_working_copy(Path::new(&path), &raw) else {
+        return std::ptr::null_mut();
+    };
+    env.new_string(message)
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Narrow, versioned JSON commands for the *separate* experimental working
+/// copy. Every write goes through the existing canonical storage domain.
+/// Errors are returned as structured JSON; no direct JS/JNI interface exists.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_workingCopyRequest(
+    mut env: JNIEnv,
+    _object: JObject,
+    target_path: JString,
+    raw: JString,
+) -> jstring {
+    let Ok(path) = env.get_string(&target_path) else {
+        return std::ptr::null_mut();
+    };
+    let path = String::from(path);
+    let Ok(raw) = env.get_string(&raw) else {
+        return std::ptr::null_mut();
+    };
+    let raw = String::from(raw);
+    let result = match working_copy::working_request(Path::new(&path), &raw) {
+        Ok(value) => value,
+        Err(error) => serde_json::json!({"ok":false,"error":error.to_string()}),
+    };
+    env.new_string(result.to_string())
         .map_or(std::ptr::null_mut(), |value| value.into_raw())
 }
 
