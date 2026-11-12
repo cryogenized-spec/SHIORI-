@@ -183,6 +183,14 @@ def run():
             ) == []
             page.reload(wait_until="load")
             assert page.locator("#mainData .task-row").count() == 0
+
+            # The canonical Rust migration is opt-in and surfaced only under
+            # Android Settings, not executed at startup or by browser tests.
+            page.evaluate(
+                "document.querySelector('[data-view=settings]').click()"
+            )
+            assert page.locator("#stageCanonicalShadow").count() == 1
+            assert page.locator("#saveNativeVault").count() == 1
             assert not failures, failures
             assert not external_requests, external_requests
             print("Android-origin offline UI: create, edit, persistence, saved views, delete passed")
