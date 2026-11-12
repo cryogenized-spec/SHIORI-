@@ -177,7 +177,9 @@ impl SqliteStore {
         imported: &[Task],
         source_backup: &str,
     ) -> Result<bool, StorageError> {
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS legacy_shadow_source (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -238,11 +240,14 @@ impl SqliteStore {
         if exists == 0 {
             return Ok(None);
         }
-        Ok(self.db.query_row(
-            "SELECT payload FROM legacy_shadow_source WHERE id=1",
-            [],
-            |row| row.get(0),
-        ).optional()?)
+        Ok(self
+            .db
+            .query_row(
+                "SELECT payload FROM legacy_shadow_source WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     pub fn get(&self, id: &str) -> Result<Task, StorageError> {
