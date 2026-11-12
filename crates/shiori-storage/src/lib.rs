@@ -210,10 +210,7 @@ impl SqliteStore {
     /// Indexed local assignment query. All incomplete records assigned to the
     /// specified local identity are returned; blockers come from prerequisite
     /// rows in SQLite (one query, not one DB lookup per task).
-    pub fn assigned_attention(
-        &self,
-        assignee: &str,
-    ) -> Result<Vec<(Task, bool)>, StorageError> {
+    pub fn assigned_attention(&self, assignee: &str) -> Result<Vec<(Task, bool)>, StorageError> {
         let assignee = validate_assignee_id(assignee)?;
         let sql = format!(
             "SELECT base.*, EXISTS(
@@ -473,7 +470,9 @@ mod tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert!(
-            plans.iter().any(|plan| plan.contains("idx_tasks_assignee_active")),
+            plans
+                .iter()
+                .any(|plan| plan.contains("idx_tasks_assignee_active")),
             "assigned-to-me must use its dedicated index: {plans:?}"
         );
     }
