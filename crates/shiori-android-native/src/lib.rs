@@ -63,10 +63,10 @@ fn validate_snapshot(raw: &str) -> Result<(), &'static str> {
         if !due.is_empty() && NaiveDate::parse_from_str(due, "%Y-%m-%d").is_err() {
             return Err("invalid calendar date");
         }
-        if let Some(minutes) = task.get("mins").filter(|v| !v.is_null()) {
-            if !matches!(minutes.as_i64(), Some(1..=1440)) {
-                return Err("invalid effort");
-            }
+        if let Some(minutes) = task.get("mins").filter(|v| !v.is_null())
+            && !matches!(minutes.as_i64(), Some(1..=1440))
+        {
+            return Err("invalid effort");
         }
         if let Some(assignee) = task.get("assigneeId").filter(|v| !v.is_null()) {
             let id = assignee.as_str().ok_or("invalid assignee")?;
