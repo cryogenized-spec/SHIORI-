@@ -133,7 +133,7 @@ def make_server(port, cli, database):
                 args, capture_output=True, timeout=15, check=False
             )
             if result.returncode:
-                if b"task was changed by another writer" in result.stderr:
+                if b"RevisionConflict" in result.stderr or b"task was changed by another writer" in result.stderr:
                     raise RevisionConflict("task was changed; reload before saving")
                 raise ValueError("Rust task command was rejected")
             if len(result.stdout) > MAX_EXPORT:
