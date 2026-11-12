@@ -394,18 +394,20 @@ class MainActivity : Activity() {
                 }
                 val total = result.optInt("total")
                 val builder = AlertDialog.Builder(this)
-                    .setTitle("Native Rust tasks · working copy")
-                    .setMessage(
-                        "Experimental, separate SQLite copy. These edits do not affect your " +
-                            "normal Android tasks. Showing ${rows.length()} of $total records."
-                    )
+                    .setTitle("Rust working copy · ${rows.length()} of $total")
                     .setNeutralButton("Add task") { _, _ -> promptNativeTask() }
                     .setNegativeButton("Close", null)
                     .setPositiveButton("Refresh") { _, _ -> showWorkingCopy() }
                 if (labels.isNotEmpty()) {
+                    // Android AlertDialog cannot display a message and a
+                    // selectable list simultaneously on all OS versions.
                     builder.setItems(labels) { _, index ->
                         showNativeTaskActions(rows.getJSONObject(index))
                     }
+                } else {
+                    builder.setMessage(
+                        "No native tasks in this separate experimental SQLite working copy."
+                    )
                 }
                 builder.show()
             }
