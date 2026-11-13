@@ -65,6 +65,7 @@ def main():
         metadata = {
             "saved_views": [],
             "sort": "focus",
+            "revision": 1,
             "tags_by_id": {"native-1": ["Stored", "SQLite"]},
         }
 
@@ -101,7 +102,15 @@ def main():
                 "(rows)=>localStorage.setItem('shiori-android-local-tasks', JSON.stringify(rows))",
                 old,
             )
+            page.evaluate("""() => {
+                localStorage.setItem('shiori-demo-sort', 'fifo');
+                localStorage.setItem('shiori-saved-views', JSON.stringify([
+                    {name:'Legacy only',view:'inbox',filter:'all',sort:'fifo',query:''}
+                ]));
+            }""")
             page.reload(wait_until="load")
+            legacy_sort = page.evaluate("localStorage.getItem('shiori-demo-sort')")
+            legacy_views = page.evaluate("localStorage.getItem('shiori-saved-views')")
             baseline = page.evaluate(
                 "localStorage.getItem('shiori-android-local-tasks')"
             )
@@ -150,6 +159,26 @@ def main():
                 "localStorage.getItem('shiori-android-local-tasks')"
             ) == baseline
 
+            # Tags are edited separately, atomically, with the currently
+            # displayed canonical task revision. Neither task edits nor tag
+            # edits should write to the frozen WebView JSON snapshot.
+            page.locator("#nativeDetailTagInput").fill("Native, Quality, 栞")
+            page.locator("#nativeDetailTagsForm").evaluate(
+                "(form)=>form.requestSubmit()"
+            )
+            tag_request = take()
+            assert tag_request["op"] == "tags_set", tag_request
+            assert tag_request["expected_version"] == 5
+            assert tag_request["tags"] == ["Native", "Quality", "栞"]
+            complete(tag_request, {"ok": True, "id": "native-1", "version": 6,
+                                   "tags": ["Native", "Quality", "栞"]})
+            metadata["tags_by_id"]["native-1"] = ["Native", "Quality", "栞"]
+            supply_full_read("Edited through Rust", 6)
+            assert page.locator("#nativeDetailTagInput").input_value() == "Native, Quality, 栞"
+            assert page.evaluate(
+                "localStorage.getItem('shiori-android-local-tasks')"
+            ) == baseline
+
             # Native version-checked completion, again no legacy write.
             page.evaluate(
                 "document.querySelector('[data-view=inbox]').click()"
@@ -159,13 +188,57 @@ def main():
             page.locator("#detailOverlay [data-complete]").click()
             completed = take()
             assert completed["op"] == "status"
-            assert completed["expected_version"] == 5
+            assert completed["expected_version"] == 6
             assert completed["status"] == "done"
-            complete(completed, {"ok": True, "task": {"id": "native-1", "version": 6}})
-            supply_full_read("Edited through Rust", 6)
+            complete(completed, {"ok": True, "task": {"id": "native-1", "version": 7}})
+            supply_full_read("Edited through Rust", 7)
             assert page.evaluate(
                 "localStorage.getItem('shiori-android-local-tasks')"
             ) == baseline
+
+            # Both native sorting and saved views are SQLite-owned; the
+            # untouched WebView legacy preferences are not mutated.
+            page.locator("#sortMode").select_option("priority")
+            sort_request = take()
+            assert sort_request["op"] == "workspace_set", sort_request
+            assert sort_request["expected_revision"] == 1
+            assert sort_request["sort"] == "priority"
+            metadata["sort"] = "priority"
+            metadata["revision"] = 2
+            complete(sort_request, {"ok": True, "metadata": metadata})
+            supply_full_read("Edited through Rust", 7)
+            assert page.locator("#sortMode").input_value() == "priority"
+            assert page.evaluate("localStorage.getItem('shiori-demo-sort')") == legacy_sort
+
+            page.once("dialog", lambda dialog: dialog.accept("Native review"))
+            page.locator("#saveView").evaluate("(button)=>button.click()")
+            view_request = take()
+            assert view_request["op"] == "workspace_set", view_request
+            assert view_request["expected_revision"] == 2
+            assert view_request["saved_views"][0]["name"] == "Native review"
+            metadata["saved_views"] = view_request["saved_views"]
+            metadata["revision"] = 3
+            complete(view_request, {"ok": True, "metadata": metadata})
+            supply_full_read("Edited through Rust", 7)
+            assert page.locator(
+                "#savedViewSelect option[value='Native review']"
+            ).count() == 1
+            assert page.evaluate("localStorage.getItem('shiori-saved-views')") == legacy_views
+
+            page.locator("#savedViewSelect").select_option("Native review")
+            page.locator("#removeView").click()
+            remove_request = take()
+            assert remove_request["op"] == "workspace_set", remove_request
+            assert remove_request["expected_revision"] == 3
+            assert remove_request["saved_views"] == []
+            metadata["saved_views"] = []
+            metadata["revision"] = 4
+            complete(remove_request, {"ok": True, "metadata": metadata})
+            supply_full_read("Edited through Rust", 7)
+            assert page.locator(
+                "#savedViewSelect option[value='Native review']"
+            ).count() == 0
+            assert page.evaluate("localStorage.getItem('shiori-saved-views')") == legacy_views
 
             # The native source is locked while Android validates the
             # independent rollback vault. No WebView write or new native
@@ -186,6 +259,8 @@ def main():
             page.evaluate("document.querySelector('[data-view=inbox]').click()")
             assert page.get_by_text("Original WebView task").count() == 1
             assert page.get_by_text("Edited through Rust").count() == 0
+            assert page.locator("#sortMode").input_value() == "fifo"
+            assert page.locator("#savedViewSelect option[value='Legacy only']").count() == 1
 
             # Rollback during an in-flight native metadata read must invalidate
             # that response rather than rendering native records afterwards.
@@ -220,7 +295,7 @@ def main():
 
             assert not failures, failures
             assert not outgoing, outgoing
-            print("M2.3 browser-origin canary: verified native edits, source isolation and rollback")
+            print("M2.4d browser-origin canary: verified Rust tags, views, ordering and legacy isolation")
         finally:
             context.close()
             browser.close()
