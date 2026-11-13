@@ -647,8 +647,9 @@ class MainActivity : Activity() {
             )
             val expectsPrimary = isNativeCanarySelected()
             val source = request.optString("source", "working")
+            val requiredSource = if (expectsPrimary) "primary" else "working"
             if (request.optString("protocol") != "shiori-native-working-v1" ||
-                !supported || source != if (expectsPrimary) "primary" else "working"
+                !supported || source != requiredSource
             ) {
                 completeNativeWorkingCommand(
                     requestId, JSONObject().put("ok", false)
