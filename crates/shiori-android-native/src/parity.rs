@@ -3,11 +3,26 @@
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, error::Error, path::Path};
 
-use crate::{audit::{ShadowAudit, audit_legacy_shadow}, migration::stage_legacy_backup, validate_snapshot};
+use crate::{
+    audit::{ShadowAudit, audit_legacy_shadow},
+    migration::stage_legacy_backup,
+    validate_snapshot,
+};
 
 const TASK_KEYS: &[&str] = &[
-    "id", "title", "description", "project", "priority", "status", "due",
-    "tags", "mins", "assigneeId", "version", "createdAt", "updatedAt",
+    "id",
+    "title",
+    "description",
+    "project",
+    "priority",
+    "status",
+    "due",
+    "tags",
+    "mins",
+    "assigneeId",
+    "version",
+    "createdAt",
+    "updatedAt",
     "completedAt",
 ];
 const VIEW_KEYS: &[&str] = &["name", "view", "filter", "sort", "query"];
@@ -38,9 +53,15 @@ pub fn preflight(path: &Path, current: &str) -> Result<Value, Box<dyn Error>> {
                 unsupported.insert(format!("task.{key}"));
             }
         }
-        tags += task.get("tags").and_then(Value::as_array).map_or(0, Vec::len);
+        tags += task
+            .get("tags")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
     }
-    for view in source["saved_views"].as_array().ok_or("missing saved views")? {
+    for view in source["saved_views"]
+        .as_array()
+        .ok_or("missing saved views")?
+    {
         for key in view.as_object().ok_or("invalid saved view")?.keys() {
             if !VIEW_KEYS.contains(&key.as_str()) {
                 unsupported.insert(format!("saved_view.{key}"));
@@ -50,7 +71,9 @@ pub fn preflight(path: &Path, current: &str) -> Result<Value, Box<dyn Error>> {
 
     let (task_count, same, inferred) = match audit_legacy_shadow(path, current)? {
         ShadowAudit::Verified {
-            tasks, current_matches, unverified_timestamps
+            tasks,
+            current_matches,
+            unverified_timestamps,
         } => (tasks, current_matches, unverified_timestamps),
         ShadowAudit::Missing => return Err("no staged migration database exists".into()),
     };
@@ -118,16 +141,22 @@ mod tests {
         assert_eq!(report["saved_views"], 1);
         assert_eq!(report["inferred_timestamp_fields"], 0);
         let meta = crate::migration::read_android_metadata(&path).unwrap();
-        assert_eq!(meta["tags_by_id"]["legacy-1"], json!(["Local","Repair"]));
+        assert_eq!(meta["tags_by_id"]["legacy-1"], json!(["Local", "Repair"]));
         assert_eq!(meta["sort"], "priority");
-        let original = SqliteStore::open(&path).unwrap()
-            .legacy_shadow_source().unwrap().unwrap();
+        let original = SqliteStore::open(&path)
+            .unwrap()
+            .legacy_shadow_source()
+            .unwrap()
+            .unwrap();
         assert_eq!(original, data);
         // Only the regenerated export timestamp differs: this remains
         // identical from the user's task/view perspective.
         let mut reexport: Value = serde_json::from_str(&data).unwrap();
         reexport["exported_at"] = json!("2026-11-13T10:03:00Z");
-        assert_eq!(preflight(&path, &reexport.to_string()).unwrap()["ready"], true);
+        assert_eq!(
+            preflight(&path, &reexport.to_string()).unwrap()["ready"],
+            true
+        );
         std::fs::remove_file(path).unwrap();
     }
 
@@ -138,11 +167,22 @@ mod tests {
         extra["tasks"][0]["unknownRecurringRule"] = json!("weekly");
         let preview = preflight(&path, &extra.to_string()).unwrap();
         assert_eq!(preview["ready"], false);
-        assert_eq!(preview["unsupported_fields"], json!(["task.unknownRecurringRule"]));
-        extra["tasks"][0].as_object_mut().unwrap().remove("unknownRecurringRule");
-        assert_eq!(preflight(&path, &extra.to_string()).unwrap()["ready"], false);
-        assert_eq!(preflight(&path, &extra.to_string()).unwrap()
-                   ["matches_live_android_source"], false);
+        assert_eq!(
+            preview["unsupported_fields"],
+            json!(["task.unknownRecurringRule"])
+        );
+        extra["tasks"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("unknownRecurringRule");
+        assert_eq!(
+            preflight(&path, &extra.to_string()).unwrap()["ready"],
+            false
+        );
+        assert_eq!(
+            preflight(&path, &extra.to_string()).unwrap()["matches_live_android_source"],
+            false
+        );
         std::fs::remove_file(path).unwrap();
     }
 
@@ -152,12 +192,18 @@ mod tests {
         let data = input();
         assert_eq!(preflight(&path, &data).unwrap()["ready"], true);
         let db = rusqlite::Connection::open(&path).unwrap();
-        db.execute("UPDATE android_task_tags SET value='Changed' WHERE position=0",[])
-            .unwrap();
+        db.execute(
+            "UPDATE android_task_tags SET value='Changed' WHERE position=0",
+            [],
+        )
+        .unwrap();
         assert!(preflight(&path, &data).is_err());
-        db.execute("UPDATE android_task_tags SET value='Local' WHERE position=0",[])
-            .unwrap();
-        db.execute("UPDATE android_workspace_metadata SET sort_mode='fifo'",[])
+        db.execute(
+            "UPDATE android_task_tags SET value='Local' WHERE position=0",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE android_workspace_metadata SET sort_mode='fifo'", [])
             .unwrap();
         assert!(preflight(&path, &data).is_err());
         std::fs::remove_file(path).unwrap();
