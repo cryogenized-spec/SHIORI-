@@ -43,6 +43,10 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         webView = WebView(this)
+        // A previously selected native source must be verified BEFORE
+        // anything in the legacy task list can be tapped after app restart.
+        // Do not flash an editable legacy list while native DB inspection runs.
+        webView.visibility = android.view.View.INVISIBLE
         webView.setBackgroundColor(android.graphics.Color.rgb(23, 21, 30))
         webView.settings.apply {
             javaScriptEnabled = true
@@ -144,12 +148,17 @@ class MainActivity : Activity() {
                             if (!isFinishing && !isDestroyed) {
                                 webView.evaluateJavascript(
                                     if (inspected != null) "window.shioriNativeActivate()"
-                                    else "window.shioriNativeUnavailable()",
-                                    null
-                                )
+                                    else "window.shioriNativeUnavailable()"
+                                ) {
+                                    if (!isFinishing && !isDestroyed) {
+                                        webView.visibility = android.view.View.VISIBLE
+                                    }
+                                }
                             }
                         }
                     }
+                } else {
+                    webView.visibility = android.view.View.VISIBLE
                 }
                 // Read the native vault before creating the initial copy.
                 // Never overwrite an older snapshot merely because WebView
