@@ -38,6 +38,9 @@ class MainActivity : Activity() {
     private var pendingExportJson: String? = null
     private var pendingNativeExport: File? = null
     private var nativeRecoveryPending = false
+    // UI-thread gate: no second cutover/rollback may abort the first one's
+    // freeze while a SQLite I/O transition is pending.
+    private var nativeTransitionPending = false
     private val vaultExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -272,6 +275,23 @@ class MainActivity : Activity() {
     private fun selectNativeCanary(enabled: Boolean): Boolean =
         getSharedPreferences("shiori-native-canary", MODE_PRIVATE).edit()
             .putBoolean("selected", enabled).commit()
+
+    private fun startNativeTransition(): Boolean {
+        if (nativeTransitionPending) {
+            notifyUser("Another native storage transition is still running")
+            return false
+        }
+        nativeTransitionPending = true
+        return true
+    }
+
+    private fun finishNativeTransition(script: String) {
+        // Release the guard after the trusted WebView has received the
+        // source change / abort signal, not before asynchronous JS dispatch.
+        webView.evaluateJavascript(script) {
+            nativeTransitionPending = false
+        }
+    }
 
     /**
      * The bundled page only signals a custom-scheme navigation; Kotlin pulls
@@ -551,6 +571,7 @@ class MainActivity : Activity() {
 
     private fun activateGuardedNativeCanary() {
         if (isFinishing || isDestroyed) return
+        if (!startNativeTransition()) return
         // The JS callback freezes all legacy edits *before* capturing data;
         // a field parity check against an unfrozen snapshot is insufficient.
         webView.evaluateJavascript("window.shioriFreezeLegacyForCutover()") { encoded ->
@@ -561,7 +582,7 @@ class MainActivity : Activity() {
                 ) throw IOException("Invalid Android backup")
                 raw
             } catch (_: Exception) {
-                webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                finishNativeTransition("window.shioriAbortCutover()")
                 notifyUser("Cannot make an unchanged legacy rollback snapshot")
                 return@evaluateJavascript
             }
@@ -605,10 +626,10 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (status.isSuccess) {
-                        webView.evaluateJavascript("window.shioriNativeActivate()", null)
+                        finishNativeTransition("window.shioriNativeActivate()")
                         notifyUser("Rust SQLite debug canary selected; legacy tasks kept")
                     } else {
-                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        finishNativeTransition("window.shioriAbortCutover()")
                         notifyUser("Native cutover BLOCKED: " +
                             (status.exceptionOrNull()?.message ?: "verification failed"))
                     }
@@ -658,6 +679,7 @@ class MainActivity : Activity() {
 
     private fun resumeInterruptedCanary() {
         if (isFinishing || isDestroyed) return
+        if (!startNativeTransition()) return
         webView.evaluateJavascript("window.shioriFreezeLegacyForCutover()") { encoded ->
             val source = try {
                 val raw = JSONArray("[$encoded]").getString(0)
@@ -666,7 +688,7 @@ class MainActivity : Activity() {
                 ) throw IOException("Invalid Android backup")
                 raw
             } catch (_: Exception) {
-                webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                finishNativeTransition("window.shioriAbortCutover()")
                 notifyUser("Cannot capture unchanged Android source for native recovery")
                 return@evaluateJavascript
             }
@@ -736,10 +758,10 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (status.isSuccess) {
-                        webView.evaluateJavascript("window.shioriNativeActivate()", null)
+                        finishNativeTransition("window.shioriNativeActivate()")
                         notifyUser("Verified native cutover resumed; legacy tasks preserved")
                     } else {
-                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        finishNativeTransition("window.shioriAbortCutover()")
                         notifyUser(
                             "Cannot resume native source: " +
                                 (status.exceptionOrNull()?.message ?: "validation failed")
@@ -779,6 +801,7 @@ class MainActivity : Activity() {
      */
     private fun verifyAndRollbackNativeCanary() {
         if (isFinishing || isDestroyed) return
+        if (!startNativeTransition()) return
         webView.evaluateJavascript("window.shioriNativeFreezeForRollback()") { encoded ->
             val legacy = try {
                 val raw = JSONArray("[$encoded]").getString(0)
@@ -787,7 +810,7 @@ class MainActivity : Activity() {
                 ) throw IOException("Legacy source cannot be inspected")
                 raw
             } catch (_: Exception) {
-                webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                finishNativeTransition("window.shioriAbortCutover()")
                 notifyUser("Cannot verify rollback while a native task operation is running")
                 return@evaluateJavascript
             }
@@ -800,16 +823,16 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (!checked) {
-                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        finishNativeTransition("window.shioriAbortCutover()")
                         notifyUser(
                             "Rollback BLOCKED: preserved legacy tasks no longer match " +
                                 "the migration backup. Native source remains selected."
                         )
                     } else if (!selectNativeCanary(false)) {
-                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        finishNativeTransition("window.shioriAbortCutover()")
                         notifyUser("Cannot save rollback selection; Rust remains active")
                     } else {
-                        webView.evaluateJavascript("window.shioriNativeDeactivate()", null)
+                        finishNativeTransition("window.shioriNativeDeactivate()")
                         notifyUser("Verified rollback: original Android tasks selected")
                     }
                 }
