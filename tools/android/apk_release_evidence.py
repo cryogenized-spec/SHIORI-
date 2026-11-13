@@ -77,7 +77,7 @@ def create(apk, commit, aapt, apksigner):
     if not version_code.isdigit() or not version_name.endswith("-dev"):
         raise ValueError("this acceptance gate only supports dev/debug APKs")
     permissions = command(aapt, "dump", "permissions", str(apk))
-    if re.search(r"android\\.permission\\.[A-Za-z0-9_.]+", permissions):
+    if re.search(r"android\.permission\.[A-Za-z0-9_.]+", permissions):
         raise ValueError("debug alpha unexpectedly requests Android permissions")
     certificates = command(apksigner, "verify", "--print-certs", str(apk))
     signer = re.search(
