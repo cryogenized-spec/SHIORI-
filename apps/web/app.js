@@ -140,7 +140,9 @@
     editId:null, deleteId:null
   };
   // A view-only flag. Never persist it: every app launch starts on legacy tasks.
-  const nativeReadOnly={active:false};
+  const nativeReadOnly={active:false,page:0};
+  const NATIVE_PAGE_SIZE=50;
+  const MAX_NATIVE_SOURCE_TASKS=5000;
   let nativeInFlight=null;
   let nativeNextId=0;
   const NATIVE_COMMAND_TIMEOUT_MS=15000;
@@ -199,16 +201,18 @@
     html+='<h3>Rust task workspace · separate copy</h3>';
     html+='<p>These are records in the experimental native SQLite working copy, NOT your normal Android task list. Changes here do not sync back. Keep an independent JSON backup.</p>';
     html+='<div class="settings-actions"><button type="button" data-native-op="refresh"'+(nativeWorking.busy?' disabled':'')+'>Refresh native tasks</button></div>';
-    if(nativeWorking.busy) html+='<p role="status">Reading native task database…</p>';
+    if(nativeWorking.busy) html+='<p role="status">Reading native task database…'+
+      (nativeWorking.progress?' '+nativeWorking.progress+' task(s) loaded.':'')+'</p>';
     if(nativeWorking.error) html+='<p role="alert" class="native-working-error">'+escapeHTML(nativeWorking.error)+'</p>';
     html+='<form id="nativeWorkingCreate" class="native-working-create"><label for="nativeWorkingTitle">New task in Rust working copy</label>';
     html+='<input id="nativeWorkingTitle" name="title" maxlength="120" autocomplete="off" placeholder="Task title" required>';
     html+='<button type="submit"'+(nativeWorking.busy?' disabled':'')+'>Add native task</button></form>';
-    html+='<p class="settings-hint">Showing '+nativeWorking.items.length+' of '+nativeWorking.total+' native records (up to 50 per page; pagination pending).</p>';
+    html+='<p class="settings-hint">Loaded '+nativeWorking.items.length+' of '+nativeWorking.total+
+      ' native records. Settings displays the first 50; use the read-only task layout to browse all records.</p>';
     html+='<div class="settings-actions"><button type="button" id="showNativeReadOnly"'+(nativeWorking.busy?' disabled':'')+'>Preview Rust tasks in normal task layout · read-only</button></div>';
     html+='<p class="settings-hint">This preview does not edit either task store. Lists of more than 50 records require pagination before full preview is allowed.</p>';
     html+='<div class="native-working-items">';
-    for(const task of nativeWorking.items) {
+    for(const task of nativeWorking.items.slice(0,50)) {
       const id=escapeHTML(task.id);
       const version=Number(task.version);
       if(!Number.isInteger(version)||version<1) continue;
@@ -238,24 +242,73 @@
   function nativePreviewUpdate(){
     if(view==='settings')render();
   }
+  // Read *every* native page without ever exposing a partial collection as
+  // a complete result. Each successive page pins a consistency snapshot.
+  // Changed, duplicated, missing, reordered or truncated pages fail closed.
   async function nativePreviewRefresh(){
-    if(nativeWorking.busy) return;
+    if(nativeWorking.busy) return false;
     nativeWorking.busy=true;
     nativeWorking.error='';
+    nativeWorking.progress=0;
     nativePreviewUpdate();
     try {
-      const response=await nativeWorkingRequest({op:'list'});
-      if(!response.ok) throw new Error(String(response.error||'Cannot read native tasks'));
-      if(!Array.isArray(response.tasks)||!Number.isInteger(response.total))
-        throw new Error('Unrecognized native task list');
-      nativeWorking.items=response.tasks.filter(task=>
-        task && typeof task.id==='string' && typeof task.title==='string' &&
-        typeof task.project==='string' && typeof task.status==='string');
-      nativeWorking.total=response.total;
+      const all=[];
+      const ids=new Set();
+      let total=null;
+      let snapshot=null;
+      let offset=0;
+      while(true) {
+        const request={op:'list',offset};
+        if(snapshot!==null)request.snapshot=snapshot;
+        const response=await nativeWorkingRequest(request);
+        if(!response.ok) throw new Error(String(response.error||'Cannot read native tasks'));
+        if(!Number.isSafeInteger(response.total) || response.total<0 ||
+           response.total>MAX_NATIVE_SOURCE_TASKS ||
+           !Number.isSafeInteger(response.offset)||response.offset!==offset ||
+           typeof response.snapshot!=='string' ||
+           !/^[0-9a-f]{16}-\d+$/.test(response.snapshot) ||
+           !Array.isArray(response.tasks) ||
+           response.tasks.length>NATIVE_PAGE_SIZE)
+          throw new Error('Invalid or oversized native task page');
+        if(total===null){total=response.total;snapshot=response.snapshot;}
+        if(response.total!==total || response.snapshot!==snapshot)
+          throw new Error('Native tasks changed during paging; refresh the complete list');
+        for(const task of response.tasks){
+          if(!task || typeof task.id!=='string' || !task.id ||
+             typeof task.title!=='string'||typeof task.project!=='string'||
+             !['todo','in_progress','done'].includes(task.status) ||
+             !['low','medium','high','urgent'].includes(task.priority)||
+             !Number.isSafeInteger(task.version)||task.version<1 ||
+             ids.has(task.id))
+            throw new Error('Duplicate or invalid native task returned');
+          ids.add(task.id);
+          all.push(task);
+        }
+        nativeWorking.progress=all.length;
+        if(response.next_offset===null){
+          if(all.length!==total)throw new Error('Incomplete native task list; refusing partial preview');
+          break;
+        }
+        if(!Number.isSafeInteger(response.next_offset) ||
+           response.next_offset!==offset+response.tasks.length ||
+           response.next_offset>total || response.tasks.length!==NATIVE_PAGE_SIZE)
+          throw new Error('Native task paging order is inconsistent');
+        offset=response.next_offset;
+        nativePreviewUpdate();
+      }
+      // Publish only after all pages agree on the same snapshot.
+      nativeWorking.items=all;
+      nativeWorking.total=total;
+      nativeWorking.snapshot=snapshot;
     } catch(error) {
-      nativeWorking.error=error.message||'Native preview unavailable';
+      // Do not keep stale pages from the previous read after any failure.
+      nativeWorking.items=[];
+      nativeWorking.total=0;
+      nativeWorking.snapshot=null;
+      nativeWorking.error=error.message||'Native task listing unavailable';
     } finally {
       nativeWorking.busy=false;
+      nativeWorking.progress=0;
       nativePreviewUpdate();
     }
     return !nativeWorking.error;
@@ -305,6 +358,10 @@
       if(sortMode==='fifo')return (a.createdAt||'').localeCompare(b.createdAt||'')||a.id.localeCompare(b.id);
       return (a.status==='done')-(b.status==='done')||due||priority||a.id.localeCompare(b.id);
     });
+    const pageCount=Math.max(1,Math.ceil(visible.length/NATIVE_PAGE_SIZE));
+    nativeReadOnly.page=Math.min(nativeReadOnly.page,pageCount-1);
+    const windowStart=nativeReadOnly.page*NATIVE_PAGE_SIZE;
+    const windowed=visible.slice(windowStart,windowStart+NATIVE_PAGE_SIZE);
     let html='<section class="native-readonly-banner" role="status"><strong>Read-only Rust/SQLite source preview</strong>'+
       '<p>'+nativeWorking.total+' task record(s) from the separate working copy. Your original Android tasks are unchanged.</p>'+
       '<button type="button" id="closeNativeReadOnly">Return to Android tasks</button></section>';
@@ -312,7 +369,12 @@
       return html+'<div class="empty-state"><h3>No matching native tasks</h3>'+
         '<p>Try another filter or return to your regular Android list.</p></div>';
     }
-    html+='<div class="task-list">'+visible.map(t=>
+    html+='<nav class="native-readonly-pager" aria-label="Rust task preview pages">'+
+      '<span>Showing '+(windowStart+1)+'–'+(windowStart+windowed.length)+' of '+visible.length+
+      ' matching native records · page '+(nativeReadOnly.page+1)+' / '+pageCount+'</span>'+
+      '<button type="button" data-native-page="prev"'+(nativeReadOnly.page===0?' disabled':'')+'>Previous</button>'+
+      '<button type="button" data-native-page="next"'+(nativeReadOnly.page+1===pageCount?' disabled':'')+'>Next</button></nav>';
+    html+='<div class="task-list">'+windowed.map(t=>
       '<article class="task-row native-readonly-row">'+
       '<span class="native-readonly-marker" aria-hidden="true">'+icon('search')+'</span>'+
       '<div class="task-info"><div class="task-title'+(t.status==='done'?' done':'')+'">'+
@@ -327,12 +389,8 @@
   async function openNativeReadOnly(){
     if(mode!=='android-local'||!nativeWorking.open||nativeWorking.busy)return;
     if(!(await nativePreviewRefresh()))return;
-    // Never compare only the first 50 tasks as though they were all records.
-    if(nativeWorking.total!==nativeWorking.items.length){
-      nativeWorking.error='Rust working copy exceeds the 50-item display limit. Pagination is required before full-list comparison.';
-      nativePreviewUpdate();
-      return;
-    }
+    // Full pages are already validated before nativePreviewRefresh returns.
+    nativeReadOnly.page=0;
     nativeReadOnly.active=true;
     setView('inbox');
   }
@@ -647,6 +705,12 @@
       nativeReadOnly.active=false;
       setView('inbox');return;
     }
+    const sourcePage=e.target.closest('[data-native-page]');
+    if(sourcePage && nativeReadOnly.active){
+      const n=sourcePage.dataset.nativePage==='next'?1:-1;
+      nativeReadOnly.page=Math.max(0,nativeReadOnly.page+n);
+      render();return;
+    }
     const nativeButton=e.target.closest('[data-native-op]');
     if(nativeButton&&mode==='android-local'){
       const op=nativeButton.dataset.nativeOp;
@@ -750,8 +814,8 @@
     }
     closeModal();setView('inbox');toast(mode==='live'?'Task saved to local SQLite':'Task added to your local demo');
   });
-  $('#searchInput').addEventListener('input',e=>{query=e.target.value;render();});
-  $('#filterButton').addEventListener('click',()=>{const options=['all','urgent','high','medium','low'];filter=options[(options.indexOf(filter)+1)%options.length];render();});
+  $('#searchInput').addEventListener('input',e=>{query=e.target.value;nativeReadOnly.page=0;render();});
+  $('#filterButton').addEventListener('click',()=>{const options=['all','urgent','high','medium','low'];filter=options[(options.indexOf(filter)+1)%options.length];nativeReadOnly.page=0;render();});
   $('#sortMode').addEventListener('change',e=>{
     if (!['focus','fifo','due','priority'].includes(e.target.value)) return;
     sortMode=e.target.value;
