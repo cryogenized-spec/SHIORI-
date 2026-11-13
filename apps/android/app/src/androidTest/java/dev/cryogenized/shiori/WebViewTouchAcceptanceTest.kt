@@ -42,6 +42,18 @@ class WebViewTouchAcceptanceTest {
             javascript("typeof window.shioriExportBackup === 'function' && " +
                 "document.querySelector('#taskModal') !== null") == "true"
         }
+        val viewport = javascript(
+            "(function(){return {width:window.innerWidth,height:window.innerHeight," +
+                "mobile:window.matchMedia('(max-width:760px)').matches," +
+                "fabWidth:document.querySelector('.mobile-fab').getBoundingClientRect().width};})()"
+        )
+        val dimensions = JSONObject(viewport)
+        assertTrue(
+            "Android WebView ignored mobile viewport meta tag: $viewport",
+            dimensions.getBoolean("mobile") &&
+                dimensions.getDouble("width") <= 760 &&
+                dimensions.getDouble("fabWidth") >= 44
+        )
     }
 
     @After
@@ -120,7 +132,11 @@ class WebViewTouchAcceptanceTest {
                     "width:r.width,height:r.height,viewport:window.innerWidth};})()"
             )
         )
-        assertTrue("Element is not laid out: $selector", bounds.getDouble("width") > 1)
+        assertTrue(
+            "Element is not laid out: $selector; bounds=$bounds, viewport=" +
+                javascript("JSON.stringify({width:window.innerWidth,height:window.innerHeight})"),
+            bounds.getDouble("width") > 1
+        )
         assertTrue("Element is not laid out: $selector", bounds.getDouble("height") > 1)
         val location = IntArray(2)
         var width = 0
