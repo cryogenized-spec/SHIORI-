@@ -62,7 +62,9 @@ fn summary(t: Task) -> Value {
         "id": t.id, "title": t.title, "project": t.project, "notes": t.notes,
         "priority": t.priority.as_str(), "status": t.status.as_str(),
         "due_on": t.due_on, "estimate_minutes": t.estimate_minutes,
-        "assignee_id": t.assignee_id, "version": t.version
+        "assignee_id": t.assignee_id, "version": t.version,
+        "created_at": t.created_at, "updated_at": t.updated_at,
+        "completed_at": t.completed_at
     })
 }
 /// Bounded, versioned native-only command protocol. Mutations are performed
@@ -85,6 +87,10 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
     }
     let op = requested(&input, "op")?;
     match op {
+        "metadata" => {
+            let data = crate::migration::read_android_metadata(path)?;
+            Ok(json!({"ok":true, "metadata":data}))
+        }
         "list" => {
             let requested_offset = input.get("offset").map_or(Ok(0_u64), |raw| {
                 raw.as_u64().ok_or("offset must be an unsigned integer")
@@ -181,6 +187,50 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
                 TaskPatch {
                     title: Some(requested(&input, "title")?.into()),
                     ..TaskPatch::default()
+                },
+            )?;
+            Ok(json!({"ok":true,"task":summary(task)}))
+        }
+        "edit" => {
+            let present_string = |key: &str| -> Result<Option<String>, Box<dyn Error>> {
+                match input.get(key) {
+                    Some(v) => Ok(Some(v.as_str().ok_or("invalid text field")?.to_owned())),
+                    None => Ok(None),
+                }
+            };
+            let notes = present_string("notes")?;
+            if notes.as_ref().is_some_and(|value| value.chars().count() > 6000) {
+                return Err("task notes exceed 6000 characters".into());
+            }
+            let priority = input.get("priority")
+                .map(|v| Priority::from_str(v.as_str().ok_or("invalid priority")?))
+                .transpose()?;
+            let due_on = input.get("due_on")
+                .map(|v| -> Result<Option<NaiveDate>, Box<dyn Error>> {
+                    if v.is_null() { Ok(None) }
+                    else { date(v.as_str().ok_or("invalid due date")?) }
+                }).transpose()?;
+            let estimate_minutes = input.get("estimate_minutes")
+                .map(|v| -> Result<Option<i64>, Box<dyn Error>> {
+                    if v.is_null() { Ok(None) }
+                    else { Ok(Some(validate_estimate(v.as_i64().ok_or("invalid effort")?)?)) }
+                }).transpose()?;
+            let assignee_id = input.get("assignee_id")
+                .map(|v| -> Result<Option<String>, Box<dyn Error>> {
+                    if v.is_null() { Ok(None) }
+                    else { Ok(Some(validate_assignee_id(v.as_str().ok_or("invalid assignee")?)?)) }
+                }).transpose()?;
+            let task = store.edit_if_version(
+                requested(&input, "id")?,
+                version(&input)?,
+                TaskPatch {
+                    title: present_string("title")?,
+                    notes,
+                    project: present_string("project")?,
+                    priority,
+                    due_on,
+                    estimate_minutes,
+                    assignee_id,
                 },
             )?;
             Ok(json!({"ok":true,"task":summary(task)}))
@@ -437,6 +487,47 @@ mod tests {
         let restart = send(&path, command("list")).unwrap();
         assert_ne!(restart["snapshot"], token);
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn native_full_edit_and_metadata_are_version_checked_and_preserve_tags() {
+        let path = location();
+        let mut source: Value = serde_json::from_str(&backup()).unwrap();
+        source["tasks"][0]["tags"] = json!(["Original", "Native"]);
+        source["saved_views"] = json!([{
+            "name":"Mine","view":"inbox","filter":"all","sort":"fifo","query":""
+        }]);
+        initialize_working_copy(&path, &source.to_string()).unwrap();
+        let metadata = send(&path, command("metadata")).unwrap();
+        assert_eq!(metadata["metadata"]["tags_by_id"]["u123"], json!(["Original","Native"]));
+        assert_eq!(metadata["metadata"]["saved_views"].as_array().unwrap().len(), 1);
+        let before = send(&path, command("list")).unwrap();
+        let rev = before["tasks"][0]["version"].as_i64().unwrap();
+        let changed = send(&path, json!({
+            "protocol":PROTOCOL, "op":"edit", "id":"u123",
+            "expected_version":rev,
+            "title":"Updated via normal UI", "notes":"Preserve Unicode 栞",
+            "project":"New home", "priority":"urgent",
+            "due_on":"2026-12-11", "estimate_minutes":50,
+            "assignee_id":"local"
+        })).unwrap();
+        assert_eq!(changed["task"]["notes"], "Preserve Unicode 栞");
+        assert_eq!(changed["task"]["priority"], "urgent");
+        assert_eq!(changed["task"]["estimate_minutes"], 50);
+        assert_eq!(changed["task"]["assignee_id"], "local");
+        assert!(changed["task"]["created_at"].is_string());
+        assert!(send(&path, json!({
+            "protocol":PROTOCOL,"op":"edit","id":"u123",
+            "expected_version":rev,"notes":"Stale writer"
+        })).is_err());
+        assert!(send(&path, json!({
+            "protocol":PROTOCOL,"op":"edit","id":"u123",
+            "expected_version":changed["task"]["version"],
+            "estimate_minutes":0
+        })).is_err());
+        assert_eq!(send(&path, command("metadata")).unwrap()["metadata"]["tags_by_id"]["u123"],
+            json!(["Original","Native"]));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
