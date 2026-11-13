@@ -789,7 +789,14 @@
     $('#taskModal').setAttribute('aria-hidden','false');
     $('#taskForm').reset();$('#taskDue').value=newDate();
     setTimeout(()=>{
-      if($('#taskModal').classList.contains('open'))$('#taskName').focus();
+      // Do not steal a user's already-changed focus (e.g. immediately
+      // reaching the X/Cancel control with the keyboard).
+      const modal=$('#taskModal');
+      if(modal.classList.contains('open') &&
+         (!modal.contains(document.activeElement) ||
+          document.activeElement===dialogOpeners.create)){
+        $('#taskName').focus();
+      }
     },0);
   }
   function closeModal(){
@@ -848,7 +855,12 @@
     $('#editModal').classList.add('open');
     $('#editModal').setAttribute('aria-hidden','false');
     setTimeout(()=>{
-      if($('#editModal').classList.contains('open'))$('#editTaskName').focus();
+      const modal=$('#editModal');
+      if(modal.classList.contains('open') &&
+         (!modal.contains(document.activeElement) ||
+          document.activeElement===dialogOpeners.edit)){
+        $('#editTaskName').focus();
+      }
     },0);
   }
   async function removeTask(){
