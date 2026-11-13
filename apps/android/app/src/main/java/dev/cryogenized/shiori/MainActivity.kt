@@ -526,7 +526,9 @@ class MainActivity : Activity() {
 
     private fun activateGuardedNativeCanary() {
         if (isFinishing || isDestroyed) return
-        webView.evaluateJavascript("window.shioriExportBackup()") { encoded ->
+        // The JS callback freezes all legacy edits *before* capturing data;
+        // a field parity check against an unfrozen snapshot is insufficient.
+        webView.evaluateJavascript("window.shioriFreezeLegacyForCutover()") { encoded ->
             val source = try {
                 val raw = JSONArray("[$encoded]").getString(0)
                 if (raw.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
@@ -534,6 +536,7 @@ class MainActivity : Activity() {
                 ) throw IOException("Invalid Android backup")
                 raw
             } catch (_: Exception) {
+                webView.evaluateJavascript("window.shioriAbortCutover()", null)
                 notifyUser("Cannot make an unchanged legacy rollback snapshot")
                 return@evaluateJavascript
             }
@@ -580,6 +583,7 @@ class MainActivity : Activity() {
                         webView.evaluateJavascript("window.shioriNativeActivate()", null)
                         notifyUser("Rust SQLite debug canary selected; legacy tasks kept")
                     } else {
+                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
                         notifyUser("Native cutover BLOCKED: " +
                             (status.exceptionOrNull()?.message ?: "verification failed"))
                     }
