@@ -174,3 +174,162 @@ pub fn workspace_revision(db: &Connection) -> Result<i64, Box<dyn Error>> {
     }
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        export::export_working_database,
+        migration::read_android_metadata,
+        recovery::recover_to_separate_preview,
+        working_copy::{initialize_working_copy, working_request},
+    };
+
+    fn paths() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let suffix = format!(
+            "{}-{}", std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
+        );
+        let root = std::env::temp_dir();
+        (
+            root.join(format!("shiori-meta-src-{suffix}.sqlite3")),
+            root.join(format!("shiori-meta-export-{suffix}.sqlite3")),
+            root.join(format!("shiori-meta-recover-{suffix}.sqlite3")),
+        )
+    }
+    fn source() -> String {
+        json!({
+            "format":"shiori-android-local-v1",
+            "exported_at":"2026-11-13T10:00:00Z",
+            "tasks":[{
+                "id":"u-tag","title":"Native tags","project":"Personal",
+                "description":"Archived unchanged","priority":"medium",
+                "status":"todo","due":"","tags":["Legacy"]
+            }],
+            "saved_views":[{"name":"Mine","view":"inbox","filter":"all",
+                "sort":"fifo","query":""}],
+            "sort":"fifo"
+        }).to_string()
+    }
+    fn send(path: &Path, value: Value) -> Result<Value, Box<dyn Error>> {
+        let mut request=value;
+        request["protocol"]=json!("shiori-native-working-v1");
+        working_request(path, &request.to_string())
+    }
+
+    #[test]
+    fn tags_are_atomic_revision_checked_ordered_and_durable() {
+        let (path, export, recovered) = paths();
+        let legacy = source();
+        initialize_working_copy(&path, &legacy).unwrap();
+        assert_eq!(read_android_metadata(&path).unwrap()["revision"], 1);
+        assert_eq!(
+            read_android_metadata(&path).unwrap()["tags_by_id"]["u-tag"],
+            json!(["Legacy"])
+        );
+        let before = send(&path,json!({"op":"list"})).unwrap();
+        let version=before["tasks"][0]["version"].as_i64().unwrap();
+        let response=send(&path,json!({
+            "op":"tags_set","id":"u-tag","expected_version":version,
+            "tags":["Native","Quality","栞"]
+        })).unwrap();
+        assert_eq!(response["version"],version+1);
+        assert_eq!(response["tags"],json!(["Native","Quality","栞"]));
+        for bad in [
+            json!({"op":"tags_set","id":"u-tag","expected_version":version,"tags":["stale"]}),
+            json!({"op":"tags_set","id":"u-tag","expected_version":version+1,"tags":["X","x"]}),
+            json!({"op":"tags_set","id":"u-tag","expected_version":version+1,"tags":["bad\nline"]}),
+            json!({"op":"tags_set","id":"u-tag","expected_version":version+1,"tags":[""]}),
+            json!({"op":"tags_set","id":"missing","expected_version":version+1,"tags":[]}),
+            json!({"op":"tags_set","id":"u-tag","expected_version":version+1,
+                "tags":(0..17).map(|n|n.to_string()).collect::<Vec<_>>()})
+        ] {
+            assert!(send(&path,bad).is_err());
+        }
+        assert_eq!(
+            read_android_metadata(&path).unwrap()["tags_by_id"]["u-tag"],
+            json!(["Native","Quality","栞"])
+        );
+        assert_eq!(
+            send(&path,json!({"op":"list"})).unwrap()["tasks"][0]["version"],
+            version+1
+        );
+        assert!(send(&path,json!({
+            "op":"edit","id":"u-tag","expected_version":version,"title":"stale"
+        })).is_err());
+        assert_eq!(
+            send(&path,json!({"op":"metadata"})).unwrap()["metadata"]["revision"],1
+        );
+        export_working_database(&path,&export).unwrap();
+        recover_to_separate_preview(&export,&recovered).unwrap();
+        assert_eq!(
+            read_android_metadata(&recovered).unwrap()["tags_by_id"]["u-tag"],
+            json!(["Native","Quality","栞"])
+        );
+        assert_eq!(
+            read_android_metadata(&recovered).unwrap()["revision"],1
+        );
+        let store=shiori_storage::SqliteStore::open(&path).unwrap();
+        assert_eq!(store.legacy_shadow_source().unwrap().as_deref(),Some(legacy.as_str()));
+        drop(store);
+        for file in [path,export,recovered] {std::fs::remove_file(file).unwrap();}
+    }
+
+    #[test]
+    fn workspace_preferences_are_revision_guarded_and_backed_up() {
+        let (path,export,recovered)=paths();
+        initialize_working_copy(&path,&source()).unwrap();
+        assert_eq!(read_android_metadata(&path).unwrap()["revision"],1);
+        let changed=send(&path,json!({
+            "op":"workspace_set","expected_revision":1,"sort":"priority",
+            "saved_views":[
+                {"name":"Urgent","view":"attention","filter":"high",
+                 "sort":"priority","query":"Quality"}
+            ]
+        })).unwrap();
+        assert_eq!(changed["metadata"]["revision"],2);
+        assert_eq!(changed["metadata"]["sort"],"priority");
+        assert_eq!(changed["metadata"]["saved_views"][0]["name"],"Urgent");
+        assert_eq!(read_android_metadata(&path).unwrap()["revision"],2);
+        for bad in [
+            json!({"op":"workspace_set","expected_revision":1,"sort":"fifo"}),
+            json!({"op":"workspace_set","expected_revision":2,"sort":"unknown"}),
+            json!({"op":"workspace_set","expected_revision":2,"saved_views":[
+                {"name":"Duplicate","view":"today","filter":"all","sort":"fifo","query":""},
+                {"name":"duplicate","view":"today","filter":"all","sort":"fifo","query":""}
+            ]}),
+            json!({"op":"workspace_set","expected_revision":2,"saved_views":[
+                {"name":"Extra","view":"today","filter":"all",
+                 "sort":"fifo","query":"","unexpected":true}
+            ]}),
+            json!({"op":"workspace_set","expected_revision":2})
+        ] {
+            assert!(send(&path,bad).is_err());
+        }
+        assert_eq!(read_android_metadata(&path).unwrap()["revision"],2);
+        let final_state=send(&path,json!({
+            "op":"workspace_set","expected_revision":2,"saved_views":[]
+        })).unwrap();
+        assert_eq!(final_state["metadata"]["revision"],3);
+        assert_eq!(final_state["metadata"]["sort"],"priority");
+        assert_eq!(final_state["metadata"]["saved_views"],json!([]));
+        export_working_database(&path,&export).unwrap();
+        recover_to_separate_preview(&export,&recovered).unwrap();
+        assert_eq!(read_android_metadata(&path).unwrap(),read_android_metadata(&recovered).unwrap());
+        assert_eq!(read_android_metadata(&recovered).unwrap()["revision"],3);
+        for file in [path,export,recovered] {std::fs::remove_file(file).unwrap();}
+    }
+
+    #[test]
+    fn older_native_database_without_revision_table_is_compatible() {
+        let (path,_,_)=paths();
+        initialize_working_copy(&path,&source()).unwrap();
+        assert_eq!(workspace_revision(&Connection::open(&path).unwrap()).unwrap(),1);
+        let updated=send(&path,json!({
+            "op":"workspace_set","expected_revision":1,"sort":"due"
+        })).unwrap();
+        assert_eq!(updated["metadata"]["revision"],2);
+        assert_eq!(updated["metadata"]["tags_by_id"]["u-tag"],json!(["Legacy"]));
+        std::fs::remove_file(path).unwrap();
+    }
+}
