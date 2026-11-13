@@ -39,4 +39,12 @@ internal object NativeVault {
         candidatePath: String,
         currentLegacyJson: String
     ): Boolean
+    /** Read-only assessment of pre-existing interrupted cutover artifacts.
+     * Returns a typed JSON report; never creates or replaces any database. */
+    external fun inspectInterruptedCanary(
+        candidatePath: String,
+        rollbackVaultPath: String,
+        nativePrimaryPath: String,
+        currentLegacyJson: String
+    ): String?
 }
