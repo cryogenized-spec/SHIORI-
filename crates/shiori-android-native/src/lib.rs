@@ -5,6 +5,7 @@
 //! Never silently overwrite the last native snapshot at Activity startup.
 mod audit;
 mod export;
+mod recovery;
 mod migration;
 mod working_copy;
 
@@ -357,6 +358,69 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_exportWorkingCopy
     let message = format!(
         "Verified Rust SQLite backup: {} records ({} deletions), {} dependencies, {} bytes",
         report.records, report.tombstones, report.dependencies, report.bytes
+    );
+    env.new_string(message)
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Stage an imported SQLite file into a NEW non-authoritative recovery
+/// preview. Both arguments must be app-private paths chosen by Kotlin.
+/// Never overwrites the working copy, legacy WebView store, or existing
+/// recovered preview. No JavaScript object or file path is exposed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_recoverWorkingCopy(
+    mut env: JNIEnv,
+    _object: JObject,
+    source_path: JString,
+    isolated_path: JString,
+) -> jstring {
+    let Ok(source) = env.get_string(&source_path) else {
+        return std::ptr::null_mut();
+    };
+    let source = String::from(source);
+    let Ok(destination) = env.get_string(&isolated_path) else {
+        return std::ptr::null_mut();
+    };
+    let destination = String::from(destination);
+    let Ok(report) = recovery::recover_to_separate_preview(
+        Path::new(&source), Path::new(&destination)
+    ) else {
+        return std::ptr::null_mut();
+    };
+    let message = format!(
+        "Verified isolated recovery: {} task records ({} deletions), {} dependencies",
+        report.records, report.tombstones, report.dependencies
+    );
+    env.new_string(message)
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Reopen a recovered preview READ ONLY to inspect it after an Android
+/// process restart; it does not promote or modify the recovered database.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_inspectRecoveredCopy(
+    mut env: JNIEnv,
+    _object: JObject,
+    isolated_path: JString,
+) -> jstring {
+    let Ok(path) = env.get_string(&isolated_path) else {
+        return std::ptr::null_mut();
+    };
+    let path = String::from(path);
+    if !Path::new(&path).is_file() {
+        return std::ptr::null_mut();
+    }
+    let Ok(connection) = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return std::ptr::null_mut();
+    };
+    let Ok((_, records, tombstones, dependencies)) = export::read_manifest(&connection) else {
+        return std::ptr::null_mut();
+    };
+    let message = format!(
+        "Verified recovered preview: {records} task records ({tombstones} deletions), {dependencies} dependencies. Neither task source is active here."
     );
     env.new_string(message)
         .map_or(std::ptr::null_mut(), |value| value.into_raw())
