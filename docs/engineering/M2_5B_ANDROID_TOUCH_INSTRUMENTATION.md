@@ -8,6 +8,8 @@ This change adds a dedicated `androidTest` APK built with AndroidX Test, separat
 
 `WebViewTouchAcceptanceTest.kt` uses Android's `Instrumentation.sendPointerSync` to send real screen-coordinate pointer events to the embedded WebView. It reads element locations using `getBoundingClientRect` and the physical WebView viewport geometry, then sends genuine `ACTION_DOWN`/`ACTION_UP` input. JavaScript is used only to **inspect** the DOM/storage, and to scroll the intended touch target into view. The test does not use `element.click()`, `form.requestSubmit()`, synthetic DOM events, or a mocked native bridge.
 
+Android's first instrumented run exposed a concrete **responsive-viewport issue**: the mobile capture button had a zero-width layout rectangle in the actual WebView. The Activity now enables `WebSettings.useWideViewPort` so its existing `width=device-width` meta tag is respected on phone-sized displays. A separate upfront assertion checks the Android viewport breakpoint and minimum 44-pixel layout width for the mobile capture control, then the tests inject pointer events.
+
 Required scenarios:
 
 1. Open New Task via the mobile plus button, close it via its header X. Repeat with real keyboard typing and the Cancel button. Assert the discarded task never appears in on-device localStorage. Open a third time and dismiss through Android Back (allowing an initial Back to dismiss the soft keyboard).
