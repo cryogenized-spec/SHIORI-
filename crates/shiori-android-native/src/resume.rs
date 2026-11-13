@@ -6,12 +6,8 @@ use serde_json::{Value, json};
 use std::{error::Error, fs, path::Path};
 
 use crate::{
-    audit::normalized_snapshot,
-    export::read_manifest,
-    migration::read_android_metadata,
-    parity::preflight,
-    recovery::records_match,
-    rollback::verify_legacy_rollback,
+    audit::normalized_snapshot, export::read_manifest, migration::read_android_metadata,
+    parity::preflight, recovery::records_match, rollback::verify_legacy_rollback,
     validate_snapshot,
 };
 
@@ -108,7 +104,9 @@ mod tests {
 
     fn paths() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
         let suffix = format!(
-            "{}-{}", std::process::id(), Utc::now().timestamp_nanos_opt().unwrap()
+            "{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
         );
         let root = std::env::temp_dir();
         (
@@ -133,7 +131,8 @@ mod tests {
                 "version":2,
                 "assigneeId":"local"
             }]
-        }).to_string()
+        })
+        .to_string()
     }
 
     #[test]
@@ -163,7 +162,9 @@ mod tests {
         let complete = inspect_interrupted_stage(&candidate, &vault, &primary, &original).unwrap();
         assert_eq!(complete["ready"], true);
         assert_eq!(complete["task_records"], 1);
-        for file in [candidate, vault, primary] { fs::remove_file(file).unwrap(); }
+        for file in [candidate, vault, primary] {
+            fs::remove_file(file).unwrap();
+        }
     }
 
     #[test]
@@ -174,13 +175,18 @@ mod tests {
         store_snapshot(&vault, &original).unwrap();
         export_working_database(&candidate, &primary).unwrap();
         let db = Connection::open(&primary).unwrap();
-        db.execute("UPDATE tasks SET title='Edited while native was active' WHERE id='legacy-42'",[])
-            .unwrap();
+        db.execute(
+            "UPDATE tasks SET title='Edited while native was active' WHERE id='legacy-42'",
+            [],
+        )
+        .unwrap();
         drop(db);
         assert!(inspect_interrupted_stage(&candidate, &vault, &primary, &original).is_err());
         assert!(primary.is_file());
         assert!(vault.is_file());
-        for file in [candidate, vault, primary] { fs::remove_file(file).unwrap(); }
+        for file in [candidate, vault, primary] {
+            fs::remove_file(file).unwrap();
+        }
     }
 
     #[test]
@@ -194,7 +200,9 @@ mod tests {
         fs::remove_file(&vault).unwrap();
         let mut changed: Value = serde_json::from_str(&original).unwrap();
         changed["tasks"][0]["title"] = json!("Different tasks");
-        assert!(inspect_interrupted_stage(&candidate, &vault, &primary, &changed.to_string()).is_err());
+        assert!(
+            inspect_interrupted_stage(&candidate, &vault, &primary, &changed.to_string()).is_err()
+        );
         assert!(!primary.exists());
         fs::remove_file(candidate).unwrap();
     }
