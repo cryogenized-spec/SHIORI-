@@ -321,12 +321,22 @@
     }
     return !nativeWorking.error;
   }
+  function clearTaskSurfacesOnSourceChange(){
+    activeDetail=null;
+    $('#detailOverlay').classList.remove('open');
+    $('#detailPane').replaceChildren();
+    $('#taskModal').classList.remove('open');
+    $('#taskModal').setAttribute('aria-hidden','true');
+    $('#editModal').classList.remove('open');
+    $('#editModal').setAttribute('aria-hidden','true');
+  }
   async function loadNativeCanary(){
     if(mode!=='android-local'||!nativeCanary.selected||nativeCanary.busy)return false;
     const generation=nativeCanary.generation;
     nativeCanary.busy=true;
     nativeCanary.active=false;
     nativeCanary.error='';
+    clearTaskSurfacesOnSourceChange();
     tasks=[];
     render();
     try{
@@ -389,6 +399,7 @@
     return loadNativeCanary();
   };
   window.shioriNativeUnavailable=()=>{
+    clearTaskSurfacesOnSourceChange();
     nativeCanary.generation++;
     nativeCanary.selected=true;
     nativeCanary.active=false;
@@ -398,6 +409,7 @@
   };
   window.shioriNativeDeactivate=()=>{
     if(mode!=='android-local')return false;
+    clearTaskSurfacesOnSourceChange();
     nativeCanary.generation++;
     nativeCanary.selected=false;nativeCanary.active=false;
     nativeCanary.busy=false;nativeCanary.pending=false;nativeCanary.error='';nativeCanary.metadata=null;
