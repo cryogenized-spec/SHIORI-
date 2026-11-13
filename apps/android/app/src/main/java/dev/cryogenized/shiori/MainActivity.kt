@@ -74,6 +74,8 @@ class MainActivity : Activity() {
                             "native-recover" -> beginIsolatedDatabaseRecovery()
                             "native-inspect" -> inspectIsolatedRecovery()
                             "migration-parity" -> auditNativeMigrationParity()
+                            "native-activate" -> beginGuardedNativeCanary()
+                            "native-rollback" -> rollbackNativeCanary()
                         }
                     }
                     return true
@@ -127,6 +129,28 @@ class MainActivity : Activity() {
                 // The bridge only becomes available for the bundled trusted page.
                 // No addJavascriptInterface, network endpoint or arbitrary path.
                 webView.evaluateJavascript("window.shioriNativeBridgeEnabled=true", null)
+                if (isDebugCanaryAllowed()) {
+                    webView.evaluateJavascript(
+                        "window.shioriNativeDebugCanaryAvailable=true", null
+                    )
+                }
+                if (isNativeCanarySelected()) {
+                    vaultExecutor.execute {
+                        val inspected = runCatching {
+                            if (!isDebugCanaryAllowed()) null
+                            else NativeVault.inspectRecoveredCopy(primaryPath())
+                        }.getOrNull()
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                webView.evaluateJavascript(
+                                    if (inspected != null) "window.shioriNativeActivate()"
+                                    else "window.shioriNativeUnavailable()",
+                                    null
+                                )
+                            }
+                        }
+                    }
+                }
                 // Read the native vault before creating the initial copy.
                 // Never overwrite an older snapshot merely because WebView
                 // happens to start with an empty/missing localStorage store.
@@ -204,6 +228,25 @@ class MainActivity : Activity() {
     /** One independent, never automatically overwritten native cutover trial. */
     private fun candidatePath(): String =
         File(filesDir, "shiori-native-cutover-candidate-v1.sqlite3").absolutePath
+
+    /** The debug-only selected Rust source is independent of earlier tests. */
+    private fun primaryPath(): String =
+        File(filesDir, "shiori-native-primary-canary-v1.sqlite3").absolutePath
+
+    /** Immutable backup of legacy Android JSON immediately before cutover. */
+    private fun cutoverRollbackPath(): String =
+        File(filesDir, "shiori-legacy-cutover-rollback-v1.sqlite3").absolutePath
+
+    private fun isDebugCanaryAllowed(): Boolean =
+        (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    private fun isNativeCanarySelected(): Boolean =
+        getSharedPreferences("shiori-native-canary", MODE_PRIVATE)
+            .getBoolean("selected", false)
+
+    private fun selectNativeCanary(enabled: Boolean): Boolean =
+        getSharedPreferences("shiori-native-canary", MODE_PRIVATE).edit()
+            .putBoolean("selected", enabled).commit()
 
     /**
      * The bundled page only signals a custom-scheme navigation; Kotlin pulls
@@ -443,6 +486,130 @@ class MainActivity : Activity() {
     }
 
     /**
+     * Debug APK only: one-time, opt-in pilot of the normal task UI over Rust.
+     * The existing WebView localStorage remains untouched and a separate
+     * rollback vault must be readable before the selected flag is written.
+     */
+    private fun beginGuardedNativeCanary() {
+        if (!isDebugCanaryAllowed()) {
+            notifyUser("Native cutover is disabled outside SHIORI debug builds")
+            return
+        }
+        if (isNativeCanarySelected()) {
+            notifyUser("Native SQLite is already selected")
+            return
+        }
+        if (File(primaryPath()).exists() || File(cutoverRollbackPath()).exists()) {
+            notifyUser("An earlier canary database/rollback exists; no files replaced")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Use Rust SQLite for tasks? Experimental")
+            .setMessage(
+                "Debug-only storage pilot. We will verify the current task fields, " +
+                    "create a permanent independent rollback backup, and switch the " +
+                    "normal task UI to a separate native database. Existing Android " +
+                    "tasks remain stored in WebView. Rust edits will NOT be merged " +
+                    "back if you choose rollback. Real-device validation is pending. " +
+                    "Export backups before proceeding."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Verify and enable") { _, _ ->
+                activateGuardedNativeCanary()
+            }
+            .show()
+    }
+
+    private fun activateGuardedNativeCanary() {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript("window.shioriExportBackup()") { encoded ->
+            val source = try {
+                val raw = JSONArray("[$encoded]").getString(0)
+                if (raw.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(raw).optString("format") != BACKUP_FORMAT
+                ) throw IOException("Invalid Android backup")
+                raw
+            } catch (_: Exception) {
+                notifyUser("Cannot make an unchanged legacy rollback snapshot")
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                var candidateExport: File? = null
+                val status = runCatching {
+                    if (isNativeCanarySelected() ||
+                        File(primaryPath()).exists() ||
+                        File(cutoverRollbackPath()).exists()
+                    ) throw IOException("A canary already exists")
+                    val rawReport = NativeVault.stageCutoverCandidate(candidatePath(), source)
+                        ?: throw IOException("Could not validate source parity")
+                    val report = JSONObject(rawReport)
+                    if (!report.optBoolean("ready", false)) {
+                        throw IOException("Migration field audit failed or source changed")
+                    }
+                    if (!NativeVault.storeSnapshot(cutoverRollbackPath(), source) ||
+                        NativeVault.loadSnapshot(cutoverRollbackPath()) != source
+                    ) throw IOException("Could not verify independent legacy rollback")
+                    candidateExport = File.createTempFile(
+                        "shiori-native-primary-", ".sqlite3", filesDir
+                    )
+                    if (!candidateExport!!.delete()) {
+                        throw IOException("Cannot prepare isolated native source")
+                    }
+                    NativeVault.exportWorkingCopy(
+                        candidatePath(), candidateExport!!.absolutePath
+                    ) ?: throw IOException("Failed canonical SQLite export verification")
+                    val primary = File(primaryPath())
+                    if (primary.exists() || !candidateExport!!.renameTo(primary)) {
+                        throw IOException("Cannot commit native canary database")
+                    }
+                    NativeVault.inspectRecoveredCopy(primary.absolutePath)
+                        ?: throw IOException("Native source failed post-install inspection")
+                    if (!selectNativeCanary(true)) {
+                        throw IOException("Cannot persist canary source selection")
+                    }
+                    true
+                }
+                candidateExport?.delete()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (status.isSuccess) {
+                        webView.evaluateJavascript("window.shioriNativeActivate()", null)
+                        notifyUser("Rust SQLite debug canary selected; legacy tasks kept")
+                    } else {
+                        notifyUser("Native cutover BLOCKED: " +
+                            (status.exceptionOrNull()?.message ?: "verification failed"))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun rollbackNativeCanary() {
+        if (!isNativeCanarySelected()) {
+            notifyUser("Android WebView tasks are already selected")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Return to the original Android tasks?")
+            .setMessage(
+                "The original WebView tasks are unchanged. Switching back will " +
+                    "NOT copy native-only edits into them. The native database and " +
+                    "its independent backup remain on this device. Export a " +
+                    "native SQLite backup before rolling back."
+            )
+            .setNegativeButton("Keep Rust source", null)
+            .setPositiveButton("Return to Android tasks") { _, _ ->
+                if (!selectNativeCanary(false)) {
+                    notifyUser("Could not persist rollback; Rust remains selected")
+                } else {
+                    webView.evaluateJavascript("window.shioriNativeDeactivate()", null)
+                    notifyUser("Returned to original Android WebView tasks")
+                }
+            }
+            .show()
+    }
+
+    /**
      * One-at-a-time, typed request/response bridge for the appassets origin.
      * Web content signals a fixed custom URL; Kotlin pulls the request from
      * the bundled JS and runs allowlisted operations on its serial I/O worker.
@@ -467,7 +634,9 @@ class MainActivity : Activity() {
             if (!requestId.matches(Regex("[1-9][0-9]{0,11}"))) return@evaluateJavascript
 
             val action = request.optString("op")
-            val supported = action in setOf("list", "create", "rename", "status", "delete")
+            val supported = action in setOf(
+                "list", "create", "rename", "edit", "status", "delete", "metadata"
+            )
             if (request.optString("protocol") != "shiori-native-working-v1" || !supported) {
                 completeNativeWorkingCommand(
                     requestId, JSONObject().put("ok", false)
@@ -477,7 +646,10 @@ class MainActivity : Activity() {
             }
             vaultExecutor.execute {
                 val answer = runCatching {
-                    NativeVault.workingCopyRequest(workingPath(), request.toString())
+                    NativeVault.workingCopyRequest(
+                        if (isNativeCanarySelected()) primaryPath() else workingPath(),
+                        request.toString()
+                    )
                 }.getOrNull()
                 val result = if (answer == null ||
                     answer.toByteArray(Charsets.UTF_8).size > MAX_NATIVE_RESPONSE_BYTES
@@ -512,7 +684,7 @@ class MainActivity : Activity() {
      * choose a destination. There is no native restore/cutover action here.
      */
     private fun beginNativeDatabaseExport() {
-        if (!File(workingPath()).isFile) {
+        if (!File(if (isNativeCanarySelected()) primaryPath() else workingPath()).isFile) {
             notifyUser("Create a Rust working copy before exporting its database")
             return
         }
@@ -545,7 +717,8 @@ class MainActivity : Activity() {
                 // zero-byte placeholder before Rust creates its snapshot.
                 if (!staging!!.delete()) throw IOException("Cannot prepare staging path")
                 val report = NativeVault.exportWorkingCopy(
-                    workingPath(), staging!!.absolutePath
+                    if (isNativeCanarySelected()) primaryPath() else workingPath(),
+                    staging!!.absolutePath
                 ) ?: throw IOException("Native SQLite export failed verification")
                 if (!staging!!.isFile ||
                     staging!!.length() == 0L ||
