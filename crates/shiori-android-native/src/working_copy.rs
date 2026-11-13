@@ -205,9 +205,10 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
             {
                 return Err("task notes exceed 6000 characters".into());
             }
-            let priority = input
-                .get("priority")
-                .map(|v| Priority::from_str(v.as_str().ok_or("invalid priority")?))
+            let priority = input.get("priority")
+                .map(|v| -> Result<Priority, Box<dyn Error>> {
+                    Ok(Priority::from_str(v.as_str().ok_or("invalid priority")?)?)
+                })
                 .transpose()?;
             let due_on = input
                 .get("due_on")
