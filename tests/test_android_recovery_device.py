@@ -28,12 +28,34 @@ class RecoveryDeviceContract(unittest.TestCase):
 
         with patch.object(device, "adb", side_effect=fake_adb):
             result = device.state()
-        self.assertEqual(len(result), 4)
+        self.assertEqual(len(result), len(device.PROTECTED) + 1)
         self.assertEqual(result[device.RECOVERY]["bytes"], 128)
         self.assertEqual(calls[0], ["get-state"])
         self.assertEqual(calls[1][:3], ["shell", "run-as", device.APP_ID])
         self.assertNotIn("rm ", " ".join(calls[1]))
         self.assertNotIn("cat ", " ".join(calls[1]))
+
+    def test_covers_selected_primary_rollback_vault_and_sqlite_sidecars(self):
+        self.assertIn("shiori-native-primary-canary-v1.sqlite3", device.PROTECTED)
+        self.assertIn("shiori-legacy-cutover-rollback-v1.sqlite3", device.PROTECTED)
+        self.assertIn("shiori-native-cutover-candidate-v1.sqlite3", device.PROTECTED)
+        for name in device.DATABASES:
+            for suffix in ("-wal", "-shm", "-journal"):
+                self.assertIn(name + suffix, device.PROTECTED)
+
+    def test_rejects_duplicate_rows_and_invalid_hex_digest(self):
+        rows = "\\n".join(
+            f"{name}|100|{'a' * 64}" for name in (*device.PROTECTED, device.RECOVERY)
+        )
+        for forged in (
+            rows + "\\n" + f"{device.PROTECTED[0]}|100|{'a' * 64}",
+            rows.replace("a" * 64, "z" * 64, 1),
+        ):
+            def fake_adb(args):
+                return "device" if args == ["get-state"] else forged
+            with patch.object(device, "adb", side_effect=fake_adb):
+                with self.assertRaises(RuntimeError):
+                    device.state()
 
     def test_refuses_missing_recovery_or_unexpected_rows(self):
         def fake_adb(args):
@@ -61,6 +83,24 @@ class RecoveryDeviceContract(unittest.TestCase):
                 with patch.object(sys, "argv", ["verify_recovery_device.py", "verify",
                                               "--baseline", str(baseline)]):
                     self.assertEqual(device.main(), 0)
+            # The old three-database harness missed active-primary and
+            # sidecar modifications. Both now fail closed.
+            result["shiori-native-primary-canary-v1.sqlite3"] = {
+                "bytes": 11, "sha256": "c" * 64
+            }
+            with patch.object(device, "state", return_value=result):
+                with patch.object(sys, "argv", ["verify_recovery_device.py", "verify",
+                                              "--baseline", str(baseline)]):
+                    self.assertEqual(device.main(), 1)
+            result["shiori-native-primary-canary-v1.sqlite3"] = None
+            result["shiori-native-working-v1.sqlite3-wal"] = {
+                "bytes": 44, "sha256": "d" * 64
+            }
+            with patch.object(device, "state", return_value=result):
+                with patch.object(sys, "argv", ["verify_recovery_device.py", "verify",
+                                              "--baseline", str(baseline)]):
+                    self.assertEqual(device.main(), 1)
+            result["shiori-native-working-v1.sqlite3-wal"] = None
             result[device.PROTECTED[0]] = {"bytes": 11, "sha256": "c" * 64}
             with patch.object(device, "state", return_value=result):
                 with patch.object(sys, "argv", ["verify_recovery_device.py", "verify",
