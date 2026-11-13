@@ -178,3 +178,18 @@
 }
 .native-readonly-pager button:disabled{opacity:.45;cursor:default}
 .native-readonly-pager button:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
+
+/* M2.3 explicit Rust task source: never visually impersonate legacy tasks. */
+.native-canary-banner {
+  display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+  border:1px solid var(--line);border-left:3px solid var(--plum);
+  border-radius:9px;padding:12px 14px;margin-bottom:16px;
+  background:var(--surface);font-size:12px;
+}
+.native-canary-banner strong {font-weight:700;}
+.native-canary-banner span {color:var(--muted);flex:1 1 180px;}
+.native-canary-banner button {
+  min-height:44px;padding:8px 14px;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);color:var(--text);
+}
+.native-canary-banner button:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
