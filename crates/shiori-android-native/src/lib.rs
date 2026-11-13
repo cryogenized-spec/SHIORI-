@@ -495,10 +495,7 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_verifyLegacyRollb
         return JNI_FALSE;
     };
     let current = String::from(current);
-    if rollback::verify_legacy_rollback(
-        Path::new(&vault), Path::new(&candidate), &current,
-    )
-    .is_ok()
+    if rollback::verify_legacy_rollback(Path::new(&vault), Path::new(&candidate), &current).is_ok()
     {
         JNI_TRUE
     } else {
