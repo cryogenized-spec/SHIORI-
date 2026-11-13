@@ -642,7 +642,12 @@ class MainActivity : Activity() {
                     !candidate!!.renameTo(target)
                 ) throw IOException("Cannot commit separate recovered preview")
                 val inspected = NativeVault.inspectRecoveredCopy(target.absolutePath)
-                    ?: throw IOException("Committed recovered preview did not verify")
+                if (inspected == null) {
+                    // We just created this path; remove only this unverified
+                    // recovery, never another pre-existing user database.
+                    target.delete()
+                    throw IOException("Committed recovered preview did not verify")
+                }
                 "$report. $inspected"
             }
             input?.delete()
