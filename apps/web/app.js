@@ -499,7 +499,7 @@
     // Stats and the calendar retain their legacy data source. They are
     // not mixed into the read-only native task-list projection.
     renderStats();renderUpcoming();renderCalendar();
-    $('[data-add]').forEach(button=>{
+    document.querySelectorAll('[data-add]').forEach(button=>{
       button.disabled=nativeReadOnly.active;
       button.title=nativeReadOnly.active?'Read-only preview · return to Android tasks':'';
     });
