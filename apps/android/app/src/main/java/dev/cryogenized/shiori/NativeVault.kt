@@ -22,4 +22,6 @@ internal object NativeVault {
     external fun initializeWorkingCopy(workingDatabasePath: String, backupJson: String): String?
     /** Revision-checked Rust task commands, only called by Kotlin dialogs. */
     external fun workingCopyRequest(workingDatabasePath: String, requestJson: String): String?
+    /** Export-only, verified SQLite snapshot into a NEW private staging path. */
+    external fun exportWorkingCopy(workingDatabasePath: String, stagingPath: String): String?
 }
