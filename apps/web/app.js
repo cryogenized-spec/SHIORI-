@@ -530,7 +530,7 @@
     return json.length<=MAX_BACKUP_CHARS?json:null;
   };
   window.shioriRestoreBackup=(raw)=>{
-    if(mode!=='android-local'||nativeReadOnly.active||nativeCanary.selected||typeof raw!=='string'||raw.length>MAX_BACKUP_CHARS)return false;
+    if(mode!=='android-local'||nativeReadOnly.active||nativeCanary.selected||nativeCanary.pending||typeof raw!=='string'||raw.length>MAX_BACKUP_CHARS)return false;
     try{
       const data=JSON.parse(raw);
       if(!data||data.format!==ANDROID_BACKUP_FORMAT||!Array.isArray(data.tasks)
@@ -965,7 +965,7 @@
   document.addEventListener('submit',event=>{
     if(event.target.id!=='nativeWorkingCreate')return;
     event.preventDefault();
-    if(mode!=='android-local'||nativeWorking.busy||nativeCanary.selected)return;
+    if(mode!=='android-local'||nativeWorking.busy||nativeCanary.selected||nativeCanary.pending)return;
     const field=$('#nativeWorkingTitle');
     const title=field?field.value.trim():'';
     if(!title||title.length>120){
@@ -1019,7 +1019,9 @@
     render();
   });
   $('#saveView').addEventListener('click',()=>{
-    if(nativeCanary.selected){toast('Saved-view editing is disabled in debug canary');return;}
+    if(nativeCanary.selected||nativeCanary.pending){
+      toast('Saved-view editing is paused during native source verification');return;
+    }
     if(!['today','attention','inbox','board'].includes(view)){toast('Open a task list before saving a view');return;}
     const name=prompt('Name for this saved view (up to 40 characters):','My focus');
     if(name===null)return;
