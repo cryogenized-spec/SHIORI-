@@ -144,7 +144,8 @@
   // Debug-only opt-in normal-UI canary. Source selection is owned by Kotlin,
   // never inferred from task rows or localStorage. A failed native read
   // displays an error and does not silently fall back to the legacy source.
-  const nativeCanary={selected:false,active:false,busy:false,pending:false,error:'',metadata:null};
+  const nativeCanary={selected:false,active:false,busy:false,pending:false,
+    generation:0,error:'',metadata:null};
   const NATIVE_PAGE_SIZE=50;
   const MAX_NATIVE_SOURCE_TASKS=5000;
   let nativeInFlight=null;
@@ -180,7 +181,10 @@
     if(!command || !allowed.includes(command.op))
       return Promise.reject(new Error('Unsupported native operation'));
     const id=String(++nativeNextId);
-    const request=Object.assign({protocol:'shiori-native-working-v1',request_id:id},command);
+    const request=Object.assign({
+      protocol:'shiori-native-working-v1',request_id:id,
+      source:nativeCanary.selected?'primary':'working'
+    },command);
     if(JSON.stringify(request).length>16000)
       return Promise.reject(new Error('Native request is too large'));
     return new Promise((resolve,reject)=>{
@@ -319,6 +323,7 @@
   }
   async function loadNativeCanary(){
     if(mode!=='android-local'||!nativeCanary.selected||nativeCanary.busy)return false;
+    const generation=nativeCanary.generation;
     nativeCanary.busy=true;
     nativeCanary.active=false;
     nativeCanary.error='';
@@ -326,6 +331,7 @@
     render();
     try{
       const response=await nativeWorkingRequest({op:'metadata'});
+      if(!nativeCanary.selected||nativeCanary.generation!==generation)return false;
       if(!response.ok||!response.metadata||
          !Array.isArray(response.metadata.saved_views)||
          typeof response.metadata.tags_by_id!=='object'||
@@ -333,6 +339,7 @@
         throw new Error('Native metadata unavailable; no source cutover');
       if(!(await nativePreviewRefresh()))
         throw new Error(nativeWorking.error||'Native task read failed');
+      if(!nativeCanary.selected||nativeCanary.generation!==generation)return false;
       const tags=response.metadata.tags_by_id;
       const candidate=nativeWorking.items.map(row=>{
         const task=fromStoredTask(row);
@@ -351,6 +358,7 @@
       render();
       return true;
     }catch(error){
+      if(!nativeCanary.selected||nativeCanary.generation!==generation)return false;
       tasks=[];
       nativeCanary.active=false;
       nativeCanary.error=error.message||'Cannot read native task source';
@@ -376,10 +384,12 @@
   window.shioriNativeActivate=()=>{
     if(mode!=='android-local')return Promise.resolve(false);
     nativeCanary.pending=false;
+    nativeCanary.generation++;
     nativeCanary.selected=true;
     return loadNativeCanary();
   };
   window.shioriNativeUnavailable=()=>{
+    nativeCanary.generation++;
     nativeCanary.selected=true;
     nativeCanary.active=false;
     nativeCanary.error='Native database could not be verified. The original Android tasks remain on the device. Use Settings to roll back.';
@@ -388,6 +398,7 @@
   };
   window.shioriNativeDeactivate=()=>{
     if(mode!=='android-local')return false;
+    nativeCanary.generation++;
     nativeCanary.selected=false;nativeCanary.active=false;
     nativeCanary.busy=false;nativeCanary.pending=false;nativeCanary.error='';nativeCanary.metadata=null;
     nativeWorking.open=false;nativeWorking.items=[];
@@ -408,13 +419,16 @@
   };
   async function mutateNativeCanary(command){
     if(!nativeCanary.active||nativeCanary.busy)return false;
+    const generation=nativeCanary.generation;
     nativeCanary.busy=true;
     try{
       const result=await nativeWorkingRequest(command);
+      if(!nativeCanary.selected||nativeCanary.generation!==generation)return false;
       if(!result.ok)throw new Error(String(result.error||'Native write failed'));
       nativeCanary.busy=false;
       return await loadNativeCanary();
     }catch(error){
+      if(!nativeCanary.selected||nativeCanary.generation!==generation)return false;
       nativeCanary.busy=false;
       nativeCanary.error='Native write failed: '+(error.message||'refresh required');
       toast('Native write rejected; refresh and inspect the task');
