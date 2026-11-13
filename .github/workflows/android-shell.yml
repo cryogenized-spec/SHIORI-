@@ -68,7 +68,7 @@ jobs:
           done
       - name: Build APK with bundled offline assets
         run: |
-          /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug --no-daemon --stacktrace
+          /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
       - name: Assert the APK is self-contained and network-permission-free
         run: |
           set -euo pipefail
@@ -116,6 +116,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Archive isolated Android instrumentation test APK
+        if: success()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-android-instrumentation
+          path: apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          if-no-files-found: error
+          retention-days: 14
+
   android-emulator-smoke:
     name: Android emulator lifecycle smoke
     needs: android-alpha
@@ -130,6 +139,11 @@ jobs:
         with:
           name: shiori-android-alpha
           path: build-apk
+      - name: Download the Android instrumentation test APK
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: shiori-android-instrumentation
+          path: build-test-apk
       - name: Verify downloaded APK matches source-job evidence
         run: |
           python3 tools/android/apk_release_evidence.py verify \
@@ -149,4 +163,4 @@ jobs:
           avd-name: shiori-api35
           disable-animations: true
           emulator-options: "-no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim"
-          script: python3 tests/android_emulator_smoke.py build-apk/app-debug.apk
+          script: python3 tests/android_emulator_smoke.py build-apk/app-debug.apk --test-apk build-test-apk/app-debug-androidTest.apk
