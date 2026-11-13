@@ -144,7 +144,7 @@
   // Debug-only opt-in normal-UI canary. Source selection is owned by Kotlin,
   // never inferred from task rows or localStorage. A failed native read
   // displays an error and does not silently fall back to the legacy source.
-  const nativeCanary={selected:false,active:false,busy:false,error:'',metadata:null};
+  const nativeCanary={selected:false,active:false,busy:false,pending:false,error:'',metadata:null};
   const NATIVE_PAGE_SIZE=50;
   const MAX_NATIVE_SOURCE_TASKS=5000;
   let nativeInFlight=null;
@@ -361,8 +361,21 @@
       render();
     }
   }
+  // Freeze legacy writes while Kotlin validates parity and commits the
+  // independent rollback. No edits are allowed between snapshot and switch.
+  window.shioriFreezeLegacyForCutover=()=>{
+    if(mode!=='android-local'||nativeCanary.selected||nativeCanary.pending)return null;
+    nativeCanary.pending=true;
+    render();
+    return window.shioriExportBackup();
+  };
+  window.shioriAbortCutover=()=>{
+    nativeCanary.pending=false;
+    render();
+  };
   window.shioriNativeActivate=()=>{
     if(mode!=='android-local')return Promise.resolve(false);
+    nativeCanary.pending=false;
     nativeCanary.selected=true;
     return loadNativeCanary();
   };
@@ -376,7 +389,7 @@
   window.shioriNativeDeactivate=()=>{
     if(mode!=='android-local')return false;
     nativeCanary.selected=false;nativeCanary.active=false;
-    nativeCanary.busy=false;nativeCanary.error='';nativeCanary.metadata=null;
+    nativeCanary.busy=false;nativeCanary.pending=false;nativeCanary.error='';nativeCanary.metadata=null;
     nativeWorking.open=false;nativeWorking.items=[];
     try{
       const saved=JSON.parse(localStorage.getItem(taskStoreKey)||'[]');
@@ -595,7 +608,7 @@
   const dateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
   let toastTimer;
   const save=()=>{
-    if(nativeReadOnly.active||nativeCanary.selected){
+    if(nativeReadOnly.active||nativeCanary.selected||nativeCanary.pending){
       toast('Task writes are not allowed in the legacy source during native canary');
       return;
     }
@@ -674,9 +687,14 @@
     // The explicitly selected canary is instead the task source for all views.
     renderStats();renderUpcoming();renderCalendar();
     document.querySelectorAll('[data-add]').forEach(button=>{
-      button.disabled=nativeReadOnly.active||(nativeCanary.selected&&!nativeCanary.active);
+      button.disabled=nativeCanary.pending||nativeReadOnly.active||
+        (nativeCanary.selected&&!nativeCanary.active);
       button.title=button.disabled?'Task source is read-only or unavailable':'';
     });
+    if(nativeCanary.pending&&view!=='settings'){
+      $('#mainData').innerHTML='<section class="native-readonly-banner" role="status"><strong>Verifying native cutover</strong><p>Legacy writes are temporarily paused while backup and parity checks finish.</p></section>';
+      return;
+    }
     if(nativeCanary.selected&&!nativeCanary.active&&view!=='settings'){
       $('#mainData').innerHTML='<section class="native-readonly-banner" role="alert"><strong>Rust task source unavailable</strong><p>'+
         escapeHTML(nativeCanary.error||'Loading verified native SQLite records…')+
@@ -696,6 +714,7 @@
     $('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
   function closeSidebar(){$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');}
   function openModal(){
+    if(nativeCanary.pending){toast('Storage verification in progress');return;}
     if(nativeCanary.selected&&!nativeCanary.active){toast('Rust task source unavailable · return to Settings');return;}
     if(nativeReadOnly.active){toast('Read-only source preview · return to Android tasks to edit');return;}$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
   function closeModal(){$('#taskModal').classList.remove('open');$('#taskModal').setAttribute('aria-hidden','true');}
@@ -720,7 +739,7 @@
   }
   function openEdit(){
     const t=tasks.find(item=>item.id===activeDetail);
-    if(!t || mode==='checking' || mode==='local-error') return;
+    if(!t || nativeCanary.pending || mode==='checking' || mode==='local-error') return;
     $('#editTaskName').value=t.title;
     $('#editTaskDescription').value=t.description||'';
     $('#editTaskProject').value=t.project;
@@ -741,7 +760,7 @@
     setTimeout(()=>$('#editTaskName').focus(),0);
   }
   async function removeTask(){
-    if(nativeReadOnly.active)return;
+    if(nativeReadOnly.active||nativeCanary.pending)return;
     const t=tasks.find(item=>item.id===activeDetail);
     if(!t || mode==='checking' || mode==='local-error') return;
     if(!confirm('Move this task to deleted records?')) return;
@@ -764,7 +783,7 @@
   }
   function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?(nativeCanary.selected?'Debug Rust/SQLite task · original Android tasks kept':'Offline Android task · stored on this device'):'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
   async function toggleTask(id){
-    if(nativeReadOnly.active)return;
+    if(nativeReadOnly.active||nativeCanary.pending)return;
     const t=tasks.find(x=>x.id===id);if(!t)return;
     const next=t.status==='done'?'todo':'done';
     if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
@@ -906,7 +925,7 @@
   });
   $('#editTaskForm').addEventListener('submit',async e=>{
     e.preventDefault();
-    if(nativeReadOnly.active)return;
+    if(nativeReadOnly.active||nativeCanary.pending)return;
     const t=tasks.find(item=>item.id===activeDetail);
     if(!t || mode==='checking' || mode==='local-error') return;
     const estimateText=$('#editTaskEstimate').value.trim();
@@ -959,7 +978,7 @@
 
   $('#taskForm').addEventListener('submit',async e=>{
     e.preventDefault();
-    if(nativeReadOnly.active)return;
+    if(nativeReadOnly.active||nativeCanary.pending)return;
     const title=$('#taskName').value.trim();if(!title)return;
     if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
     const record={title,notes:$('#taskDescription').value.trim(),project:$('#taskProject').value,priority:$('#taskPriority').value,due_on:$('#taskDue').value||null,estimate_minutes:Number($('#taskEstimate').value)};
@@ -1044,7 +1063,7 @@
     if(e.key==='/'){e.preventDefault();$('#searchInput').focus();}
     if(e.key.toLowerCase()==='n' && !e.metaKey && !e.ctrlKey){openModal();}
   });
-  let dragged=null;document.addEventListener('dragstart',e=>{if(nativeReadOnly.active)return;const card=e.target.closest('[data-drag]');if(card){dragged=card.dataset.drag;card.classList.add('dragging');}});document.addEventListener('dragend',()=>{$$('.dragging').forEach(c=>c.classList.remove('dragging'));dragged=null;});document.addEventListener('dragover',e=>{const col=e.target.closest('[data-drop]');if(col){e.preventDefault();col.classList.add('drag-over');}});document.addEventListener('dragleave',e=>{const col=e.target.closest('[data-drop]');if(col && !col.contains(e.relatedTarget))col.classList.remove('drag-over');});document.addEventListener('drop',e=>{if(nativeReadOnly.active)return;const col=e.target.closest('[data-drop]');if(col && dragged){
+  let dragged=null;document.addEventListener('dragstart',e=>{if(nativeReadOnly.active||nativeCanary.pending)return;const card=e.target.closest('[data-drag]');if(card){dragged=card.dataset.drag;card.classList.add('dragging');}});document.addEventListener('dragend',()=>{$$('.dragging').forEach(c=>c.classList.remove('dragging'));dragged=null;});document.addEventListener('dragover',e=>{const col=e.target.closest('[data-drop]');if(col){e.preventDefault();col.classList.add('drag-over');}});document.addEventListener('dragleave',e=>{const col=e.target.closest('[data-drop]');if(col && !col.contains(e.relatedTarget))col.classList.remove('drag-over');});document.addEventListener('drop',e=>{if(nativeReadOnly.active||nativeCanary.pending)return;const col=e.target.closest('[data-drop]');if(col && dragged){
     e.preventDefault();const t=tasks.find(x=>x.id===dragged);
     if(t){
       if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
