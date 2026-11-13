@@ -172,6 +172,15 @@
     }
     return true;
   };
+  function cancelNativeRequestForSourceChange(){
+    // A new source must not inherit a pending request from the old one.
+    // Late Kotlin callbacks are refused because their ID no longer matches.
+    const pending=nativeInFlight;
+    if(!pending)return;
+    nativeInFlight=null;
+    clearTimeout(pending.timer);
+    pending.reject(new Error('Task source changed while request was pending'));
+  }
   function nativeWorkingRequest(command){
     if(mode!=='android-local'||window.shioriNativeBridgeEnabled!==true)
       return Promise.reject(new Error('Native Rust bridge unavailable in this preview'));
@@ -375,8 +384,10 @@
       render();
       return false;
     }finally{
-      nativeCanary.busy=false;
-      render();
+      if(nativeCanary.generation===generation){
+        nativeCanary.busy=false;
+        render();
+      }
     }
   }
   // Freeze legacy writes while Kotlin validates parity and commits the
@@ -393,12 +404,14 @@
   };
   window.shioriNativeActivate=()=>{
     if(mode!=='android-local')return Promise.resolve(false);
+    cancelNativeRequestForSourceChange();
     nativeCanary.pending=false;
     nativeCanary.generation++;
     nativeCanary.selected=true;
     return loadNativeCanary();
   };
   window.shioriNativeUnavailable=()=>{
+    cancelNativeRequestForSourceChange();
     clearTaskSurfacesOnSourceChange();
     nativeCanary.generation++;
     nativeCanary.selected=true;
@@ -409,6 +422,7 @@
   };
   window.shioriNativeDeactivate=()=>{
     if(mode!=='android-local')return false;
+    cancelNativeRequestForSourceChange();
     clearTaskSurfacesOnSourceChange();
     nativeCanary.generation++;
     nativeCanary.selected=false;nativeCanary.active=false;
