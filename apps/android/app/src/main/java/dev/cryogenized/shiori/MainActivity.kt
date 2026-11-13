@@ -23,6 +23,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.FileAlreadyExistsException
 
 /**
  * Minimal native Android container around the same offline-responsive SHIORI UI.
@@ -264,6 +266,22 @@ class MainActivity : Activity() {
     /** Immutable backup of legacy Android JSON immediately before cutover. */
     private fun cutoverRollbackPath(): String =
         File(filesDir, "shiori-legacy-cutover-rollback-v1.sqlite3").absolutePath
+
+    /**
+     * File.renameTo() may replace an existing POSIX destination during an
+     * Activity recreation race. NIO move without REPLACE_EXISTING refuses a
+     * duplicate target instead of silently destroying a prior database.
+     */
+    private fun installNewPrivateSqlite(staged: File, target: File) {
+        if (!staged.isFile || target.exists()) {
+            throw IOException("Native SQLite destination already exists or source is missing")
+        }
+        try {
+            Files.move(staged.toPath(), target.toPath())
+        } catch (_: FileAlreadyExistsException) {
+            throw IOException("Native SQLite destination was created by another operation")
+        }
+    }
 
     private fun isDebugCanaryAllowed(): Boolean =
         (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -612,9 +630,7 @@ class MainActivity : Activity() {
                         candidatePath(), candidateExport!!.absolutePath
                     ) ?: throw IOException("Failed canonical SQLite export verification")
                     val primary = File(primaryPath())
-                    if (primary.exists() || !candidateExport!!.renameTo(primary)) {
-                        throw IOException("Cannot commit native canary database")
-                    }
+                    installNewPrivateSqlite(candidateExport!!, primary)
                     NativeVault.inspectRecoveredCopy(primary.absolutePath)
                         ?: throw IOException("Native source failed post-install inspection")
                     if (!selectNativeCanary(true)) {
@@ -739,9 +755,9 @@ class MainActivity : Activity() {
                         NativeVault.exportWorkingCopy(
                             candidatePath(), candidateExport!!.absolutePath
                         ) ?: throw IOException("Cannot verify new native SQLite source")
-                        if (File(primaryPath()).exists() ||
-                            !candidateExport!!.renameTo(File(primaryPath()))
-                        ) throw IOException("Unable to commit isolated native primary")
+                        installNewPrivateSqlite(
+                            candidateExport!!, File(primaryPath())
+                        )
                     }
                     val final = inspect()
                     if (!final.optBoolean("ready", false)) {
@@ -1111,9 +1127,7 @@ class MainActivity : Activity() {
                 val report = NativeVault.recoverWorkingCopy(
                     input!!.absolutePath, candidate!!.absolutePath
                 ) ?: throw IOException("SQLite backup failed native validation")
-                if (!candidate!!.isFile || target.exists() ||
-                    !candidate!!.renameTo(target)
-                ) throw IOException("Cannot commit separate recovered preview")
+                installNewPrivateSqlite(candidate!!, target)
                 val inspected = NativeVault.inspectRecoveredCopy(target.absolutePath)
                 if (inspected == null) {
                     // We just created this path; remove only this unverified
