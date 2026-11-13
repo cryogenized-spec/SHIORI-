@@ -6,8 +6,8 @@
 mod audit;
 mod export;
 mod migration;
-mod recovery;
 mod parity;
+mod recovery;
 mod working_copy;
 
 use chrono::NaiveDate;
