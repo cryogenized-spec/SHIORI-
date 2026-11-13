@@ -5,8 +5,8 @@
 //! Never silently overwrite the last native snapshot at Activity startup.
 mod audit;
 mod export;
-mod recovery;
 mod migration;
+mod recovery;
 mod working_copy;
 
 use chrono::NaiveDate;
@@ -382,9 +382,9 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_recoverWorkingCop
         return std::ptr::null_mut();
     };
     let destination = String::from(destination);
-    let Ok(report) = recovery::recover_to_separate_preview(
-        Path::new(&source), Path::new(&destination)
-    ) else {
+    let Ok(report) =
+        recovery::recover_to_separate_preview(Path::new(&source), Path::new(&destination))
+    else {
         return std::ptr::null_mut();
     };
     let message = format!(
@@ -410,10 +410,9 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_inspectRecoveredC
     if !Path::new(&path).is_file() {
         return std::ptr::null_mut();
     }
-    let Ok(connection) = rusqlite::Connection::open_with_flags(
-        &path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    ) else {
+    let Ok(connection) =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
         return std::ptr::null_mut();
     };
     let Ok((_, records, tombstones, dependencies)) = export::read_manifest(&connection) else {
