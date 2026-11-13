@@ -199,27 +199,50 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
                 }
             };
             let notes = present_string("notes")?;
-            if notes.as_ref().is_some_and(|value| value.chars().count() > 6000) {
+            if notes
+                .as_ref()
+                .is_some_and(|value| value.chars().count() > 6000)
+            {
                 return Err("task notes exceed 6000 characters".into());
             }
-            let priority = input.get("priority")
+            let priority = input
+                .get("priority")
                 .map(|v| Priority::from_str(v.as_str().ok_or("invalid priority")?))
                 .transpose()?;
-            let due_on = input.get("due_on")
+            let due_on = input
+                .get("due_on")
                 .map(|v| -> Result<Option<NaiveDate>, Box<dyn Error>> {
-                    if v.is_null() { Ok(None) }
-                    else { date(v.as_str().ok_or("invalid due date")?) }
-                }).transpose()?;
-            let estimate_minutes = input.get("estimate_minutes")
+                    if v.is_null() {
+                        Ok(None)
+                    } else {
+                        date(v.as_str().ok_or("invalid due date")?)
+                    }
+                })
+                .transpose()?;
+            let estimate_minutes = input
+                .get("estimate_minutes")
                 .map(|v| -> Result<Option<i64>, Box<dyn Error>> {
-                    if v.is_null() { Ok(None) }
-                    else { Ok(Some(validate_estimate(v.as_i64().ok_or("invalid effort")?)?)) }
-                }).transpose()?;
-            let assignee_id = input.get("assignee_id")
+                    if v.is_null() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(validate_estimate(
+                            v.as_i64().ok_or("invalid effort")?,
+                        )?))
+                    }
+                })
+                .transpose()?;
+            let assignee_id = input
+                .get("assignee_id")
                 .map(|v| -> Result<Option<String>, Box<dyn Error>> {
-                    if v.is_null() { Ok(None) }
-                    else { Ok(Some(validate_assignee_id(v.as_str().ok_or("invalid assignee")?)?)) }
-                }).transpose()?;
+                    if v.is_null() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(validate_assignee_id(
+                            v.as_str().ok_or("invalid assignee")?,
+                        )?))
+                    }
+                })
+                .transpose()?;
             let task = store.edit_if_version(
                 requested(&input, "id")?,
                 version(&input)?,
@@ -499,34 +522,61 @@ mod tests {
         }]);
         initialize_working_copy(&path, &source.to_string()).unwrap();
         let metadata = send(&path, command("metadata")).unwrap();
-        assert_eq!(metadata["metadata"]["tags_by_id"]["u123"], json!(["Original","Native"]));
-        assert_eq!(metadata["metadata"]["saved_views"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            metadata["metadata"]["tags_by_id"]["u123"],
+            json!(["Original", "Native"])
+        );
+        assert_eq!(
+            metadata["metadata"]["saved_views"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         let before = send(&path, command("list")).unwrap();
         let rev = before["tasks"][0]["version"].as_i64().unwrap();
-        let changed = send(&path, json!({
-            "protocol":PROTOCOL, "op":"edit", "id":"u123",
-            "expected_version":rev,
-            "title":"Updated via normal UI", "notes":"Preserve Unicode 栞",
-            "project":"New home", "priority":"urgent",
-            "due_on":"2026-12-11", "estimate_minutes":50,
-            "assignee_id":"local"
-        })).unwrap();
+        let changed = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL, "op":"edit", "id":"u123",
+                "expected_version":rev,
+                "title":"Updated via normal UI", "notes":"Preserve Unicode 栞",
+                "project":"New home", "priority":"urgent",
+                "due_on":"2026-12-11", "estimate_minutes":50,
+                "assignee_id":"local"
+            }),
+        )
+        .unwrap();
         assert_eq!(changed["task"]["notes"], "Preserve Unicode 栞");
         assert_eq!(changed["task"]["priority"], "urgent");
         assert_eq!(changed["task"]["estimate_minutes"], 50);
         assert_eq!(changed["task"]["assignee_id"], "local");
         assert!(changed["task"]["created_at"].is_string());
-        assert!(send(&path, json!({
-            "protocol":PROTOCOL,"op":"edit","id":"u123",
-            "expected_version":rev,"notes":"Stale writer"
-        })).is_err());
-        assert!(send(&path, json!({
-            "protocol":PROTOCOL,"op":"edit","id":"u123",
-            "expected_version":changed["task"]["version"],
-            "estimate_minutes":0
-        })).is_err());
-        assert_eq!(send(&path, command("metadata")).unwrap()["metadata"]["tags_by_id"]["u123"],
-            json!(["Original","Native"]));
+        assert!(
+            send(
+                &path,
+                json!({
+                    "protocol":PROTOCOL,"op":"edit","id":"u123",
+                    "expected_version":rev,"notes":"Stale writer"
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            send(
+                &path,
+                json!({
+                    "protocol":PROTOCOL,"op":"edit","id":"u123",
+                    "expected_version":changed["task"]["version"],
+                    "estimate_minutes":0
+                })
+            )
+            .is_err()
+        );
+        assert_eq!(
+            send(&path, command("metadata")).unwrap()["metadata"]["tags_by_id"]["u123"],
+            json!(["Original", "Native"])
+        );
         std::fs::remove_file(path).unwrap();
     }
 
