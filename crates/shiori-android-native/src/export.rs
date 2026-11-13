@@ -95,7 +95,7 @@ pub fn export_working_database(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{migration::stage_legacy_backup, working_copy::initialize_working_copy};
+    use crate::working_copy::initialize_working_copy;
     use chrono::Utc;
     use shiori_core::{Priority, Task};
     use shiori_storage::SqliteStore;
@@ -129,12 +129,10 @@ mod tests {
         initialize_working_copy(&source, &original).unwrap();
         {
             let connection = Connection::open(&source).unwrap();
-            let mode: String = connection
-                .pragma_query_value(None, "journal_mode", |r| r.get(0))
+            let journal: String = connection
+                .query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))
                 .unwrap();
-            let _: String = connection
-                .pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))
-                .unwrap_or(mode);
+            assert_eq!(journal.to_lowercase(), "wal");
         }
         let new_id;
         {
