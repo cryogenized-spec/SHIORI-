@@ -59,6 +59,8 @@ jobs:
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_initializeWorkingCopy'
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_workingCopyRequest'
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_exportWorkingCopy'
+            readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_recoverWorkingCopy'
+            readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_inspectRecoveredCopy'
           done
       - name: Build APK with bundled offline assets
         run: |
