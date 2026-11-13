@@ -92,7 +92,9 @@ class RecoveryDeviceContract(unittest.TestCase):
                 with patch.object(sys, "argv", ["verify_recovery_device.py", "verify",
                                               "--baseline", str(baseline)]):
                     self.assertEqual(device.main(), 1)
-            result["shiori-native-primary-canary-v1.sqlite3"] = None
+            result["shiori-native-primary-canary-v1.sqlite3"] = {
+                "bytes": 10, "sha256": "a" * 64
+            }
             result["shiori-native-working-v1.sqlite3-wal"] = {
                 "bytes": 44, "sha256": "d" * 64
             }
