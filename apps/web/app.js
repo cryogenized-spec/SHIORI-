@@ -1159,12 +1159,23 @@
   });
   $('#searchInput').addEventListener('input',e=>{query=e.target.value;nativeReadOnly.page=0;render();});
   $('#filterButton').addEventListener('click',()=>{const options=['all','urgent','high','medium','low'];filter=options[(options.indexOf(filter)+1)%options.length];nativeReadOnly.page=0;render();});
-  $('#sortMode').addEventListener('change',e=>{
-    if (!['focus','fifo','due','priority'].includes(e.target.value)) return;
-    sortMode=e.target.value;
-    if(!nativeCanary.selected){
-      try {localStorage.setItem('shiori-demo-sort',sortMode);signalNativeVault();} catch {}
+  $('#sortMode').addEventListener('change',async e=>{
+    const selected=e.target.value;
+    if(!['focus','fifo','due','priority'].includes(selected))return;
+    if(nativeCanary.selected){
+      const previous=nativeCanary.metadata?.sort||sortMode;
+      e.target.value=previous;
+      if(await saveNativeWorkspace({sort:selected})){
+        toast('Native task ordering saved in SQLite');
+      }else{
+        e.target.value=previous;
+        toast('Native ordering not saved; reload and try again');
+      }
+      return;
     }
+    if(nativeCanary.pending)return;
+    sortMode=selected;
+    try{localStorage.setItem('shiori-demo-sort',sortMode);signalNativeVault();}catch{}
     render();
   });
   $('#savedViewSelect').addEventListener('change',e=>{
@@ -1177,31 +1188,49 @@
     $('#searchInput').value=query;
     render();
   });
-  $('#saveView').addEventListener('click',()=>{
-    if(nativeCanary.selected||nativeCanary.pending){
-      toast('Saved-view editing is paused during native source verification');return;
+  $('#saveView').addEventListener('click',async ()=>{
+    if(nativeCanary.pending||(nativeCanary.selected&&!nativeCanary.active)){
+      toast('Task source is being verified; saved views are unavailable');return;
     }
     if(!['today','attention','inbox','board'].includes(view)){toast('Open a task list before saving a view');return;}
     const name=prompt('Name for this saved view (up to 40 characters):','My focus');
     if(name===null)return;
     const normalized=name.trim();
-    if(!normalized || normalized.length>40){toast('Enter a name with up to 40 characters');return;}
+    if(!normalized||normalized.length>40){toast('Enter a name with up to 40 characters');return;}
     const entry={name:normalized,view,filter,sort:sortMode,query};
-    const index=savedViews.findIndex(x=>x.name===normalized);
-    if(index>=0)savedViews[index]=entry;
+    const next=[...savedViews];
+    const index=next.findIndex(x=>x.name===normalized);
+    if(index>=0)next[index]=entry;
     else{
-      if(savedViews.length>=30){toast('30 saved views maximum');return;}
-      savedViews.push(entry);
+      if(next.length>=30){toast('30 saved views maximum');return;}
+      next.push(entry);
     }
-    persistSavedViews();
+    if(nativeCanary.selected){
+      if(!(await saveNativeWorkspace({saved_views:next}))){
+        toast('Native saved view was not changed; refresh before retrying');return;
+      }
+    }else{
+      savedViews=next;
+      persistSavedViews();
+    }
     $('#savedViewSelect').value=normalized;
     toast('Saved view: '+normalized);
   });
-  $('#removeView').addEventListener('click',()=>{
-    if(nativeCanary.selected){toast('Saved-view editing is disabled in debug canary');return;}
-    const name=$('#savedViewSelect').value;if(!name){toast('Select a saved view first');return;}
-    savedViews=savedViews.filter(v=>v.name!==name);
-    persistSavedViews();
+  $('#removeView').addEventListener('click',async ()=>{
+    if(nativeCanary.pending||(nativeCanary.selected&&!nativeCanary.active)){
+      toast('Task source is being verified; saved views are unavailable');return;
+    }
+    const name=$('#savedViewSelect').value;
+    if(!name){toast('Select a saved view first');return;}
+    const next=savedViews.filter(v=>v.name!==name);
+    if(nativeCanary.selected){
+      if(!(await saveNativeWorkspace({saved_views:next}))){
+        toast('Native saved view was not removed; refresh before retrying');return;
+      }
+    }else{
+      savedViews=next;
+      persistSavedViews();
+    }
     toast('Saved view removed');
   });
   $('#viewSwitch').addEventListener('click',()=>setView(view==='board'?'today':'board'));
