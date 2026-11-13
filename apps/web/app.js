@@ -769,11 +769,38 @@
       '<button type="button" data-view="settings">Storage settings</button></section>':'')+html;
     $('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
   function closeSidebar(){$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');}
+  // Android's soft keyboard can steal focus while a dialog is open. Keep
+  // one focus owner per modal so Back, X, Cancel and Escape all restore an
+  // accessible control rather than leaving focus on a hidden input.
+  const dialogOpeners={create:null,edit:null};
+  function restoreDialogFocus(element){
+    if(element && element.isConnected && !element.disabled &&
+       !element.closest('[aria-hidden="true"]')){
+      element.focus({preventScroll:true});
+    }
+  }
   function openModal(){
     if(nativeCanary.pending){toast('Storage verification in progress');return;}
     if(nativeCanary.selected&&!nativeCanary.active){toast('Rust task source unavailable · return to Settings');return;}
-    if(nativeReadOnly.active){toast('Read-only source preview · return to Android tasks to edit');return;}$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
-  function closeModal(){$('#taskModal').classList.remove('open');$('#taskModal').setAttribute('aria-hidden','true');}
+    if(nativeReadOnly.active){toast('Read-only source preview · return to Android tasks to edit');return;}
+    if($('#taskModal').classList.contains('open'))return;
+    dialogOpeners.create=document.activeElement;
+    $('#taskModal').classList.add('open');
+    $('#taskModal').setAttribute('aria-hidden','false');
+    $('#taskForm').reset();$('#taskDue').value=newDate();
+    setTimeout(()=>{
+      if($('#taskModal').classList.contains('open'))$('#taskName').focus();
+    },0);
+  }
+  function closeModal(){
+    const modal=$('#taskModal'),wasOpen=modal.classList.contains('open');
+    modal.classList.remove('open');modal.setAttribute('aria-hidden','true');
+    if(wasOpen){
+      if(modal.contains(document.activeElement))document.activeElement.blur();
+      restoreDialogFocus(dialogOpeners.create);
+    }
+    dialogOpeners.create=null;
+  }
   // Dismiss exactly one surface per Back/Escape press, topmost first.
   // The native Android Activity sends a cancelable shiori-native-back event;
   // this keeps the browser UI and Android system navigation in agreement.
@@ -790,8 +817,14 @@
     if(dismissTopLayer())event.preventDefault();
   });
   function closeEdit(){
-    $('#editModal').classList.remove('open');
-    $('#editModal').setAttribute('aria-hidden','true');
+    const modal=$('#editModal'),wasOpen=modal.classList.contains('open');
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden','true');
+    if(wasOpen){
+      if(modal.contains(document.activeElement))document.activeElement.blur();
+      restoreDialogFocus(dialogOpeners.edit);
+    }
+    dialogOpeners.edit=null;
   }
   function openEdit(){
     const t=tasks.find(item=>item.id===activeDetail);
@@ -811,9 +844,12 @@
       assigneeSelect.add(new Option('Other: '+t.assigneeId,t.assigneeId));
     }
     assigneeSelect.value=t.assigneeId||'';
+    dialogOpeners.edit=document.activeElement;
     $('#editModal').classList.add('open');
     $('#editModal').setAttribute('aria-hidden','false');
-    setTimeout(()=>$('#editTaskName').focus(),0);
+    setTimeout(()=>{
+      if($('#editModal').classList.contains('open'))$('#editTaskName').focus();
+    },0);
   }
   async function removeTask(){
     if(nativeReadOnly.active||nativeCanary.pending)return;
@@ -1120,6 +1156,29 @@
     if(e.key==='Escape'){
       if(dismissTopLayer())e.preventDefault();
       return;
+    }
+    const topModal=$('#editModal').classList.contains('open')?$('#editModal'):
+      $('#taskModal').classList.contains('open')?$('#taskModal'):null;
+    if(topModal){
+      // Keep keyboard Tab inside the visible dialog; Android Back and the
+      // explicit X/Cancel remain available regardless of screen height.
+      if(e.key==='Tab'){
+        const controls=Array.from(topModal.querySelectorAll(
+          'button:not([disabled]),input:not([disabled]),textarea:not([disabled]),'+
+          'select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+        )).filter(node=>node.getClientRects().length>0);
+        if(controls.length){
+          const first=controls[0],last=controls[controls.length-1];
+          if(!topModal.contains(document.activeElement)){
+            e.preventDefault();(e.shiftKey?last:first).focus();
+          }else if(e.shiftKey&&document.activeElement===first){
+            e.preventDefault();last.focus();
+          }else if(!e.shiftKey&&document.activeElement===last){
+            e.preventDefault();first.focus();
+          }
+        }
+      }
+      return; // No global shortcuts inside a dialog, even on a button.
     }
     if(e.target.matches('input,textarea,select'))return;
     if(e.key==='/'){e.preventDefault();$('#searchInput').focus();}
