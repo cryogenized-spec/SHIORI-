@@ -128,12 +128,12 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
             if offset != 0 && expected.is_none() {
                 return Err("continuing a page requires the original snapshot token".into());
             }
-            if let Some(expected) = expected {
-                if expected != snapshot {
-                    return Err(
-                        "native tasks changed during paging; restart from the first page".into(),
-                    );
-                }
+            if let Some(expected) = expected
+                && expected != snapshot
+            {
+                return Err(
+                    "native tasks changed during paging; restart from the first page".into(),
+                );
             }
             let next_offset = if offset + PAGE_SIZE < total {
                 Some(offset + PAGE_SIZE)
