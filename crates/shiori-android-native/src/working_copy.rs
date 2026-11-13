@@ -99,7 +99,9 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
             all.sort_by(|a, b| a.id.cmp(&b.id));
             let total = all.len();
             if total > MAX_NATIVE_TASKS {
-                return Err("native source exceeds 5000 tasks; pagination safety limit reached".into());
+                return Err(
+                    "native source exceeds 5000 tasks; pagination safety limit reached".into(),
+                );
             }
             if offset > total {
                 return Err("offset is beyond the native task count".into());
@@ -111,7 +113,10 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
             for task in &all {
                 let marker = format!(
                     "{}:{}:{}:{};",
-                    task.id.len(), task.id, task.version, task.updated_at.to_rfc3339()
+                    task.id.len(),
+                    task.id,
+                    task.version,
+                    task.updated_at.to_rfc3339()
                 );
                 for byte in marker.bytes() {
                     fingerprint ^= u64::from(byte);
@@ -125,7 +130,9 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
             }
             if let Some(expected) = expected {
                 if expected != snapshot {
-                    return Err("native tasks changed during paging; restart from the first page".into());
+                    return Err(
+                        "native tasks changed during paging; restart from the first page".into(),
+                    );
                 }
             }
             let next_offset = if offset + PAGE_SIZE < total {
@@ -133,7 +140,12 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
             } else {
                 None
             };
-            let tasks: Vec<Value> = all.into_iter().skip(offset).take(PAGE_SIZE).map(summary).collect();
+            let tasks: Vec<Value> = all
+                .into_iter()
+                .skip(offset)
+                .take(PAGE_SIZE)
+                .map(summary)
+                .collect();
             Ok(json!({
                 "ok":true,"tasks":tasks,"total":total,"offset":offset,
                 "next_offset":next_offset,"snapshot":snapshot
@@ -344,24 +356,46 @@ mod tests {
         assert_eq!(first["next_offset"], 50);
         assert_eq!(first["tasks"].as_array().unwrap().len(), 50);
         let token = first["snapshot"].as_str().unwrap().to_owned();
-        let mut ids: Vec<String> = first["tasks"].as_array().unwrap()
-            .iter().map(|row| row["id"].as_str().unwrap().to_owned()).collect();
+        let mut ids: Vec<String> = first["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_owned())
+            .collect();
 
-        let second = send(&path, json!({
-            "protocol":PROTOCOL,"op":"list","offset":50,"snapshot":token
-        })).unwrap();
+        let second = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL,"op":"list","offset":50,"snapshot":token
+            }),
+        )
+        .unwrap();
         assert_eq!(second["total"], 123);
         assert_eq!(second["next_offset"], 100);
         assert_eq!(second["snapshot"], token);
-        ids.extend(second["tasks"].as_array().unwrap().iter()
-            .map(|row| row["id"].as_str().unwrap().to_owned()));
-        let third = send(&path, json!({
-            "protocol":PROTOCOL,"op":"list","offset":100,"snapshot":token
-        })).unwrap();
+        ids.extend(
+            second["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["id"].as_str().unwrap().to_owned()),
+        );
+        let third = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL,"op":"list","offset":100,"snapshot":token
+            }),
+        )
+        .unwrap();
         assert!(third["next_offset"].is_null());
         assert_eq!(third["tasks"].as_array().unwrap().len(), 23);
-        ids.extend(third["tasks"].as_array().unwrap().iter()
-            .map(|row| row["id"].as_str().unwrap().to_owned()));
+        ids.extend(
+            third["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["id"].as_str().unwrap().to_owned()),
+        );
         assert_eq!(ids.len(), 123);
         let mut sorted = ids.clone();
         sorted.sort();
@@ -381,15 +415,25 @@ mod tests {
         }
 
         let row = first["tasks"][0].clone();
-        let edited = send(&path, json!({
-            "protocol":PROTOCOL,"op":"rename",
-            "id":row["id"],"title":"Changed between pages",
-            "expected_version":row["version"]
-        })).unwrap();
+        let edited = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL,"op":"rename",
+                "id":row["id"],"title":"Changed between pages",
+                "expected_version":row["version"]
+            }),
+        )
+        .unwrap();
         assert!(edited["ok"].as_bool().unwrap());
-        assert!(send(&path, json!({
-            "protocol":PROTOCOL,"op":"list","offset":50,"snapshot":token
-        })).is_err());
+        assert!(
+            send(
+                &path,
+                json!({
+                    "protocol":PROTOCOL,"op":"list","offset":50,"snapshot":token
+                })
+            )
+            .is_err()
+        );
         let restart = send(&path, command("list")).unwrap();
         assert_ne!(restart["snapshot"], token);
         std::fs::remove_file(&path).unwrap();
