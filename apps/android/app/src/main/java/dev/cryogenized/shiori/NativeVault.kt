@@ -28,4 +28,8 @@ internal object NativeVault {
     external fun recoverWorkingCopy(privateStagedInput: String, isolatedStagingPath: String): String?
     /** Inspect recovered SQLite data without modifying or activating it. */
     external fun inspectRecoveredCopy(isolatedPath: String): String?
+    /** Explicit M2.2 migration audit; returns typed parity JSON, does not switch source. */
+    external fun stageCutoverCandidate(candidatePath: String, originalAndroidJson: String): String?
+    /** Native SQLite tags/preferences read only; no JavaScript database path. */
+    external fun readWorkingMetadata(candidatePath: String): String?
 }
