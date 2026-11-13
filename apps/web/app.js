@@ -936,7 +936,17 @@
     activeDetail=null;
     toast('Task moved to deleted records');
   }
-  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?(nativeCanary.selected?'Debug Rust/SQLite task · original Android tasks kept':'Offline Android task · stored on this device'):'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
+  function nativeTagEditor(t){
+    if(!nativeCanary.selected||!nativeCanary.active)return '';
+    return '<form id="nativeDetailTagsForm" class="native-tag-editor" aria-label="Edit native task tags">'+
+      '<label for="nativeDetailTagInput">Tags · stored in Rust SQLite</label>'+
+      '<input id="nativeDetailTagInput" type="text" maxlength="700" value="'+
+      escapeHTML((t.tags||[]).join(', '))+'" placeholder="Comma-separated tags" '+
+      'aria-describedby="nativeTagHelp">'+
+      '<p id="nativeTagHelp">Up to 16 tags, 40 characters each. Changing tags updates the task revision.</p>'+
+      '<button type="submit" class="secondary-btn">Save tags</button></form>';
+  }
+  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div>${nativeTagEditor(t)}<div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?(nativeCanary.selected?'Debug Rust/SQLite task · original Android tasks kept':'Offline Android task · stored on this device'):'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
   async function toggleTask(id){
     if(nativeReadOnly.active||nativeCanary.pending)return;
     const t=tasks.find(x=>x.id===id);if(!t)return;
@@ -1120,6 +1130,27 @@
     closeEdit();
     showDetail(t.id);
     toast('Task updated');
+  });
+  document.addEventListener('submit',async event=>{
+    if(event.target.id!=='nativeDetailTagsForm')return;
+    event.preventDefault();
+    if(!nativeCanary.selected||!nativeCanary.active||nativeCanary.busy||
+       nativeCanary.pending)return;
+    const task=tasks.find(item=>item.id===activeDetail);
+    const input=$('#nativeDetailTagInput');
+    if(!task||!input)return;
+    const text=input.value.trim();
+    const tags=text?text.split(',').map(tag=>tag.trim()):[];
+    if(tags.length>16||tags.some(tag=>!tag||tag.length>40)){
+      toast('Use up to 16 tags, each 1–40 characters');return;
+    }
+    const id=task.id;
+    if(await mutateNativeCanary({
+      op:'tags_set',id,expected_version:task.version,tags
+    })){
+      showDetail(id);
+      toast('Native task tags saved to SQLite');
+    }
   });
   document.addEventListener('submit',event=>{
     if(event.target.id!=='nativeWorkingCreate')return;
