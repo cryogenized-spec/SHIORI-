@@ -31,8 +31,7 @@ pub fn verify_legacy_rollback(
     // Important: load_snapshot() would create a database on a missing path.
     // Rollback checks MUST open existing databases in read-only mode only.
     let rollback = Connection::open_with_flags(vault_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let integrity: String =
-        rollback.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    let integrity: String = rollback.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
     if integrity != "ok" {
         return Err("rollback vault failed SQLite integrity validation".into());
     }
@@ -149,8 +148,11 @@ mod tests {
         // A once-valid vault must not be treated as sufficient when the
         // canonical candidate itself has changed or is corrupted.
         let db = Connection::open(&candidate).unwrap();
-        db.execute("UPDATE android_task_tags SET value='tampered' WHERE position=0", [])
-            .unwrap();
+        db.execute(
+            "UPDATE android_task_tags SET value='tampered' WHERE position=0",
+            [],
+        )
+        .unwrap();
         drop(db);
         assert!(verify_legacy_rollback(&vault, &candidate, &original).is_err());
         assert_eq!(crate::load_snapshot(&vault).unwrap(), Some(original));
