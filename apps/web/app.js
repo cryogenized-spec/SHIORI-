@@ -139,6 +139,8 @@
     open:false, busy:false, error:'', items:[], total:0,
     editId:null, deleteId:null
   };
+  // A view-only flag. Never persist it: every app launch starts on legacy tasks.
+  const nativeReadOnly={active:false};
   let nativeInFlight=null;
   let nativeNextId=0;
   const NATIVE_COMMAND_TIMEOUT_MS=15000;
@@ -203,6 +205,8 @@
     html+='<input id="nativeWorkingTitle" name="title" maxlength="120" autocomplete="off" placeholder="Task title" required>';
     html+='<button type="submit"'+(nativeWorking.busy?' disabled':'')+'>Add native task</button></form>';
     html+='<p class="settings-hint">Showing '+nativeWorking.items.length+' of '+nativeWorking.total+' native records (up to 50 per page; pagination pending).</p>';
+    html+='<div class="settings-actions"><button type="button" id="showNativeReadOnly"'+(nativeWorking.busy?' disabled':'')+'>Preview Rust tasks in normal task layout · read-only</button></div>';
+    html+='<p class="settings-hint">This preview does not edit either task store. Lists of more than 50 records require pagination before full preview is allowed.</p>';
     html+='<div class="native-working-items">';
     for(const task of nativeWorking.items) {
       const id=escapeHTML(task.id);
@@ -254,6 +258,7 @@
       nativeWorking.busy=false;
       nativePreviewUpdate();
     }
+    return !nativeWorking.error;
   }
   async function nativePreviewMutate(command){
     if(nativeWorking.busy) return;
@@ -282,6 +287,55 @@
     if(view!=='settings')setView('settings');
     nativePreviewRefresh();
   };
+
+  // Snapshot projection into the existing task-row layout, never into tasks.
+  function renderNativeReadOnly(){
+    let visible=nativeWorking.items.map(fromStoredTask);
+    if(filter!=='all')visible=visible.filter(t=>t.priority===filter);
+    if(query.trim()){
+      const q=query.trim().toLowerCase();
+      visible=visible.filter(t=>[t.title,t.project,t.description].join(' ').toLowerCase().includes(q));
+    }
+    const rank=p=>({urgent:0,high:1,medium:2,low:3}[p]??4);
+    visible=[...visible].sort((a,b)=>{
+      const due=String(a.due||'9999-12-31').localeCompare(String(b.due||'9999-12-31'));
+      const priority=rank(a.priority)-rank(b.priority);
+      if(sortMode==='due')return due||priority||a.id.localeCompare(b.id);
+      if(sortMode==='priority')return priority||due||a.id.localeCompare(b.id);
+      if(sortMode==='fifo')return (a.createdAt||'').localeCompare(b.createdAt||'')||a.id.localeCompare(b.id);
+      return (a.status==='done')-(b.status==='done')||due||priority||a.id.localeCompare(b.id);
+    });
+    let html='<section class="native-readonly-banner" role="status"><strong>Read-only Rust/SQLite source preview</strong>'+
+      '<p>'+nativeWorking.total+' task record(s) from the separate working copy. Your original Android tasks are unchanged.</p>'+
+      '<button type="button" id="closeNativeReadOnly">Return to Android tasks</button></section>';
+    if(!visible.length){
+      return html+'<div class="empty-state"><h3>No matching native tasks</h3>'+
+        '<p>Try another filter or return to your regular Android list.</p></div>';
+    }
+    html+='<div class="task-list">'+visible.map(t=>
+      '<article class="task-row native-readonly-row">'+
+      '<span class="native-readonly-marker" aria-hidden="true">'+icon('eye')+'</span>'+
+      '<div class="task-info"><div class="task-title'+(t.status==='done'?' done':'')+'">'+
+      escapeHTML(t.title)+'</div><div class="task-meta"><span class="project-chip">'+
+      escapeHTML(t.project)+'</span><span>Read-only · '+
+      escapeHTML(t.status.replace(/_/g,' '))+'</span></div></div>'+
+      '<div class="task-end"><span class="due-chip">'+escapeHTML(displayDate(t.due))+
+      '</span></div></article>'
+    ).join('')+'</div>';
+    return html;
+  }
+  async function openNativeReadOnly(){
+    if(mode!=='android-local'||!nativeWorking.open||nativeWorking.busy)return;
+    if(!(await nativePreviewRefresh()))return;
+    // Never compare only the first 50 tasks as though they were all records.
+    if(nativeWorking.total>nativeWorking.items.length){
+      nativeWorking.error='Rust working copy exceeds the 50-item display limit. Pagination is required before full-list comparison.';
+      nativePreviewUpdate();
+      return;
+    }
+    nativeReadOnly.active=true;
+    setView('inbox');
+  }
 
   const ANDROID_BACKUP_FORMAT='shiori-android-local-v1';
   const MAX_BACKUP_CHARS=1000000;
