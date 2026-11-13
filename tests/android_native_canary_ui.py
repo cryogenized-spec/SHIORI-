@@ -179,7 +179,12 @@ def main():
             interrupted = take()
             assert interrupted["op"] == "metadata"
             assert page.evaluate("window.shioriNativeDeactivate()") is True
-            complete(interrupted, {"ok": True, "metadata": metadata})
+            assert page.evaluate(
+                """({id,metadata})=>window.shioriNativeComplete(
+                    id, JSON.stringify({ok:true,metadata})
+                )""",
+                {"id": interrupted["request_id"], "metadata": metadata},
+            ) is False
             page.evaluate("document.querySelector('[data-view=inbox]').click()")
             assert page.get_by_text("Original WebView task").count() == 1
             assert page.evaluate("window.shioriNativeTakeRequest()") is None
