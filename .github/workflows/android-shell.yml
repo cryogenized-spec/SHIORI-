@@ -91,12 +91,28 @@ jobs:
             exit 1
           fi
           echo "Bundled assets and offline permissions verified."
-      - name: Archive debug APK
+      - name: Produce commit-bound debug APK evidence
+        run: |
+          set -euo pipefail
+          OUTPUT=apps/android/app/build/outputs/apk/debug
+          python3 tools/android/apk_release_evidence.py create \
+            --apk "$OUTPUT/app-debug.apk" \
+            --output "$OUTPUT/shiori-android-evidence.json" \
+            --commit "$GITHUB_SHA" \
+            --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          python3 tools/android/apk_release_evidence.py verify \
+            --apk "$OUTPUT/app-debug.apk" \
+            --manifest "$OUTPUT/shiori-android-evidence.json" \
+            --commit "$GITHUB_SHA"
+      - name: Archive debug APK and its integrity manifest
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: shiori-android-alpha
-          path: apps/android/app/build/outputs/apk/debug/*.apk
+          path: |
+            apps/android/app/build/outputs/apk/debug/*.apk
+            apps/android/app/build/outputs/apk/debug/shiori-android-evidence.json
           if-no-files-found: error
           retention-days: 14
 
@@ -114,6 +130,12 @@ jobs:
         with:
           name: shiori-android-alpha
           path: build-apk
+      - name: Verify downloaded APK matches source-job evidence
+        run: |
+          python3 tools/android/apk_release_evidence.py verify \
+            --apk build-apk/app-debug.apk \
+            --manifest build-apk/shiori-android-evidence.json \
+            --commit "$GITHUB_SHA"
       - name: Permit hardware acceleration on the hosted Linux runner
         run: |
           if test -e /dev/kvm; then sudo chmod 666 /dev/kvm; fi
