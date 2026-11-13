@@ -294,6 +294,12 @@ def run():
             page.keyboard.press("n")
             assert "open" not in (page.locator("#taskModal").get_attribute("class") or "").split()
             assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
+            # Import callbacks cannot silently restore over legacy data while
+            # the view-only native source is displayed.
+            assert page.evaluate("""() =>
+                window.shioriRestoreBackup(window.shioriExportBackup())
+            """) is False
+            assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
 
             # Explicit return restores the original Android task list and
             # its normal create/edit UI without touching localStorage.
