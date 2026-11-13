@@ -171,9 +171,7 @@ pub fn audit_legacy_shadow(
     // comments inside the archived JSON sidecar. Require exact parity before
     // authorizing any future source cutover.
     let metadata = crate::migration::read_android_metadata(db_path)?;
-    if metadata["saved_views"] != source["saved_views"]
-        || metadata["sort"] != source["sort"]
-    {
+    if metadata["saved_views"] != source["saved_views"] || metadata["sort"] != source["sort"] {
         return Err("native saved view or sort metadata differs from Android".into());
     }
     let tags_by_id = metadata["tags_by_id"]
@@ -181,12 +179,22 @@ pub fn audit_legacy_shadow(
         .ok_or("native tag metadata is malformed")?;
     let mut expected_tags = 0_usize;
     for original in original_tasks {
-        let id = original["id"].as_str().ok_or("missing original tag owner")?;
+        let id = original["id"]
+            .as_str()
+            .ok_or("missing original tag owner")?;
         let empty = Vec::new();
-        let tags = original.get("tags").and_then(Value::as_array).unwrap_or(&empty);
+        let tags = original
+            .get("tags")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
         expected_tags += tags.len();
-        if tags_by_id.get(id).map(Value::as_array).flatten().map(Vec::as_slice)
-            .unwrap_or(&[]) != tags.as_slice()
+        if tags_by_id
+            .get(id)
+            .map(Value::as_array)
+            .flatten()
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            != tags.as_slice()
         {
             return Err("native task tags do not match archived Android tags".into());
         }
