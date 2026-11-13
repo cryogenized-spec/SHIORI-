@@ -1,5 +1,18 @@
 # SHIORI Android offline shell (M2 alpha)
 
+> **Current M2.5 acceptance status:** Debug-only, **not release-ready**.
+> The app now includes an opt-in Rust/SQLite native task source, JNI commands
+> for task edits, tags and saved views, guarded migration/rollback and an
+> Android emulator lifecycle smoke test. Some earlier sections below describe
+> historical development states rather than today's capabilities. See the
+> [M2.5 release hold and physical-device test plan](../../docs/engineering/M2_5_ANDROID_ACCEPTANCE_AND_RELEASE_HOLD.md).
+>
+> **Do not uninstall an earlier debug build to install a new CI APK on a
+> real-data device.** Ephemeral CI debug certificates may differ between runs,
+> so an in-place update may fail. Uninstalling can delete app-private data.
+> Export and verify an independent backup, and test new builds on disposable
+> profiles until stable signing and upgrade validation are complete.
+
 This is an **actual native Android Activity**, deliberately small and self-contained. It serves the **same** responsive SHIORI web UI assets from the APK through a private HTTPS-like WebView origin. It has **no INTERNET permission**, no JavaScript bridge, and blocks outbound navigation.
 
 ## Mobile navigation and cancellation
@@ -78,7 +91,7 @@ The debug APK will be under `apps/android/app/build/outputs/apk/debug/` after a 
 
 ## Security
 
-The Activity only loads bundled app assets via `https://appassets.androidplatform.net` and intercepts all asset reads. Non-local origins are blocked, file/content URI access is disabled, JavaScript popups are disabled, and the manifest requests no network permission. There is no JavaScript-to-native interface.
+The Activity only loads bundled app assets via `https://appassets.androidplatform.net` and intercepts all asset reads. Non-local origins are blocked, file/content URI access is disabled, JavaScript popups are disabled, and the manifest requests no network permission. There is no `addJavascriptInterface` object exposed to page JavaScript. The reviewed, allowlisted `shiori-vault://` custom-URL bridge still carries explicitly bounded native commands to Rust; it is a real native integration and requires continued security review.
 
 Security review and Android device tests remain required before publication.
 
