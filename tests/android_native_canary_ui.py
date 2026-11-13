@@ -175,7 +175,9 @@ def main():
 
             # Rollback during an in-flight native metadata read must invalidate
             # that response rather than rendering native records afterwards.
-            page.evaluate("window.shioriNativeActivate()")
+            # Launch without awaiting the returned Promise: this mock host
+            # must answer metadata while the native loader is still pending.
+            page.evaluate("() => { window.shioriNativeActivate(); }")
             interrupted = take()
             assert interrupted["op"] == "metadata"
             assert page.evaluate("window.shioriNativeDeactivate()") is True
