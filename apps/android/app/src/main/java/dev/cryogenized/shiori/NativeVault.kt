@@ -24,4 +24,8 @@ internal object NativeVault {
     external fun workingCopyRequest(workingDatabasePath: String, requestJson: String): String?
     /** Export-only, verified SQLite snapshot into a NEW private staging path. */
     external fun exportWorkingCopy(workingDatabasePath: String, stagingPath: String): String?
+    /** Restore an independently exported SQLite backup into a NEW isolated preview. */
+    external fun recoverWorkingCopy(privateStagedInput: String, isolatedStagingPath: String): String?
+    /** Inspect recovered SQLite data without modifying or activating it. */
+    external fun inspectRecoveredCopy(isolatedPath: String): String?
 }
