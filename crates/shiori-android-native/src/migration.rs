@@ -3,8 +3,8 @@
 //! The entire original JSON (including tags, saved views and sort settings)
 //! is archived transactionally next to the imported rows for lossless recovery.
 use chrono::{DateTime, NaiveDate, Utc};
-use serde_json::Value;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use serde_json::Value;
 use shiori_core::{Priority, Task, TaskStatus, validate_assignee_id};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{error::Error, path::Path, str::FromStr};
@@ -29,7 +29,9 @@ fn timestamp(s: &str) -> Result<DateTime<Utc>, Box<dyn Error>> {
 /// A resumed import is idempotent; it never overwrites existing metadata.
 fn persist_android_metadata(db_path: &Path, snapshot: &Value) -> Result<(), Box<dyn Error>> {
     let tasks = snapshot["tasks"].as_array().ok_or("missing task records")?;
-    let views = snapshot["saved_views"].as_array().ok_or("missing saved views")?;
+    let views = snapshot["saved_views"]
+        .as_array()
+        .ok_or("missing saved views")?;
     let order = snapshot["sort"].as_str().ok_or("missing sort mode")?;
     let mut connection = Connection::open(db_path)?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -69,7 +71,11 @@ fn persist_android_metadata(db_path: &Path, snapshot: &Value) -> Result<(), Box<
             for (position, tag) in tags.iter().enumerate() {
                 tx.execute(
                     "INSERT INTO android_task_tags(task_id,position,value) VALUES(?1,?2,?3)",
-                    params![id, i64::try_from(position)?, tag.as_str().ok_or("invalid tag")?],
+                    params![
+                        id,
+                        i64::try_from(position)?,
+                        tag.as_str().ok_or("invalid tag")?
+                    ],
                 )?;
             }
         }
@@ -86,25 +92,26 @@ fn persist_android_metadata(db_path: &Path, snapshot: &Value) -> Result<(), Box<
 /// A normalized, read-only workspace metadata lookup for Android native UI.
 /// Never reads from the WebView task array, and never mutates SQLite.
 pub fn read_android_metadata(db_path: &Path) -> Result<Value, Box<dyn Error>> {
-    let connection = Connection::open_with_flags(
-        db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )?;
+    let connection =
+        Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let (views, order): (String, String) = connection.query_row(
         "SELECT saved_views_json,sort_mode FROM android_workspace_metadata WHERE id=1",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     let mut tags = serde_json::Map::new();
-    let mut stmt = connection.prepare(
-        "SELECT task_id,value FROM android_task_tags ORDER BY task_id,position",
-    )?;
-    let entries = stmt.query_map([], |row| Ok((
-        row.get::<_, String>(0)?, row.get::<_, String>(1)?,
-    )))?;
+    let mut stmt = connection
+        .prepare("SELECT task_id,value FROM android_task_tags ORDER BY task_id,position")?;
+    let entries = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
     for record in entries {
         let (id, tag) = record?;
         let value = tags.entry(id).or_insert_with(|| Value::Array(Vec::new()));
-        value.as_array_mut().ok_or("invalid tags")?.push(Value::String(tag));
+        value
+            .as_array_mut()
+            .ok_or("invalid tags")?
+            .push(Value::String(tag));
     }
     Ok(serde_json::json!({
         "saved_views": serde_json::from_str::<Value>(&views)?,
