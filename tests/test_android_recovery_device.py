@@ -63,7 +63,7 @@ class RecoveryDeviceContract(unittest.TestCase):
                 return "device"
             return "unexpected.sqlite3|100|" + "a" * 64
         with patch.object(device, "adb", side_effect=fake_adb):
-            with self.assertRaisesRegex(RuntimeError, "Unexpected ADB"):
+            with self.assertRaisesRegex(RuntimeError, "Unexpected/duplicate ADB"):
                 device.state()
 
     def test_snapshot_manifest_contains_digests_not_task_contents(self):
