@@ -429,6 +429,10 @@ class MainActivity : Activity() {
 
     private fun openOrCreateWorkingCopy() {
         if (isFinishing || isDestroyed) return
+        if (isNativeCanarySelected()) {
+            notifyUser("Normal tasks already use Rust SQLite. Roll back before testing another copy.")
+            return
+        }
         if (File(workingPath()).exists()) {
             notifyWebWorkingReady()
             return
