@@ -39,9 +39,17 @@ pub(crate) fn records_match(
     const TASKS: &str = "SELECT id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes,assignee_id FROM tasks ORDER BY id";
     const DEPENDENCIES: &str =
         "SELECT task_id,depends_on_id FROM task_dependencies ORDER BY task_id,depends_on_id";
+    const TAGS: &str =
+        "SELECT task_id,position,value FROM android_task_tags ORDER BY task_id,position";
+    const WORKSPACE: &str =
+        "SELECT id,saved_views_json,sort_mode FROM android_workspace_metadata ORDER BY id";
     Ok(
         table_rows(original, TASKS)? == table_rows(recovered, TASKS)?
-            && table_rows(original, DEPENDENCIES)? == table_rows(recovered, DEPENDENCIES)?,
+            && table_rows(original, DEPENDENCIES)? == table_rows(recovered, DEPENDENCIES)?
+            && table_rows(original, TAGS)? == table_rows(recovered, TAGS)?
+            && table_rows(original, WORKSPACE)? == table_rows(recovered, WORKSPACE)?
+            && crate::native_metadata::workspace_revision(original)?
+                == crate::native_metadata::workspace_revision(recovered)?,
     )
 }
 
