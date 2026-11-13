@@ -66,6 +66,25 @@ def run():
             page.locator("#taskName").fill("Discard by X")
             page.locator("#taskModal .modal-head [data-close-modal]").click(timeout=4000)
             assert page.locator("#taskModal").is_hidden()
+            assert page.evaluate("document.activeElement.matches('.mobile-fab')")
+
+            # A dialog is a keyboard boundary. Shift+Tab from its first
+            # control wraps to Save and Tab from Save returns to the X;
+            # neither press may focus the underlying task list.
+            page.locator(".mobile-fab").click()
+            page.locator("#taskModal .modal-head [data-close-modal]").focus()
+            page.keyboard.press("Shift+Tab")
+            assert page.evaluate(
+                "document.activeElement.matches('#taskForm button[type=submit]')"
+            )
+            page.keyboard.press("Tab")
+            assert page.evaluate(
+                "document.activeElement.matches('#taskModal .modal-head [data-close-modal]')"
+            )
+            page.keyboard.press("Escape")
+            assert page.locator("#taskModal").is_hidden()
+            assert page.evaluate("document.activeElement.matches('.mobile-fab')")
+
             page.locator(".mobile-fab").click()
             page.locator("#taskName").fill("Discard by Cancel")
             page.locator("#taskModal .modal-actions [data-close-modal]").click(timeout=4000)
@@ -124,6 +143,17 @@ def run():
             page.locator("#taskModal .modal-head [data-close-modal]").click(timeout=4000)
             assert page.locator("#taskModal").is_hidden()
             assert page.locator("#detailOverlay").is_visible()
+            page.locator("#detailPane [data-edit-task]").click()
+            page.locator("#editTaskName").fill("Discarded edit")
+            page.keyboard.press("Escape")
+            assert page.locator("#editModal").is_hidden()
+            assert page.locator("#detailOverlay").is_visible()
+            assert page.evaluate(
+                "document.activeElement.matches('#detailPane [data-edit-task]')"
+            )
+            assert page.evaluate(
+                "JSON.parse(localStorage.getItem('shiori-android-local-tasks'))"
+            )[0]["title"] == "Offline field check 栞"
             page.locator("#detailPane [data-edit-task]").click()
             page.locator("#editTaskName").fill("Revised offline check 栞")
             page.locator("#editTaskProject").fill("Android local")
