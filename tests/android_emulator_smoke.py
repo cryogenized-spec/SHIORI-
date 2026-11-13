@@ -35,7 +35,18 @@ def adb(*args, timeout=60):
 
 
 def alive():
-    return bool(adb("shell", "pidof", PACKAGE).strip())
+    # Android's pidof returns shell status 1 when the process is absent.
+    # That is expected before first launch and after a force-stop, not an
+    # ADB transport failure.
+    check = subprocess.run(
+        ["adb", "shell", "pidof", PACKAGE],
+        text=True, capture_output=True, timeout=15, check=False,
+    )
+    if check.returncode == 1:
+        return False
+    if check.returncode != 0:
+        raise RuntimeError("ADB pidof check failed: " + check.stderr.strip()[:200])
+    return bool(check.stdout.strip())
 
 
 def wait_alive(description, timeout_s=25):
