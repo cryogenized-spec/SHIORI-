@@ -71,6 +71,7 @@ def main():
         def supply_full_read(title="Native canonical task", version=4):
             first = take()
             assert first["op"] == "metadata", first
+            assert first["source"] == "primary"
             complete(first, {"ok": True, "metadata": metadata})
             listed = take()
             assert listed["op"] == "list"
@@ -138,6 +139,7 @@ def main():
             page.locator("#editTaskForm").evaluate("(form)=>form.requestSubmit()")
             edited = take()
             assert edited["op"] == "edit"
+            assert edited["source"] == "primary"
             assert edited["id"] == "native-1"
             assert edited["expected_version"] == 4
             assert edited["notes"] == "Changed description"
@@ -168,6 +170,20 @@ def main():
             page.evaluate("document.querySelector('[data-view=inbox]').click()")
             assert page.get_by_text("Original WebView task").count() == 1
             assert page.get_by_text("Edited through Rust").count() == 0
+
+            # Rollback during an in-flight native metadata read must invalidate
+            # that response rather than rendering native records afterwards.
+            page.evaluate("window.shioriNativeActivate()")
+            interrupted = take()
+            assert interrupted["op"] == "metadata"
+            assert page.evaluate("window.shioriNativeDeactivate()") is True
+            complete(interrupted, {"ok": True, "metadata": metadata})
+            page.evaluate("document.querySelector('[data-view=inbox]').click()")
+            assert page.get_by_text("Original WebView task").count() == 1
+            assert page.evaluate("window.shioriNativeTakeRequest()") is None
+            assert page.evaluate(
+                "localStorage.getItem('shiori-android-local-tasks')"
+            ) == baseline
 
             # Native source failure must never fall back silently to legacy.
             page.evaluate("window.shioriNativeUnavailable()")
