@@ -42,6 +42,21 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Android can recreate an Activity while ACTION_CREATE_DOCUMENT is
+        // open. Reuse only an existing private staging file from this app's
+        // cache directory; never trust or write a path supplied by a picker.
+        pendingNativeExport = savedInstanceState
+            ?.getString(STATE_PENDING_NATIVE_EXPORT)
+            ?.let(::File)
+            ?.takeIf { file ->
+                file.name.startsWith("shiori-native-export-") &&
+                    file.name.endsWith(".sqlite3") &&
+                    file.parentFile?.canonicalFile == cacheDir.canonicalFile &&
+                    file.isFile &&
+                    file.length() in 1..MAX_NATIVE_EXPORT_BYTES
+            }
+        nativeRecoveryPending = savedInstanceState
+            ?.getBoolean(STATE_RECOVERY_PICKER_PENDING, false) ?: false
         webView = WebView(this)
         // A previously selected native source must be verified BEFORE
         // anything in the legacy task list can be tapped after app restart.
@@ -615,15 +630,57 @@ class MainActivity : Activity() {
                     "native SQLite backup before rolling back."
             )
             .setNegativeButton("Keep Rust source", null)
-            .setPositiveButton("Return to Android tasks") { _, _ ->
-                if (!selectNativeCanary(false)) {
-                    notifyUser("Could not persist rollback; Rust remains selected")
-                } else {
-                    webView.evaluateJavascript("window.shioriNativeDeactivate()", null)
-                    notifyUser("Returned to original Android WebView tasks")
-                }
+            .setPositiveButton("Verify and return") { _, _ ->
+                verifyAndRollbackNativeCanary()
             }
             .show()
+    }
+
+    /**
+     * A debug canary may only switch back to WebView after checking that
+     * current legacy localStorage is unchanged from BOTH the independent
+     * rollback vault and the canonical migration candidate. Freeze UI
+     * mutations until the native audit and selected-source commit finish.
+     * This prevents silently reopening stale or modified legacy records.
+     */
+    private fun verifyAndRollbackNativeCanary() {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript("window.shioriNativeFreezeForRollback()") { encoded ->
+            val legacy = try {
+                val raw = JSONArray("[$encoded]").getString(0)
+                if (raw.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(raw).optString("format") != BACKUP_FORMAT
+                ) throw IOException("Legacy source cannot be inspected")
+                raw
+            } catch (_: Exception) {
+                webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                notifyUser("Cannot verify rollback while a native task operation is running")
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                val checked = runCatching {
+                    NativeVault.verifyLegacyRollback(
+                        cutoverRollbackPath(), candidatePath(), legacy
+                    )
+                }.getOrDefault(false)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (!checked) {
+                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        notifyUser(
+                            "Rollback BLOCKED: preserved legacy tasks no longer match " +
+                                "the migration backup. Native source remains selected."
+                        )
+                    } else if (!selectNativeCanary(false)) {
+                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        notifyUser("Cannot save rollback selection; Rust remains active")
+                    } else {
+                        webView.evaluateJavascript("window.shioriNativeDeactivate()", null)
+                        notifyUser("Verified rollback: original Android tasks selected")
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -724,7 +781,8 @@ class MainActivity : Activity() {
                     "working copy, including its edited tasks, deleted-record " +
                     "history, dependencies and original import archive. " +
                     "Your normal Android tasks will not change. " +
-                    "Restoring this database is not yet supported in the app."
+                    "An isolated verified recovery preview is supported, " +
+                    "but restoring directly into live tasks is not yet supported."
             )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Choose backup location") { _, _ ->
@@ -1045,7 +1103,12 @@ class MainActivity : Activity() {
         } else if (requestCode == NATIVE_EXPORT_REQUEST) {
             val staged = pendingNativeExport
             pendingNativeExport = null
-            if (staged == null) return
+            if (staged == null) {
+                if (resultCode == RESULT_OK) {
+                    notifyUser("Native backup staging was lost; export again. No source changed.")
+                }
+                return
+            }
             val destination = if (resultCode == RESULT_OK) data?.data else null
             if (destination == null) {
                 staged.delete()
@@ -1119,8 +1182,19 @@ class MainActivity : Activity() {
         navigateBack()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        pendingNativeExport?.takeIf { it.isFile }?.let {
+            outState.putString(STATE_PENDING_NATIVE_EXPORT, it.absolutePath)
+        }
+        outState.putBoolean(STATE_RECOVERY_PICKER_PENDING, nativeRecoveryPending)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
-        pendingNativeExport?.delete()
+        // Keep a staged export only when Android is recreating this Activity
+        // (e.g., rotation with the document picker open). Cancellation or
+        // normal Activity destruction still removes transient private data.
+        if (!isChangingConfigurations) pendingNativeExport?.delete()
         pendingNativeExport = null
         vaultExecutor.shutdown()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1144,5 +1218,9 @@ class MainActivity : Activity() {
         private const val IMPORT_REQUEST = 4002
         private const val NATIVE_EXPORT_REQUEST = 4003
         private const val NATIVE_RECOVERY_REQUEST = 4004
+        private const val STATE_PENDING_NATIVE_EXPORT =
+            "shiori.lifecycle.pending_native_export"
+        private const val STATE_RECOVERY_PICKER_PENDING =
+            "shiori.lifecycle.recovery_picker_pending"
     }
 }
