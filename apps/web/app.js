@@ -141,6 +141,10 @@
   };
   // A view-only flag. Never persist it: every app launch starts on legacy tasks.
   const nativeReadOnly={active:false,page:0};
+  // Debug-only opt-in normal-UI canary. Source selection is owned by Kotlin,
+  // never inferred from task rows or localStorage. A failed native read
+  // displays an error and does not silently fall back to the legacy source.
+  const nativeCanary={selected:false,active:false,busy:false,error:'',metadata:null};
   const NATIVE_PAGE_SIZE=50;
   const MAX_NATIVE_SOURCE_TASKS=5000;
   let nativeInFlight=null;
@@ -172,7 +176,7 @@
       return Promise.reject(new Error('Native Rust bridge unavailable in this preview'));
     if(nativeInFlight)
       return Promise.reject(new Error('Another native operation is in progress'));
-    const allowed=['list','create','rename','status','delete'];
+    const allowed=['list','create','rename','edit','status','delete','metadata'];
     if(!command || !allowed.includes(command.op))
       return Promise.reject(new Error('Unsupported native operation'));
     const id=String(++nativeNextId);
@@ -313,6 +317,93 @@
     }
     return !nativeWorking.error;
   }
+  async function loadNativeCanary(){
+    if(mode!=='android-local'||!nativeCanary.selected||nativeCanary.busy)return false;
+    nativeCanary.busy=true;
+    nativeCanary.active=false;
+    nativeCanary.error='';
+    tasks=[];
+    render();
+    try{
+      const response=await nativeWorkingRequest({op:'metadata'});
+      if(!response.ok||!response.metadata||
+         !Array.isArray(response.metadata.saved_views)||
+         typeof response.metadata.tags_by_id!=='object'||
+         response.metadata.tags_by_id===null)
+        throw new Error('Native metadata unavailable; no source cutover');
+      if(!(await nativePreviewRefresh()))
+        throw new Error(nativeWorking.error||'Native task read failed');
+      const tags=response.metadata.tags_by_id;
+      const candidate=nativeWorking.items.map(row=>{
+        const task=fromStoredTask(row);
+        const values=Object.prototype.hasOwnProperty.call(tags,row.id)?tags[row.id]:[];
+        if(!Array.isArray(values)||values.some(x=>typeof x!=='string'))
+          throw new Error('Native tags are invalid');
+        task.tags=[...values];
+        return task;
+      });
+      tasks=candidate;
+      nativeCanary.metadata=response.metadata;
+      nativeCanary.active=true;
+      nativeCanary.error='';
+      $('#footerMode').textContent='RUST SQLITE · DEBUG CUTOVER CANARY';
+      $('#railMode').textContent='● RUST SQLITE (EXPERIMENTAL)';
+      render();
+      return true;
+    }catch(error){
+      tasks=[];
+      nativeCanary.active=false;
+      nativeCanary.error=error.message||'Cannot read native task source';
+      render();
+      return false;
+    }finally{
+      nativeCanary.busy=false;
+      render();
+    }
+  }
+  window.shioriNativeActivate=()=>{
+    if(mode!=='android-local')return Promise.resolve(false);
+    nativeCanary.selected=true;
+    return loadNativeCanary();
+  };
+  window.shioriNativeUnavailable=()=>{
+    nativeCanary.selected=true;
+    nativeCanary.active=false;
+    nativeCanary.error='Native database could not be verified. The original Android tasks remain on the device. Use Settings to roll back.';
+    tasks=[];
+    render();
+  };
+  window.shioriNativeDeactivate=()=>{
+    if(mode!=='android-local')return false;
+    nativeCanary.selected=false;nativeCanary.active=false;
+    nativeCanary.busy=false;nativeCanary.error='';nativeCanary.metadata=null;
+    nativeWorking.open=false;nativeWorking.items=[];
+    try{
+      const saved=JSON.parse(localStorage.getItem(taskStoreKey)||'[]');
+      tasks=Array.isArray(saved)?saved:[];
+    }catch{tasks=[];}
+    $('#footerMode').textContent='ANDROID · OFFLINE LOCAL DEVICE';
+    $('#railMode').textContent='● OFFLINE DEVICE';
+    setView('inbox');
+    return true;
+  };
+  async function mutateNativeCanary(command){
+    if(!nativeCanary.active||nativeCanary.busy)return false;
+    nativeCanary.busy=true;
+    try{
+      const result=await nativeWorkingRequest(command);
+      if(!result.ok)throw new Error(String(result.error||'Native write failed'));
+      nativeCanary.busy=false;
+      return await loadNativeCanary();
+    }catch(error){
+      nativeCanary.busy=false;
+      nativeCanary.error='Native write failed: '+(error.message||'refresh required');
+      toast('Native write rejected; refresh and inspect the task');
+      render();
+      return false;
+    }
+  }
+
   async function nativePreviewMutate(command){
     if(nativeWorking.busy) return;
     nativeWorking.busy=true;
@@ -387,7 +478,7 @@
     return html;
   }
   async function openNativeReadOnly(){
-    if(mode!=='android-local'||!nativeWorking.open||nativeWorking.busy)return;
+    if(mode!=='android-local'||nativeCanary.selected||!nativeWorking.open||nativeWorking.busy)return;
     if(!(await nativePreviewRefresh()))return;
     // Full pages are already validated before nativePreviewRefresh returns.
     nativeReadOnly.page=0;
@@ -399,12 +490,21 @@
   const MAX_BACKUP_CHARS=1000000;
   window.shioriExportBackup=()=>{
     if(mode!=='android-local')return null;
+    let legacy=tasks;
+    if(nativeCanary.selected){
+      try{
+        const stored=JSON.parse(localStorage.getItem(taskStoreKey)||'[]');
+        if(!Array.isArray(stored))return null;
+        legacy=stored;
+      }catch{return null;}
+    }
     const json=JSON.stringify({format:ANDROID_BACKUP_FORMAT,
-      exported_at:new Date().toISOString(),tasks,saved_views:savedViews,sort:sortMode});
+      exported_at:new Date().toISOString(),tasks:legacy,
+      saved_views:savedViews,sort:sortMode});
     return json.length<=MAX_BACKUP_CHARS?json:null;
   };
   window.shioriRestoreBackup=(raw)=>{
-    if(mode!=='android-local'||nativeReadOnly.active||typeof raw!=='string'||raw.length>MAX_BACKUP_CHARS)return false;
+    if(mode!=='android-local'||nativeReadOnly.active||nativeCanary.selected||typeof raw!=='string'||raw.length>MAX_BACKUP_CHARS)return false;
     try{
       const data=JSON.parse(raw);
       if(!data||data.format!==ANDROID_BACKUP_FORMAT||!Array.isArray(data.tasks)
@@ -482,7 +582,10 @@
   const dateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
   let toastTimer;
   const save=()=>{
-    if(nativeReadOnly.active){toast('Read-only Rust preview · task changes are disabled');return;}
+    if(nativeReadOnly.active||nativeCanary.selected){
+      toast('Task writes are not allowed in the legacy source during native canary');
+      return;
+    }
     try{
       localStorage.setItem(taskStoreKey,JSON.stringify(tasks));
       signalNativeVault();
@@ -550,22 +653,29 @@
   function renderTimeline(){return `<div class="timeline">${Array.from({length:7},(_,i)=>{let d=new Date(`${newDate(i)}T12:00:00`);let matches=tasks.filter(t=>t.due===newDate(i));return `<section class="timeline-day"><header>${new Intl.DateTimeFormat('en-GB',{weekday:'short'}).format(d)}<b>${d.getDate()}</b></header>${matches.map(t=>`<div class="timeline-pill" data-detail="${escapeHTML(t.id)}">${escapeHTML(t.title)}</div>`).join('')}${!matches.length?'<div style="font-size:10px;color:var(--faint);margin-top:14px">Open space</div>':''}</section>`}).join('')}</div>`;}
   function renderReports(){const c=count(),pct=c.all?Math.round(c.done/c.all*100):0;const projects=mode==='demo'?Object.keys(projectDescriptions):[...new Set(tasks.map(t=>t.project))];return `<div class="report-grid"><article class="report-card"><div class="section-eyebrow">COMPLETION RATE</div><div class="report-big">${pct}%</div><p>${c.done} tasks complete across ${c.all} ${mode==='demo'?'demo':'local'} tasks.</p><div class="report-line"><span>Progress</span><div><span style="width:${pct}%"></span></div><b>${pct}%</b></div></article><article class="report-card"><div class="section-eyebrow">PORTFOLIO HEALTH</div><div class="report-big">${projects.length.toString().padStart(2,'0')}</div><p>Projects in progress. All enterprise report types should eventually be freely accessible.</p>${projects.map(p=>{let a=tasks.filter(t=>t.project===p);let n=Math.round(a.filter(t=>t.status==='done').length/(a.length||1)*100);return `<div class="report-line"><span>${escapeHTML(p)}</span><div><span style="width:${n}%"></span></div><b>${n}%</b></div>`}).join('')}</article></div>`;}
   function renderAutomations(){return `<div class="settings-list">${[['Recurring work','Automatic task generation from repeat rules.','Planned'],['Rules & triggers','When status, date or project changes, take a defined action.','Planned'],['Webhooks','Connect external services through auditable, permission-controlled events.','Planned'],['MCP actions','Let authorized AI assistants work with tasks through typed tools.','Planned']].map(([n,d,s])=>`<article class="automation-card"><div><h3>${n}</h3><p>${d}</p><span class="status-tag">${s.toUpperCase()} · NOT IMPLEMENTED</span></div><button data-preview-feature="${n}">Preview</button></article>`).join('')}</div>`;}
-  function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='android-local'?'<div class="settings-actions"><button type="button" id="exportAndroidBackup">Export JSON backup</button><button type="button" id="importAndroidBackup">Restore backup</button></div><p class="settings-hint">Experimental Rust SQLite safety copy: a separate, private on-device copy. The current task store remains WebView-based while we validate migration.</p><div class="settings-actions"><button type="button" id="saveNativeVault">Save native safety copy</button><button type="button" id="recoverNativeVault">Recover native safety copy</button></div><p class="settings-hint">Migration preview: stage a copy of your current tasks into SHIORI’s canonical Rust/SQLite format. Your current tasks remain in WebView storage; this does not enable native editing or sync.</p><div class="settings-actions"><button type="button" id="stageCanonicalShadow">Stage Rust migration preview</button><button type="button" id="auditCanonicalShadow">Audit staged Rust preview</button><button type="button" id="auditNativeMigrationParity">Verify migration field parity</button></div><p class="settings-hint">Experimental native Rust task editor: creates a third, independent SQLite working copy. Tasks added or changed there do not appear in the normal Android list. Use it only to test the native engine.</p><div class="settings-actions"><button type="button" id="openNativeWorkingCopy">Open native Rust task workspace</button><button type="button" id="exportNativeWorkingCopy">Export native SQLite backup</button><button type="button" id="recoverNativeSQLite">Stage isolated SQLite recovery</button><button type="button" id="inspectNativeSQLiteRecovery">Inspect recovered preview</button></div>'+nativePreviewRender()+'':''}${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
+  function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?nativeCanary.selected?'Debug native canary: Rust SQLite supplies the normal task list. The original WebView tasks remain stored separately for explicit rollback. No account or network.':'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='android-local'?'<div class="settings-actions"><button type="button" id="exportAndroidBackup">Export JSON backup</button><button type="button" id="importAndroidBackup">Restore backup</button></div><p class="settings-hint">Experimental Rust SQLite safety copy: a separate, private on-device copy. The current task store remains WebView-based while we validate migration.</p><div class="settings-actions"><button type="button" id="saveNativeVault">Save native safety copy</button><button type="button" id="recoverNativeVault">Recover native safety copy</button></div><p class="settings-hint">Migration preview: stage a copy of your current tasks into SHIORI’s canonical Rust/SQLite format. Your current tasks remain in WebView storage; this does not enable native editing or sync.</p><div class="settings-actions"><button type="button" id="stageCanonicalShadow">Stage Rust migration preview</button><button type="button" id="auditCanonicalShadow">Audit staged Rust preview</button><button type="button" id="auditNativeMigrationParity">Verify migration field parity</button></div><p class="settings-hint">Debug-only native source pilot: requires passing field parity, a separately verified legacy rollback snapshot and explicit confirmation. Changes made after enabling native mode are NOT merged back on rollback.</p><div class="settings-actions"><button type="button" id="activateNativeCanary">Enable Rust task source · debug only</button><button type="button" id="rollbackNativeCanary">Return to original Android tasks</button></div><p class="settings-hint">Experimental native Rust task editor: creates a third, independent SQLite working copy. Tasks added or changed there do not appear in the normal Android list. Use it only to test the native engine.</p><div class="settings-actions"><button type="button" id="openNativeWorkingCopy">Open native Rust task workspace</button><button type="button" id="exportNativeWorkingCopy">Export native SQLite backup</button><button type="button" id="recoverNativeSQLite">Stage isolated SQLite recovery</button><button type="button" id="inspectNativeSQLiteRecovery">Inspect recovered preview</button></div>'+nativePreviewRender()+'':''}${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
   function renderUpcoming(){let upcoming=[...tasks].filter(t=>t.status!=='done' && t.due>=newDate()).sort((a,b)=>a.due.localeCompare(b.due)).slice(0,3);$('#upcoming').innerHTML=upcoming.map(t=>{const d=new Date(`${t.due}T12:00:00`);return `<div class="upcoming-item"><div class="upcoming-date"><div>${d.getDate()}<small>${new Intl.DateTimeFormat('en-GB',{month:'short'}).format(d).toUpperCase()}</small></div></div><div class="upcoming-main"><b>${escapeHTML(t.title)}</b><span>${escapeHTML(t.project)} · ${t.mins==null?'No estimate':t.mins+' min estimate'}</span></div></div>`}).join('');}
   function setView(next){if(next!=='inbox')nativeReadOnly.active=false;view=next;query='';$('#searchInput').value='';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const v=views[view];$('#breadcrumbCurrent').textContent=v[0];$('#pageTitle').innerHTML=escapeHTML(v[1].replace(/\.$/,''))+'<span class="period">.</span>';$('#pageSubtitle').textContent=v[2];$('#sectionEyebrow').textContent=v[3];$('#sectionTitle').textContent=v[4];const regular=['today','attention','inbox','board'];$('#hero').style.display=view==='today'?'flex':'none';$('#stats').style.display=view==='today'||view==='reports'?'grid':'none';$('.quick-search').style.display=regular.includes(view)?'flex':'none';$('#filterButton').style.display=regular.includes(view)?'flex':'none';$('.sort-control').style.display=regular.includes(view)?'inline-flex':'none';$('#viewSwitch').style.display=regular.includes(view)?'flex':'none';$('#viewSwitch').innerHTML=view==='board'?`${icon('check-circle')} List`:`${icon('columns')} Board`;render();closeSidebar();window.scrollTo({top:0,behavior:'instant'});}
   function render(){
-    // Stats and the calendar retain their legacy data source. They are
-    // not mixed into the read-only native task-list projection.
+    // Read-only Rust preview never mixes native rows into legacy statistics.
+    // The explicitly selected canary is instead the task source for all views.
     renderStats();renderUpcoming();renderCalendar();
     document.querySelectorAll('[data-add]').forEach(button=>{
-      button.disabled=nativeReadOnly.active;
-      button.title=nativeReadOnly.active?'Read-only preview · return to Android tasks':'';
+      button.disabled=nativeReadOnly.active||(nativeCanary.selected&&!nativeCanary.active);
+      button.title=button.disabled?'Task source is read-only or unavailable':'';
     });
+    if(nativeCanary.selected&&!nativeCanary.active&&view!=='settings'){
+      $('#mainData').innerHTML='<section class="native-readonly-banner" role="alert"><strong>Rust task source unavailable</strong><p>'+
+        escapeHTML(nativeCanary.error||'Loading verified native SQLite records…')+
+        '</p><button type="button" data-view="settings">Open Settings to roll back</button></section>';
+      return;
+    }
     if(nativeReadOnly.active&&view==='inbox'){
       $('#sectionTitle').textContent='Rust tasks · read-only preview';
       $('#mainData').innerHTML=renderNativeReadOnly();
       return;
     }
+    if(nativeCanary.active&&view==='inbox')$('#sectionTitle').textContent='Rust tasks · debug canary';
     if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=html;$('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
   function closeSidebar(){$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');}
   function openModal(){if(nativeReadOnly.active){toast('Read-only source preview · return to Android tasks to edit');return;}$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
@@ -800,7 +910,7 @@
   document.addEventListener('submit',event=>{
     if(event.target.id!=='nativeWorkingCreate')return;
     event.preventDefault();
-    if(mode!=='android-local'||nativeWorking.busy)return;
+    if(mode!=='android-local'||nativeWorking.busy||nativeCanary.selected)return;
     const field=$('#nativeWorkingTitle');
     const title=field?field.value.trim():'';
     if(!title||title.length>120){
