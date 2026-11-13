@@ -73,6 +73,7 @@ class MainActivity : Activity() {
                             "native-export" -> beginNativeDatabaseExport()
                             "native-recover" -> beginIsolatedDatabaseRecovery()
                             "native-inspect" -> inspectIsolatedRecovery()
+                            "migration-parity" -> auditNativeMigrationParity()
                         }
                     }
                     return true
@@ -200,6 +201,10 @@ class MainActivity : Activity() {
     private fun recoveredPath(): String =
         File(filesDir, "shiori-native-recovery-preview-v1.sqlite3").absolutePath
 
+    /** One independent, never automatically overwritten native cutover trial. */
+    private fun candidatePath(): String =
+        File(filesDir, "shiori-native-cutover-candidate-v1.sqlite3").absolutePath
+
     /**
      * The bundled page only signals a custom-scheme navigation; Kotlin pulls
      * the current complete snapshot on the UI thread and passes it to Rust on
@@ -323,6 +328,61 @@ class MainActivity : Activity() {
      * user-confirmed, one-time copy of current Android records into a THIRD
      * private SQLite file. Native edits never propagate into WebView tasks.
      */
+
+    /**
+     * M2.2 is a diagnostic gate only. User-visible native source switching
+     * is deliberately unavailable until the subsequent guarded-cutover PR.
+     */
+    private fun auditNativeMigrationParity() {
+        if (isFinishing || isDestroyed) return
+        webView.evaluateJavascript("window.shioriExportBackup()") { rawResult ->
+            val snapshot = try {
+                val raw = JSONArray("[$rawResult]").getString(0)
+                if (raw.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(raw).optString("format") != BACKUP_FORMAT
+                ) throw IOException("Unsupported legacy snapshot")
+                raw
+            } catch (_: Exception) {
+                notifyUser("Cannot read current Android tasks for migration comparison")
+                return@evaluateJavascript
+            }
+            vaultExecutor.execute {
+                val rawReport = runCatching {
+                    NativeVault.stageCutoverCandidate(candidatePath(), snapshot)
+                }.getOrNull()
+                val result = runCatching { JSONObject(rawReport ?: "") }.getOrNull()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    val ready = result?.optBoolean("ready", false) == true
+                    val count = result?.optInt("task_records", 0) ?: 0
+                    val tags = result?.optInt("tag_records", 0) ?: 0
+                    val views = result?.optInt("saved_views", 0) ?: 0
+                    val fields = result?.optJSONArray("unsupported_fields")
+                    AlertDialog.Builder(this)
+                        .setTitle(
+                            if (ready) "Migration field audit passed"
+                            else "Migration cutover blocked"
+                        )
+                        .setMessage(
+                            if (ready) {
+                                "$count tasks, $tags tags and $views saved views " +
+                                    "verified against separate Rust SQLite records. " +
+                                    "Existing Android tasks remain active. " +
+                                    "This audit does not switch storage."
+                            } else {
+                                (result?.optString("reason")?.ifEmpty {
+                                    result.optString("error")
+                                } ?: "Candidate could not be verified") +
+                                    ". Unsupported field types: ${fields?.length() ?: 0}. " +
+                                    "No active tasks were changed."
+                            }
+                        )
+                        .setPositiveButton("Close", null)
+                        .show()
+                }
+            }
+        }
+    }
 
     private fun openOrCreateWorkingCopy() {
         if (isFinishing || isDestroyed) return
