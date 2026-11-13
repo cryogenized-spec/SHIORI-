@@ -34,9 +34,12 @@ fn records_match(original: &Connection, recovered: &Connection) -> Result<bool, 
     // Comparing every canonical column catches differences that counts alone
     // miss, including status, revision and deleted_at differences.
     const TASKS: &str = "SELECT id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes,assignee_id FROM tasks ORDER BY id";
-    const DEPENDENCIES: &str = "SELECT task_id,depends_on_id FROM task_dependencies ORDER BY task_id,depends_on_id";
-    Ok(table_rows(original, TASKS)? == table_rows(recovered, TASKS)?
-        && table_rows(original, DEPENDENCIES)? == table_rows(recovered, DEPENDENCIES)?)
+    const DEPENDENCIES: &str =
+        "SELECT task_id,depends_on_id FROM task_dependencies ORDER BY task_id,depends_on_id";
+    Ok(
+        table_rows(original, TASKS)? == table_rows(recovered, TASKS)?
+            && table_rows(original, DEPENDENCIES)? == table_rows(recovered, DEPENDENCIES)?,
+    )
 }
 
 /// Restore an independently exported working-copy database as a distinct
@@ -74,14 +77,16 @@ pub fn recover_to_separate_preview(
         if forbidden != 0 {
             return Err("backup contains unsupported SQLite triggers or views".into());
         }
-        original.execute("VACUUM INTO ?1", params![destination.to_string_lossy().as_ref()])?;
+        original.execute(
+            "VACUUM INTO ?1",
+            params![destination.to_string_lossy().as_ref()],
+        )?;
         let restored_bytes = fs::metadata(destination)?.len();
         if restored_bytes == 0 || restored_bytes > MAX_RECOVERY_BYTES {
             return Err("recovered database exceeds the safety size limit".into());
         }
 
-        let restored =
-            Connection::open_with_flags(destination, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let restored = Connection::open_with_flags(destination, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let after = read_manifest(&restored)?;
         if before != after || !records_match(&original, &restored)? {
             return Err("recovered database differs from the selected backup".into());
@@ -145,14 +150,15 @@ mod tests {
             let mut store = SqliteStore::open(&source).unwrap();
             let active = Task::new("Native active", "Personal", Priority::Medium, None).unwrap();
             let deleted = Task::new("Deleted record", "Personal", Priority::Low, None).unwrap();
-            let prerequisite =
-                Task::new("Dependency", "Personal", Priority::High, None).unwrap();
+            let prerequisite = Task::new("Dependency", "Personal", Priority::High, None).unwrap();
             active_id = active.id.clone();
             deleted_id = deleted.id.clone();
             store.insert(&active).unwrap();
             store.insert(&deleted).unwrap();
             store.insert(&prerequisite).unwrap();
-            store.set_dependencies(&active_id, &[prerequisite.id]).unwrap();
+            store
+                .set_dependencies(&active_id, &[prerequisite.id])
+                .unwrap();
             store.delete(&deleted_id).unwrap();
         }
         export_working_database(&source, &archive).unwrap();
@@ -160,8 +166,10 @@ mod tests {
         assert_eq!(restored.records, 4);
         assert_eq!(restored.tombstones, 1);
         assert_eq!(restored.dependencies, 1);
-        let original_db = Connection::open_with_flags(&source, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        let restored_db = Connection::open_with_flags(&isolated, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let original_db =
+            Connection::open_with_flags(&source, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let restored_db =
+            Connection::open_with_flags(&isolated, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert!(records_match(&original_db, &restored_db).unwrap());
         assert_eq!(read_manifest(&restored_db).unwrap().0, original);
         assert!(fs::metadata(&archive).unwrap().len() > 0);
@@ -169,8 +177,14 @@ mod tests {
         drop(original_db);
         // Re-import cannot silently replace previously recovered edits.
         assert!(recover_to_separate_preview(&archive, &isolated).is_err());
-        let check = Connection::open_with_flags(&isolated, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        assert_eq!(table_rows(&check,"SELECT id FROM tasks ORDER BY id").unwrap().len(), 4);
+        let check =
+            Connection::open_with_flags(&isolated, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        assert_eq!(
+            table_rows(&check, "SELECT id FROM tasks ORDER BY id")
+                .unwrap()
+                .len(),
+            4
+        );
         drop(check);
         for path in [source, archive, isolated] {
             fs::remove_file(path).unwrap();
@@ -184,7 +198,8 @@ mod tests {
         assert!(recover_to_separate_preview(&source, &isolated).is_err());
         assert!(!isolated.exists());
         let conn = Connection::open(&archive).unwrap();
-        conn.execute_batch("PRAGMA user_version=99; CREATE TABLE fake (x TEXT);").unwrap();
+        conn.execute_batch("PRAGMA user_version=99; CREATE TABLE fake (x TEXT);")
+            .unwrap();
         drop(conn);
         assert!(recover_to_separate_preview(&archive, &isolated).is_err());
         assert!(!isolated.exists());
