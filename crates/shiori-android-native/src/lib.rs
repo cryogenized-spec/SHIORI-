@@ -4,9 +4,9 @@
 //! the WebView task format into canonical shiori-storage task records yet.
 //! Never silently overwrite the last native snapshot at Activity startup.
 mod audit;
+mod export;
 mod migration;
 mod working_copy;
-mod export;
 
 use chrono::NaiveDate;
 use jni::{
@@ -351,8 +351,7 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_exportWorkingCopy
         return std::ptr::null_mut();
     };
     let target = String::from(target);
-    let Ok(report) = export::export_working_database(Path::new(&source), Path::new(&target))
-    else {
+    let Ok(report) = export::export_working_database(Path::new(&source), Path::new(&target)) else {
         return std::ptr::null_mut();
     };
     let message = format!(
