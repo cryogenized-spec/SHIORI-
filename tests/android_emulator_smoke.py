@@ -118,9 +118,11 @@ def optional_dialog_probe():
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("apk", type=Path)
+    p.add_argument("--test-apk", required=True, type=Path)
     args = p.parse_args()
-    if not args.apk.is_file() or args.apk.stat().st_size == 0:
-        p.error("the downloaded Android APK is missing/empty")
+    for target in (args.apk, args.test_apk):
+        if not target.is_file() or target.stat().st_size == 0:
+            p.error(f"the downloaded Android APK is missing/empty: {target}")
     try:
         adb("wait-for-device")
         adb("install", "-r", str(args.apk.resolve()), timeout=100)
@@ -149,7 +151,27 @@ def main():
         time.sleep(1)
         launch("Back navigation followed by relaunch")
 
-        print("M2.4c emulator launch/lifecycle smoke passed. This is NOT "
+        # The AndroidX test APK injects genuine device screen-pointer touches
+        # into the packaged offline WebView. The instrumented tests inspect
+        # DOM/storage after those Android events; they do not call JS click().
+        # A test failure can still return an ADB exit code of zero, so insist
+        # on the JUnit summary as well as absence of failure markers.
+        adb("install", "-r", str(args.test_apk.resolve()), timeout=100)
+        runner = (
+            "dev.cryogenized.shiori.test/"
+            "androidx.test.runner.AndroidJUnitRunner"
+        )
+        report = adb("shell", "am", "instrument", "-w", "-r", runner, timeout=240)
+        if ("FAILURES!!!" in report or "INSTRUMENTATION_FAILED" in report or
+                not re.search(r"OK \\(2 tests?\\)", report)):
+            raise RuntimeError(
+                "Android WebView touch instrumentation failed or skipped tests: "
+                + report[-2400:]
+            )
+        print("PASS: both Android instrumentation tests used real pointer touches "
+              "and verified cancellation, task persistence and Activity recreation")
+
+        print("M2.5b emulator lifecycle and Android touch tests passed. This is NOT "
               "physical-phone validation; document-picker and filesystem "
               "fault injection still require real-device QA.")
     except (RuntimeError, subprocess.TimeoutExpired) as err:
