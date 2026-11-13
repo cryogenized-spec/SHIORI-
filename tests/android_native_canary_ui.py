@@ -154,7 +154,9 @@ def main():
             page.evaluate(
                 "document.querySelector('[data-view=inbox]').click()"
             )
-            page.locator("#mainData [data-complete]").first.click()
+            # The detail overlay remains open after an edit. Use its
+            # completion control, which is the actual tappable user surface.
+            page.locator("#detailOverlay [data-complete]").click()
             completed = take()
             assert completed["op"] == "status"
             assert completed["expected_version"] == 5
