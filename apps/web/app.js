@@ -186,7 +186,7 @@
       return Promise.reject(new Error('Native Rust bridge unavailable in this preview'));
     if(nativeInFlight)
       return Promise.reject(new Error('Another native operation is in progress'));
-    const allowed=['list','create','rename','edit','status','delete','metadata'];
+    const allowed=['list','create','rename','edit','status','delete','metadata','tags_set','workspace_set'];
     if(!command || !allowed.includes(command.op))
       return Promise.reject(new Error('Unsupported native operation'));
     const id=String(++nativeNextId);
@@ -339,6 +339,59 @@
     $('#editModal').classList.remove('open');
     $('#editModal').setAttribute('aria-hidden','true');
   }
+  function applyNativeWorkspaceMetadata(metadata){
+    if(!metadata || !Array.isArray(metadata.saved_views) ||
+       !Number.isSafeInteger(metadata.revision)||metadata.revision<1 ||
+       !['focus','fifo','due','priority'].includes(metadata.sort))
+      throw new Error('Invalid native workspace metadata');
+    const unique=new Set();
+    const viewsFromNative=metadata.saved_views.map(entry=>{
+      if(!entry || typeof entry.name!=='string'||!entry.name.trim()||
+         entry.name.length>40||unique.has(entry.name.toLowerCase())||
+         !['today','attention','inbox','board'].includes(entry.view)||
+         !['all','urgent','high','medium','low'].includes(entry.filter)||
+         !['focus','fifo','due','priority'].includes(entry.sort)||
+         typeof entry.query!=='string'||entry.query.length>240)
+        throw new Error('Invalid native saved-view metadata');
+      unique.add(entry.name.toLowerCase());
+      return {...entry};
+    });
+    if(viewsFromNative.length>30)throw new Error('Native saved views exceed safety limit');
+    // Never write these values into legacy localStorage. Once Rust is
+    // selected, these preferences belong entirely to the native DB.
+    savedViews=viewsFromNative;
+    sortMode=metadata.sort;
+    $('#sortMode').value=sortMode;
+    renderSavedViews();
+  }
+
+  function restoreLegacyWorkspaceMetadata(){
+    try{
+      const parsed=JSON.parse(localStorage.getItem('shiori-saved-views')||'[]');
+      savedViews=Array.isArray(parsed)?parsed.filter(x=>x&&
+        typeof x.name==='string'&&['today','attention','inbox','board'].includes(x.view)&&
+        ['all','high','medium','low','urgent'].includes(x.filter)&&
+        ['focus','fifo','due','priority'].includes(x.sort)&&typeof x.query==='string').slice(0,30):[];
+    }catch{savedViews=[];}
+    sortMode='focus';
+    try{
+      const order=localStorage.getItem('shiori-demo-sort');
+      if(['focus','fifo','due','priority'].includes(order))sortMode=order;
+    }catch{}
+    $('#sortMode').value=sortMode;
+    renderSavedViews();
+  }
+
+  async function saveNativeWorkspace(change){
+    if(!nativeCanary.selected||!nativeCanary.active||
+       !nativeCanary.metadata||nativeCanary.busy||nativeCanary.pending)return false;
+    const revision=nativeCanary.metadata.revision;
+    if(!Number.isSafeInteger(revision)||revision<1)return false;
+    return mutateNativeCanary(Object.assign(
+      {op:'workspace_set',expected_revision:revision},change
+    ));
+  }
+
   async function loadNativeCanary(){
     if(mode!=='android-local'||!nativeCanary.selected||nativeCanary.busy)return false;
     const generation=nativeCanary.generation;
@@ -354,7 +407,9 @@
       if(!response.ok||!response.metadata||
          !Array.isArray(response.metadata.saved_views)||
          typeof response.metadata.tags_by_id!=='object'||
-         response.metadata.tags_by_id===null)
+         response.metadata.tags_by_id===null||
+         !Number.isSafeInteger(response.metadata.revision)||
+         response.metadata.revision<1)
         throw new Error('Native metadata unavailable; no source cutover');
       if(!(await nativePreviewRefresh()))
         throw new Error(nativeWorking.error||'Native task read failed');
@@ -368,6 +423,7 @@
         task.tags=[...values];
         return task;
       });
+      applyNativeWorkspaceMetadata(response.metadata);
       tasks=candidate;
       nativeCanary.metadata=response.metadata;
       nativeCanary.active=true;
@@ -450,12 +506,7 @@
     }catch{tasks=[];}
     $('#footerMode').textContent='ANDROID · OFFLINE LOCAL DEVICE';
     $('#railMode').textContent='● OFFLINE DEVICE';
-    try{
-      const originalOrder=localStorage.getItem('shiori-demo-sort');
-      if(['focus','fifo','due','priority'].includes(originalOrder)){
-        sortMode=originalOrder;$('#sortMode').value=sortMode;
-      }
-    }catch{}
+    restoreLegacyWorkspaceMetadata();
     setView('inbox');
     return true;
   };
