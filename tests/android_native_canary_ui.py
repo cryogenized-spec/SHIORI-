@@ -105,6 +105,12 @@ def main():
                 "localStorage.getItem('shiori-android-local-tasks')"
             )
             assert "Original WebView task" in baseline
+            frozen = page.evaluate("window.shioriFreezeLegacyForCutover()")
+            assert json.loads(frozen)["tasks"][0]["title"] == "Original WebView task"
+            assert page.locator("[data-add]").first.is_disabled()
+            assert page.evaluate("window.shioriRestoreBackup(window.shioriExportBackup())") is False
+            page.evaluate("window.shioriAbortCutover()")
+            assert page.locator("[data-add]").first.is_enabled()
 
             page.evaluate("""() => {
                 window.shioriNativeBridgeEnabled = true;
