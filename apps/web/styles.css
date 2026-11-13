@@ -193,3 +193,11 @@
   border-radius:8px;background:var(--surface);color:var(--text);
 }
 .native-canary-banner button:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
+
+/* M2.4d: native tags belong to the selected Rust task, not localStorage. */
+.native-tag-editor{display:grid;gap:8px;margin:14px 0;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.native-tag-editor label{font-size:12px;font-weight:650;color:var(--text)}
+.native-tag-editor input{width:100%;min-width:0;border:1px solid var(--line);background:var(--surface);color:var(--text);padding:12px;border-radius:8px}
+.native-tag-editor p{font-size:11px;line-height:1.5;color:var(--muted)}
+.native-tag-editor button{min-height:44px;justify-self:start}
+.native-tag-editor :focus-visible{outline:2px solid var(--plum);outline-offset:2px}
