@@ -214,7 +214,7 @@
     html+='<p class="settings-hint">Loaded '+nativeWorking.items.length+' of '+nativeWorking.total+
       ' native records. Settings displays the first 50; use the read-only task layout to browse all records.</p>';
     html+='<div class="settings-actions"><button type="button" id="showNativeReadOnly"'+(nativeWorking.busy?' disabled':'')+'>Preview Rust tasks in normal task layout · read-only</button></div>';
-    html+='<p class="settings-hint">This preview does not edit either task store. Lists of more than 50 records require pagination before full preview is allowed.</p>';
+    html+='<p class="settings-hint">This preview does not edit either task store. The complete native task source is retrieved in bounded 50-row pages.</p>';
     html+='<div class="native-working-items">';
     for(const task of nativeWorking.items.slice(0,50)) {
       const id=escapeHTML(task.id);
@@ -425,7 +425,7 @@
     await nativePreviewRefresh();
   }
   window.shioriNativeWorkingReady=()=>{
-    if(mode!=='android-local') return;
+    if(mode!=='android-local'||nativeCanary.selected) return;
     nativeWorking.open=true;
     nativeWorking.error='';
     if(view!=='settings')setView('settings');
@@ -726,7 +726,10 @@
     const t=tasks.find(item=>item.id===activeDetail);
     if(!t || mode==='checking' || mode==='local-error') return;
     if(!confirm('Move this task to deleted records?')) return;
-    if(mode==='live'){
+    if(nativeCanary.selected){
+      if(!await mutateNativeCanary({op:'delete',id:t.id,expected_version:t.version}))
+        return;
+    } else if(mode==='live'){
       try {
         await requestBridge('/api/tasks/'+encodeURIComponent(t.id)+'/delete',{expected_version:t.version});
       } catch(err){
@@ -740,13 +743,18 @@
     activeDetail=null;
     toast('Task moved to deleted records');
   }
-  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?'Offline Android task · stored on this device':'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
+  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?(nativeCanary.selected?'Debug Rust/SQLite task · original Android tasks kept':'Offline Android task · stored on this device'):'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
   async function toggleTask(id){
     if(nativeReadOnly.active)return;
     const t=tasks.find(x=>x.id===id);if(!t)return;
     const next=t.status==='done'?'todo':'done';
     if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
-    if(mode==='live'){
+    if(nativeCanary.selected){
+      if(!await mutateNativeCanary({
+        op:'status',id,expected_version:t.version,
+        status:next==='progress'?'in_progress':next
+      }))return;
+    }else if(mode==='live'){
       try {await requestBridge('/api/tasks/'+encodeURIComponent(id)+'/status',{status:next});}
       catch {toast('Could not save task status');return;}
     } else {t.status=next;save();render();}
@@ -807,6 +815,12 @@
     }
     if(e.target.id==='auditNativeMigrationParity'&&mode==='android-local'){
       window.location.href='shiori-vault://migration-parity';return;
+    }
+    if(e.target.id==='activateNativeCanary'&&mode==='android-local'){
+      window.location.href='shiori-vault://native-activate';return;
+    }
+    if(e.target.id==='rollbackNativeCanary'&&mode==='android-local'){
+      window.location.href='shiori-vault://native-rollback';return;
     }
     if(e.target.id==='openNativeWorkingCopy'&&mode==='android-local'){
       window.location.href='shiori-vault://working';return;
@@ -888,7 +902,10 @@
       expected_version:t.version
     };
     if(!updated.title || !updated.project) return;
-    if(mode==='live'){
+    if(nativeCanary.selected){
+      if(!await mutateNativeCanary(Object.assign({op:'edit',id:t.id},updated)))
+        return;
+    }else if(mode==='live'){
       try{
         await requestBridge('/api/tasks/'+encodeURIComponent(t.id)+'/edit',updated);
       }catch(err){
@@ -927,21 +944,30 @@
     const title=$('#taskName').value.trim();if(!title)return;
     if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
     const record={title,notes:$('#taskDescription').value.trim(),project:$('#taskProject').value,priority:$('#taskPriority').value,due_on:$('#taskDue').value||null,estimate_minutes:Number($('#taskEstimate').value)};
-    if(mode==='live'){
+    if(nativeCanary.selected){
+      const payload=Object.assign({op:'create'},record);
+      if(!Number.isInteger(payload.estimate_minutes)||payload.estimate_minutes<1)
+        payload.estimate_minutes=null;
+      if(!await mutateNativeCanary(payload))return;
+    }else if(mode==='live'){
       try {await requestBridge('/api/tasks',record);}
       catch {toast('Could not save task to SQLite');return;}
     } else {
       tasks.unshift({id:'u'+Date.now(),createdAt:new Date().toISOString(),title,description:record.notes,project:record.project,priority:record.priority,status:'todo',due:record.due_on||'',tags:['New'],mins:record.estimate_minutes});
       save();
     }
-    closeModal();setView('inbox');toast(mode==='live'?'Task saved to local SQLite':'Task added to your local demo');
+    closeModal();setView('inbox');
+    toast(nativeCanary.selected?'Task saved to native Rust SQLite':
+      mode==='live'?'Task saved to local SQLite':'Task added to your local demo');
   });
   $('#searchInput').addEventListener('input',e=>{query=e.target.value;nativeReadOnly.page=0;render();});
   $('#filterButton').addEventListener('click',()=>{const options=['all','urgent','high','medium','low'];filter=options[(options.indexOf(filter)+1)%options.length];nativeReadOnly.page=0;render();});
   $('#sortMode').addEventListener('change',e=>{
     if (!['focus','fifo','due','priority'].includes(e.target.value)) return;
     sortMode=e.target.value;
-    try {localStorage.setItem('shiori-demo-sort',sortMode);signalNativeVault();} catch {}
+    if(!nativeCanary.selected){
+      try {localStorage.setItem('shiori-demo-sort',sortMode);signalNativeVault();} catch {}
+    }
     render();
   });
   $('#savedViewSelect').addEventListener('change',e=>{
@@ -955,6 +981,7 @@
     render();
   });
   $('#saveView').addEventListener('click',()=>{
+    if(nativeCanary.selected){toast('Saved-view editing is disabled in debug canary');return;}
     if(!['today','attention','inbox','board'].includes(view)){toast('Open a task list before saving a view');return;}
     const name=prompt('Name for this saved view (up to 40 characters):','My focus');
     if(name===null)return;
@@ -972,6 +999,7 @@
     toast('Saved view: '+normalized);
   });
   $('#removeView').addEventListener('click',()=>{
+    if(nativeCanary.selected){toast('Saved-view editing is disabled in debug canary');return;}
     const name=$('#savedViewSelect').value;if(!name){toast('Select a saved view first');return;}
     savedViews=savedViews.filter(v=>v.name!==name);
     persistSavedViews();
@@ -1002,7 +1030,12 @@
     if(t){
       if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
       const next=col.dataset.drop;
-      if(mode==='live') {
+      if(nativeCanary.selected) {
+        mutateNativeCanary({
+          op:'status',id:t.id,expected_version:t.version,
+          status:next==='progress'?'in_progress':next
+        }).then(ok=>toast(ok?'Task stage saved in Rust SQLite':'Could not move task'));
+      } else if(mode==='live') {
         requestBridge('/api/tasks/'+encodeURIComponent(t.id)+'/status',{status:next==='progress'?'in_progress':next})
           .then(()=>toast('Task stage saved to SQLite'))
           .catch(()=>toast('Could not save task stage'));
