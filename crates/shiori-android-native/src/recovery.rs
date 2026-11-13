@@ -164,13 +164,13 @@ mod tests {
         let restored_db = Connection::open_with_flags(&isolated, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert!(records_match(&original_db, &restored_db).unwrap());
         assert_eq!(read_manifest(&restored_db).unwrap().0, original);
-        assert_eq!(fs::metadata(&archive).unwrap().len() > 0, true);
+        assert!(fs::metadata(&archive).unwrap().len() > 0);
         drop(restored_db);
         drop(original_db);
         // Re-import cannot silently replace previously recovered edits.
         assert!(recover_to_separate_preview(&archive, &isolated).is_err());
         let check = Connection::open_with_flags(&isolated, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        assert!(table_rows(&check,"SELECT id FROM tasks ORDER BY id").unwrap().len() == 4);
+        assert_eq!(table_rows(&check,"SELECT id FROM tasks ORDER BY id").unwrap().len(), 4);
         drop(check);
         for path in [source, archive, isolated] {
             fs::remove_file(path).unwrap();
