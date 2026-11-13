@@ -314,7 +314,7 @@
     }
     html+='<div class="task-list">'+visible.map(t=>
       '<article class="task-row native-readonly-row">'+
-      '<span class="native-readonly-marker" aria-hidden="true">'+icon('eye')+'</span>'+
+      '<span class="native-readonly-marker" aria-hidden="true">'+icon('search')+'</span>'+
       '<div class="task-info"><div class="task-title'+(t.status==='done'?' done':'')+'">'+
       escapeHTML(t.title)+'</div><div class="task-meta"><span class="project-chip">'+
       escapeHTML(t.project)+'</span><span>Read-only · '+
@@ -328,7 +328,7 @@
     if(mode!=='android-local'||!nativeWorking.open||nativeWorking.busy)return;
     if(!(await nativePreviewRefresh()))return;
     // Never compare only the first 50 tasks as though they were all records.
-    if(nativeWorking.total>nativeWorking.items.length){
+    if(nativeWorking.total!==nativeWorking.items.length){
       nativeWorking.error='Rust working copy exceeds the 50-item display limit. Pagination is required before full-list comparison.';
       nativePreviewUpdate();
       return;
@@ -346,7 +346,7 @@
     return json.length<=MAX_BACKUP_CHARS?json:null;
   };
   window.shioriRestoreBackup=(raw)=>{
-    if(mode!=='android-local'||typeof raw!=='string'||raw.length>MAX_BACKUP_CHARS)return false;
+    if(mode!=='android-local'||nativeReadOnly.active||typeof raw!=='string'||raw.length>MAX_BACKUP_CHARS)return false;
     try{
       const data=JSON.parse(raw);
       if(!data||data.format!==ANDROID_BACKUP_FORMAT||!Array.isArray(data.tasks)
