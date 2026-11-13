@@ -32,4 +32,11 @@ internal object NativeVault {
     external fun stageCutoverCandidate(candidatePath: String, originalAndroidJson: String): String?
     /** Native SQLite tags/preferences read only; no JavaScript database path. */
     external fun readWorkingMetadata(candidatePath: String): String?
+    /** Guard explicit UI rollback: compare live legacy data with independent
+     * read-only rollback vault and canonical source candidate. */
+    external fun verifyLegacyRollback(
+        rollbackVaultPath: String,
+        candidatePath: String,
+        currentLegacyJson: String
+    ): Boolean
 }
