@@ -64,6 +64,7 @@ jobs:
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_stageCutoverCandidate'
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_readWorkingMetadata'
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_verifyLegacyRollback'
+            readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_inspectInterruptedCanary'
           done
       - name: Build APK with bundled offline assets
         run: |
