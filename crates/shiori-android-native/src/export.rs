@@ -38,11 +38,9 @@ fn read_manifest(db: &Connection) -> Result<(String, i64, i64, i64), Box<dyn Err
         [],
         |row| row.get(0),
     )?;
-    let dependencies: i64 = db.query_row(
-        "SELECT COUNT(*) FROM task_dependencies",
-        [],
-        |row| row.get(0),
-    )?;
+    let dependencies: i64 = db.query_row("SELECT COUNT(*) FROM task_dependencies", [], |row| {
+        row.get(0)
+    })?;
     Ok((archive, records, tombstones, dependencies))
 }
 
@@ -102,7 +100,9 @@ mod tests {
 
     fn paths() -> (std::path::PathBuf, std::path::PathBuf) {
         let suffix = format!(
-            "{}-{}", std::process::id(), Utc::now().timestamp_nanos_opt().unwrap()
+            "{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
         );
         let dir = std::env::temp_dir();
         (
@@ -153,19 +153,27 @@ mod tests {
         assert_eq!(report.dependencies, 1);
         assert!(report.bytes > 0);
         assert_eq!(report.bytes, fs::metadata(&target).unwrap().len());
-        let copied = Connection::open_with_flags(&target, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let copied =
+            Connection::open_with_flags(&target, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let (archived, records, deleted, edges) = read_manifest(&copied).unwrap();
         assert_eq!(archived, original);
         assert_eq!((records, deleted, edges), (4, 1, 1));
         let title: String = copied
-            .query_row("SELECT title FROM tasks WHERE id=?1", params![new_id], |row| row.get(0))
+            .query_row(
+                "SELECT title FROM tasks WHERE id=?1",
+                params![new_id],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(title, "Native dependent");
         drop(copied);
         assert!(export_working_database(&source, &target).is_err());
         assert_eq!(fs::metadata(&target).unwrap().len(), report.bytes);
         assert_eq!(
-            SqliteStore::open(&source).unwrap().legacy_shadow_source().unwrap(),
+            SqliteStore::open(&source)
+                .unwrap()
+                .legacy_shadow_source()
+                .unwrap(),
             Some(original)
         );
         fs::remove_file(target).unwrap();
