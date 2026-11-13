@@ -72,6 +72,10 @@ class MainActivity : Activity() {
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
+            // Respect <meta name="viewport" content="width=device-width">.
+            // Android WebView's default wide-viewport setting can leave the
+            // mobile FAB hidden behind the desktop-only responsive breakpoint.
+            useWideViewPort = true
             allowFileAccess = false
             allowContentAccess = false
             javaScriptCanOpenWindowsAutomatically = false
