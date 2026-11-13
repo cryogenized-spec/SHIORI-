@@ -167,7 +167,21 @@ def main():
                 "localStorage.getItem('shiori-android-local-tasks')"
             ) == baseline
 
+            # The native source is locked while Android validates the
+            # independent rollback vault. No WebView write or new native
+            # mutation can be issued during the comparison.
+            frozen = page.evaluate("window.shioriNativeFreezeForRollback()")
+            assert json.loads(frozen)["tasks"][0]["title"] == "Original WebView task"
+            assert page.locator("[data-add]").first.is_disabled()
+            assert page.evaluate("window.shioriNativeFreezeForRollback()") is None
+            assert page.evaluate(
+                "localStorage.getItem('shiori-android-local-tasks')"
+            ) == baseline
+            page.evaluate("window.shioriAbortCutover()")
+            assert page.locator("[data-add]").first.is_enabled()
+
             # Explicit rollback reloads only the untouched legacy store.
+            assert page.evaluate("window.shioriNativeFreezeForRollback()")
             assert page.evaluate("window.shioriNativeDeactivate()") is True
             page.evaluate("document.querySelector('[data-view=inbox]').click()")
             assert page.get_by_text("Original WebView task").count() == 1
