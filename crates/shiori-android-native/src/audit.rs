@@ -190,8 +190,7 @@ pub fn audit_legacy_shadow(
         expected_tags += tags.len();
         if tags_by_id
             .get(id)
-            .map(Value::as_array)
-            .flatten()
+            .and_then(Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or(&[])
             != tags.as_slice()
