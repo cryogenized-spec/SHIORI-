@@ -384,6 +384,12 @@
     }catch{tasks=[];}
     $('#footerMode').textContent='ANDROID · OFFLINE LOCAL DEVICE';
     $('#railMode').textContent='● OFFLINE DEVICE';
+    try{
+      const originalOrder=localStorage.getItem('shiori-demo-sort');
+      if(['focus','fifo','due','priority'].includes(originalOrder)){
+        sortMode=originalOrder;$('#sortMode').value=sortMode;
+      }
+    }catch{}
     setView('inbox');
     return true;
   };
@@ -498,9 +504,16 @@
         legacy=stored;
       }catch{return null;}
     }
+    let originalViews=savedViews, originalSort=sortMode;
+    if(nativeCanary.selected){
+      try{
+        originalViews=JSON.parse(localStorage.getItem('shiori-saved-views')||'[]');
+        originalSort=localStorage.getItem('shiori-demo-sort')||'focus';
+      }catch{return null;}
+    }
     const json=JSON.stringify({format:ANDROID_BACKUP_FORMAT,
       exported_at:new Date().toISOString(),tasks:legacy,
-      saved_views:savedViews,sort:sortMode});
+      saved_views:originalViews,sort:originalSort});
     return json.length<=MAX_BACKUP_CHARS?json:null;
   };
   window.shioriRestoreBackup=(raw)=>{
@@ -676,9 +689,15 @@
       return;
     }
     if(nativeCanary.active&&view==='inbox')$('#sectionTitle').textContent='Rust tasks · debug canary';
-    if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=html;$('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
+    if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=(nativeCanary.active&&view!=='settings'?
+      '<section class="native-canary-banner" role="status"><strong>Experimental Rust task source</strong>'+
+      '<span>Debug-only · Legacy tasks preserved for rollback</span>'+
+      '<button type="button" data-view="settings">Storage settings</button></section>':'')+html;
+    $('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
   function closeSidebar(){$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');}
-  function openModal(){if(nativeReadOnly.active){toast('Read-only source preview · return to Android tasks to edit');return;}$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
+  function openModal(){
+    if(nativeCanary.selected&&!nativeCanary.active){toast('Rust task source unavailable · return to Settings');return;}
+    if(nativeReadOnly.active){toast('Read-only source preview · return to Android tasks to edit');return;}$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
   function closeModal(){$('#taskModal').classList.remove('open');$('#taskModal').setAttribute('aria-hidden','true');}
   // Dismiss exactly one surface per Back/Escape press, topmost first.
   // The native Android Activity sends a cancelable shiori-native-back event;
