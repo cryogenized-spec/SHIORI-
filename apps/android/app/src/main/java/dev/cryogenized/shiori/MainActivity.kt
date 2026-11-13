@@ -645,17 +645,24 @@ class MainActivity : Activity() {
             val supported = action in setOf(
                 "list", "create", "rename", "edit", "status", "delete", "metadata"
             )
-            if (request.optString("protocol") != "shiori-native-working-v1" || !supported) {
+            val expectsPrimary = isNativeCanarySelected()
+            val source = request.optString("source", "working")
+            if (request.optString("protocol") != "shiori-native-working-v1" ||
+                !supported || source != if (expectsPrimary) "primary" else "working"
+            ) {
                 completeNativeWorkingCommand(
                     requestId, JSONObject().put("ok", false)
-                        .put("error", "Unsupported native task command").toString()
+                        .put("error", "Unsupported command or stale task source").toString()
                 )
                 return@evaluateJavascript
             }
             vaultExecutor.execute {
                 val answer = runCatching {
+                    if (expectsPrimary != isNativeCanarySelected()) {
+                        throw IOException("Task source changed before this operation")
+                    }
                     NativeVault.workingCopyRequest(
-                        if (isNativeCanarySelected()) primaryPath() else workingPath(),
+                        if (expectsPrimary) primaryPath() else workingPath(),
                         request.toString()
                     )
                 }.getOrNull()
