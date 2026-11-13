@@ -151,6 +151,15 @@ def main():
         time.sleep(1)
         launch("Back navigation followed by relaunch")
 
+        # This smoke deliberately rotates the device to landscape, then
+        # restores its user setting. On API 35 a settings write alone may not
+        # commit the WindowManager display rotation immediately. Lock actual
+        # portrait orientation before asserting the mobile FAB is visible.
+        # 'cmd window user-rotation' is the WindowManager command supported
+        # by Android 12+; this test targets Android 15.
+        adb("shell", "cmd", "window", "user-rotation", "lock", "0")
+        time.sleep(2)
+
         # The AndroidX test APK injects genuine device screen-pointer touches
         # into the packaged offline WebView. The instrumented tests inspect
         # DOM/storage after those Android events; they do not call JS click().
