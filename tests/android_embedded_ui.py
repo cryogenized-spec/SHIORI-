@@ -270,6 +270,61 @@ def run():
             ) == "[]"
             assert page.evaluate("localStorage.getItem('shiori-demo-tasks')") is None
 
+            # The read-only source switch renders native SQLite records
+            # in SHIORI's familiar task-row layout, without editing either
+            # the original WebView array or the separate Rust working copy.
+            page.locator("#showNativeReadOnly").click()
+            preview_req = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
+            assert preview_req["op"] == "list"
+            page.evaluate("""(rid) => window.shioriNativeComplete(
+                rid, JSON.stringify({ok:true,total:1,tasks:[{
+                    id:"native-1",title:"Native preview record",project:"Rust",
+                    priority:"high",status:"done",notes:"Only in SQLite",
+                    version:3,due_on:null
+                }]})
+            )""", preview_req["request_id"])
+            page.locator("#closeNativeReadOnly").wait_for()
+            assert page.get_by_text("Read-only Rust/SQLite source preview").count() == 1
+            assert page.locator("#mainData .task-row").count() == 1
+            assert page.get_by_text("Native preview record").count() == 1
+            assert page.locator("#mainData [data-complete]").count() == 0
+            assert page.locator("#mainData [data-detail]").count() == 0
+            assert page.locator("#mainData [data-drag]").count() == 0
+            assert page.locator("[data-add]").first.is_disabled()
+            page.keyboard.press("n")
+            assert "open" not in (page.locator("#taskModal").get_attribute("class") or "").split()
+            assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
+
+            # Explicit return restores the original Android task list and
+            # its normal create/edit UI without touching localStorage.
+            page.locator("#closeNativeReadOnly").click()
+            assert page.locator("#mainData .native-readonly-banner").count() == 0
+            assert page.locator("#mainData .task-row").count() == 0
+            assert page.locator("[data-add]").first.is_enabled()
+            assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
+
+            # A truncated native list is not allowed to masquerade as a
+            # complete source preview. Pagination is a separate M2 gate.
+            page.evaluate("document.querySelector('[data-view=settings]').click()")
+            page.locator("#showNativeReadOnly").click()
+            oversized_req = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
+            assert oversized_req["op"] == "list"
+            page.evaluate("""(rid) => window.shioriNativeComplete(
+                rid, JSON.stringify({ok:true,total:61,tasks:[{
+                    id:"native-1",title:"One of 61",project:"Rust",
+                    status:"todo",priority:"high",version:4
+                }]})
+            )""", oversized_req["request_id"])
+            page.get_by_text("Pagination is required before full-list comparison.", exact=False).wait_for()
+            assert page.locator("#nativeWorkingPanel").count() == 1
+            assert page.locator("#mainData .native-readonly-banner").count() == 0
+            assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
+
+            # Source selection is not saved or resumed on a new app launch.
+            page.reload(wait_until="load")
+            assert page.locator("#mainData .native-readonly-banner").count() == 0
+            assert page.evaluate("window.shioriNativeTakeRequest()") is None
+
             assert not failures, failures
             assert not external_requests, external_requests
             print("Android-origin offline UI: create, edit, persistence, saved views, delete passed")
