@@ -424,6 +424,7 @@
   const dateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
   let toastTimer;
   const save=()=>{
+    if(nativeReadOnly.active){toast('Read-only Rust preview · task changes are disabled');return;}
     try{
       localStorage.setItem(taskStoreKey,JSON.stringify(tasks));
       signalNativeVault();
@@ -493,10 +494,23 @@
   function renderAutomations(){return `<div class="settings-list">${[['Recurring work','Automatic task generation from repeat rules.','Planned'],['Rules & triggers','When status, date or project changes, take a defined action.','Planned'],['Webhooks','Connect external services through auditable, permission-controlled events.','Planned'],['MCP actions','Let authorized AI assistants work with tasks through typed tools.','Planned']].map(([n,d,s])=>`<article class="automation-card"><div><h3>${n}</h3><p>${d}</p><span class="status-tag">${s.toUpperCase()} · NOT IMPLEMENTED</span></div><button data-preview-feature="${n}">Preview</button></article>`).join('')}</div>`;}
   function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='android-local'?'<div class="settings-actions"><button type="button" id="exportAndroidBackup">Export JSON backup</button><button type="button" id="importAndroidBackup">Restore backup</button></div><p class="settings-hint">Experimental Rust SQLite safety copy: a separate, private on-device copy. The current task store remains WebView-based while we validate migration.</p><div class="settings-actions"><button type="button" id="saveNativeVault">Save native safety copy</button><button type="button" id="recoverNativeVault">Recover native safety copy</button></div><p class="settings-hint">Migration preview: stage a copy of your current tasks into SHIORI’s canonical Rust/SQLite format. Your current tasks remain in WebView storage; this does not enable native editing or sync.</p><div class="settings-actions"><button type="button" id="stageCanonicalShadow">Stage Rust migration preview</button><button type="button" id="auditCanonicalShadow">Audit staged Rust preview</button></div><p class="settings-hint">Experimental native Rust task editor: creates a third, independent SQLite working copy. Tasks added or changed there do not appear in the normal Android list. Use it only to test the native engine.</p><div class="settings-actions"><button type="button" id="openNativeWorkingCopy">Open native Rust task workspace</button></div>'+nativePreviewRender()+'':''}${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
   function renderUpcoming(){let upcoming=[...tasks].filter(t=>t.status!=='done' && t.due>=newDate()).sort((a,b)=>a.due.localeCompare(b.due)).slice(0,3);$('#upcoming').innerHTML=upcoming.map(t=>{const d=new Date(`${t.due}T12:00:00`);return `<div class="upcoming-item"><div class="upcoming-date"><div>${d.getDate()}<small>${new Intl.DateTimeFormat('en-GB',{month:'short'}).format(d).toUpperCase()}</small></div></div><div class="upcoming-main"><b>${escapeHTML(t.title)}</b><span>${escapeHTML(t.project)} · ${t.mins==null?'No estimate':t.mins+' min estimate'}</span></div></div>`}).join('');}
-  function setView(next){view=next;query='';$('#searchInput').value='';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const v=views[view];$('#breadcrumbCurrent').textContent=v[0];$('#pageTitle').innerHTML=escapeHTML(v[1].replace(/\.$/,''))+'<span class="period">.</span>';$('#pageSubtitle').textContent=v[2];$('#sectionEyebrow').textContent=v[3];$('#sectionTitle').textContent=v[4];const regular=['today','attention','inbox','board'];$('#hero').style.display=view==='today'?'flex':'none';$('#stats').style.display=view==='today'||view==='reports'?'grid':'none';$('.quick-search').style.display=regular.includes(view)?'flex':'none';$('#filterButton').style.display=regular.includes(view)?'flex':'none';$('.sort-control').style.display=regular.includes(view)?'inline-flex':'none';$('#viewSwitch').style.display=regular.includes(view)?'flex':'none';$('#viewSwitch').innerHTML=view==='board'?`${icon('check-circle')} List`:`${icon('columns')} Board`;render();closeSidebar();window.scrollTo({top:0,behavior:'instant'});}
-  function render(){renderStats();renderUpcoming();renderCalendar();if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=html;$('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
+  function setView(next){if(next!=='inbox')nativeReadOnly.active=false;view=next;query='';$('#searchInput').value='';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const v=views[view];$('#breadcrumbCurrent').textContent=v[0];$('#pageTitle').innerHTML=escapeHTML(v[1].replace(/\.$/,''))+'<span class="period">.</span>';$('#pageSubtitle').textContent=v[2];$('#sectionEyebrow').textContent=v[3];$('#sectionTitle').textContent=v[4];const regular=['today','attention','inbox','board'];$('#hero').style.display=view==='today'?'flex':'none';$('#stats').style.display=view==='today'||view==='reports'?'grid':'none';$('.quick-search').style.display=regular.includes(view)?'flex':'none';$('#filterButton').style.display=regular.includes(view)?'flex':'none';$('.sort-control').style.display=regular.includes(view)?'inline-flex':'none';$('#viewSwitch').style.display=regular.includes(view)?'flex':'none';$('#viewSwitch').innerHTML=view==='board'?`${icon('check-circle')} List`:`${icon('columns')} Board`;render();closeSidebar();window.scrollTo({top:0,behavior:'instant'});}
+  function render(){
+    // Stats and the calendar retain their legacy data source. They are
+    // not mixed into the read-only native task-list projection.
+    renderStats();renderUpcoming();renderCalendar();
+    $('[data-add]').forEach(button=>{
+      button.disabled=nativeReadOnly.active;
+      button.title=nativeReadOnly.active?'Read-only preview · return to Android tasks':'';
+    });
+    if(nativeReadOnly.active&&view==='inbox'){
+      $('#sectionTitle').textContent='Rust tasks · read-only preview';
+      $('#mainData').innerHTML=renderNativeReadOnly();
+      return;
+    }
+    if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=html;$('#filterLabel').textContent=filter==='all'?'All priorities':filter[0].toUpperCase()+filter.slice(1);}
   function closeSidebar(){$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');}
-  function openModal(){$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
+  function openModal(){if(nativeReadOnly.active){toast('Read-only source preview · return to Android tasks to edit');return;}$('#taskModal').classList.add('open');$('#taskModal').setAttribute('aria-hidden','false');$('#taskForm').reset();$('#taskDue').value=newDate();setTimeout(()=>$('#taskName').focus(),0);}
   function closeModal(){$('#taskModal').classList.remove('open');$('#taskModal').setAttribute('aria-hidden','true');}
   // Dismiss exactly one surface per Back/Escape press, topmost first.
   // The native Android Activity sends a cancelable shiori-native-back event;
@@ -540,6 +554,7 @@
     setTimeout(()=>$('#editTaskName').focus(),0);
   }
   async function removeTask(){
+    if(nativeReadOnly.active)return;
     const t=tasks.find(item=>item.id===activeDetail);
     if(!t || mode==='checking' || mode==='local-error') return;
     if(!confirm('Move this task to deleted records?')) return;
@@ -559,6 +574,7 @@
   }
   function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?'Offline Android task · stored on this device':'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
   async function toggleTask(id){
+    if(nativeReadOnly.active)return;
     const t=tasks.find(x=>x.id===id);if(!t)return;
     const next=t.status==='done'?'todo':'done';
     if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
@@ -624,6 +640,13 @@
     if(e.target.id==='openNativeWorkingCopy'&&mode==='android-local'){
       window.location.href='shiori-vault://working';return;
     }
+    if(e.target.id==='showNativeReadOnly'&&mode==='android-local'){
+      openNativeReadOnly();return;
+    }
+    if(e.target.id==='closeNativeReadOnly'){
+      nativeReadOnly.active=false;
+      setView('inbox');return;
+    }
     const nativeButton=e.target.closest('[data-native-op]');
     if(nativeButton&&mode==='android-local'){
       const op=nativeButton.dataset.nativeOp;
@@ -664,6 +687,7 @@
   });
   $('#editTaskForm').addEventListener('submit',async e=>{
     e.preventDefault();
+    if(nativeReadOnly.active)return;
     const t=tasks.find(item=>item.id===activeDetail);
     if(!t || mode==='checking' || mode==='local-error') return;
     const estimateText=$('#editTaskEstimate').value.trim();
@@ -713,6 +737,7 @@
 
   $('#taskForm').addEventListener('submit',async e=>{
     e.preventDefault();
+    if(nativeReadOnly.active)return;
     const title=$('#taskName').value.trim();if(!title)return;
     if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
     const record={title,notes:$('#taskDescription').value.trim(),project:$('#taskProject').value,priority:$('#taskPriority').value,due_on:$('#taskDue').value||null,estimate_minutes:Number($('#taskEstimate').value)};
@@ -786,7 +811,7 @@
     if(e.key==='/'){e.preventDefault();$('#searchInput').focus();}
     if(e.key.toLowerCase()==='n' && !e.metaKey && !e.ctrlKey){openModal();}
   });
-  let dragged=null;document.addEventListener('dragstart',e=>{const card=e.target.closest('[data-drag]');if(card){dragged=card.dataset.drag;card.classList.add('dragging');}});document.addEventListener('dragend',()=>{$$('.dragging').forEach(c=>c.classList.remove('dragging'));dragged=null;});document.addEventListener('dragover',e=>{const col=e.target.closest('[data-drop]');if(col){e.preventDefault();col.classList.add('drag-over');}});document.addEventListener('dragleave',e=>{const col=e.target.closest('[data-drop]');if(col && !col.contains(e.relatedTarget))col.classList.remove('drag-over');});document.addEventListener('drop',e=>{const col=e.target.closest('[data-drop]');if(col && dragged){
+  let dragged=null;document.addEventListener('dragstart',e=>{if(nativeReadOnly.active)return;const card=e.target.closest('[data-drag]');if(card){dragged=card.dataset.drag;card.classList.add('dragging');}});document.addEventListener('dragend',()=>{$$('.dragging').forEach(c=>c.classList.remove('dragging'));dragged=null;});document.addEventListener('dragover',e=>{const col=e.target.closest('[data-drop]');if(col){e.preventDefault();col.classList.add('drag-over');}});document.addEventListener('dragleave',e=>{const col=e.target.closest('[data-drop]');if(col && !col.contains(e.relatedTarget))col.classList.remove('drag-over');});document.addEventListener('drop',e=>{if(nativeReadOnly.active)return;const col=e.target.closest('[data-drop]');if(col && dragged){
     e.preventDefault();const t=tasks.find(x=>x.id===dragged);
     if(t){
       if(mode==='local-error'||mode==='checking'){toast('Local database not ready');return;}
