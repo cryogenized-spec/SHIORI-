@@ -8,8 +8,8 @@ mod export;
 mod migration;
 mod parity;
 mod recovery;
-mod rollback;
 mod resume;
+mod rollback;
 mod working_copy;
 
 use chrono::NaiveDate;
