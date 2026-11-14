@@ -1,6 +1,8 @@
 //! SHIORI's platform-independent task model.
 //! No filesystem, database, MCP, HTTP or UI dependencies belong here.
 
+pub mod scheduling;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
