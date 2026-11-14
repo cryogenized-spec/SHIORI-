@@ -115,6 +115,22 @@ def optional_dialog_probe():
     print("PASS: native UIAutomator tap opens and dismisses the task modal")
 
 
+def check_instrumentation_result(report: str) -> None:
+    """Require two passing Android tests and the runner's success exit code.
+
+    ADB may exit zero even when instrumented tests failed or were skipped.
+    Keep the parser standalone so CI can exercise it without an emulator.
+    """
+    if ("FAILURES!!!" in report or "INSTRUMENTATION_FAILED" in report or
+            "INSTRUMENTATION_ABORTED" in report or
+            not re.search(r"(?m)^OK \(2 tests\)[ \t]*$", report) or
+            not re.search(r"(?m)^INSTRUMENTATION_CODE: -1[ \t]*$", report)):
+        raise RuntimeError(
+            "Android WebView touch instrumentation failed or skipped tests: "
+            + report[-2400:]
+        )
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("apk", type=Path)
@@ -171,12 +187,7 @@ def main():
             "androidx.test.runner.AndroidJUnitRunner"
         )
         report = adb("shell", "am", "instrument", "-w", "-r", runner, timeout=240)
-        if ("FAILURES!!!" in report or "INSTRUMENTATION_FAILED" in report or
-                not re.search(r"(?m)^OK \(2 tests?\)[ \t]*$", report)):
-            raise RuntimeError(
-                "Android WebView touch instrumentation failed or skipped tests: "
-                + report[-2400:]
-            )
+        check_instrumentation_result(report)
         print("PASS: both Android instrumentation tests used real pointer touches "
               "and verified cancellation, task persistence and Activity recreation")
 
