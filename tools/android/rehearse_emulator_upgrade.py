@@ -21,6 +21,7 @@ import secrets
 import shlex
 import subprocess
 import sys
+import time
 
 from compare_debug_upgrades import compare_records, verify_against_apk
 from verify_recovery_device import APP_ID, PROTECTED, RECOVERY
@@ -223,6 +224,43 @@ def stage(args, prev, next_):
     print("STAGED on disposable emulator only. Create synthetic tasks, edit one, "
           "save a view and verify a separate backup. Run upgrade with "
           "--confirm-synthetic-data when ready; no real data was accessed.")
+
+
+def wait_for_app_readiness(serial, timeout_s=30, poll_interval_s=1):
+    """Bounded read-only liveness and persisted-WebView stability gate.
+
+    Android am start -W alone only proves Activity launch. Require two
+    consecutive, separated observations of a live app process, focused app
+    window, present WebView storage and stable private storage metadata.
+    This does not replace manual task parity or prove JavaScript completion.
+    """
+    deadline = time.monotonic() + timeout_s
+    previous = None
+    consecutive = 0
+    while time.monotonic() < deadline:
+        try:
+            pid = adb("-s", serial, "shell", "pidof", APP_ID).strip()
+            window = adb("-s", serial, "shell", "dumpsys", "window", "windows")
+            focused = any(
+                APP_ID in line and ("mCurrentFocus=" in line or
+                                    "mFocusedApp=" in line)
+                for line in window.splitlines()
+            )
+            present = bool(re.fullmatch(r"[0-9]+(?:\s+[0-9]+)*", pid))
+            current = (webview_size(serial), private_metadata(serial))
+            ready = present and focused and current[0] is not None
+            if ready and current == previous:
+                consecutive += 1
+                if consecutive >= 2:
+                    return
+            else:
+                consecutive = 0
+            previous = current if ready else None
+        except (RuntimeError, subprocess.TimeoutExpired):
+            previous = None
+            consecutive = 0
+        time.sleep(poll_interval_s)
+    raise RuntimeError("Upgraded Android app did not reach stable observable startup state")
 
 
 def replace_trial_report(path, value):
