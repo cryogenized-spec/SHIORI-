@@ -4,7 +4,7 @@ Local-first task management, independent of AI, account providers, and hosting s
 
 ## Status
 
-**First implementation slice, not a public release.** This branch implements a Rust task model, SQLite persistence, a local CLI and an interactive web **mockup**. The web UI still uses browser sample data; it is **not yet connected** to Rust, a REST API, or MCP. There is no authentication, sync, or production-grade migration system yet.
+**Early implementation, not a public release.** This branch includes the Rust task model, SQLite persistence, a local CLI, the interactive web prototype, and a **development-only localhost adapter** that connects the browser to the real Rust CLI and SQLite database. This is not a public REST/MCP service, authenticated multi-user application, or finished sync/backup system.
 
 ## Development
 
@@ -29,22 +29,32 @@ cargo run -p shiori-cli -- plan 2026-11-12 --start 08:00 --end 17:00 --break-sta
 
 By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support. Existing pre-versioning and v1 SQLite files are upgraded transactionally to schema version 2 while retaining task records and tombstones; unknown future schema versions are refused rather than overwritten. Full multi-version migrations and safe live backup are still future work.
 
-The web design concept runs standalone in Firefox by opening `apps/web/index.html`, or via a local static server:
+The web design concept runs standalone in Firefox by opening `apps/web/index.html`, or via a local static server (demo tasks only):
 
 ```bash
 cd apps/web && python3 -m http.server 8765 --bind 127.0.0.1
 ```
 
+**To use real tasks from SQLite rather than sample records**, build the local Rust CLI and launch the development bridge:
+
+```bash
+cargo build --locked -p shiori-cli
+python3 apps/local_bridge.py --cli target/debug/shiori-cli --port 8765
+```
+
+Open `http://127.0.0.1:8765`. The footer changes to **LOCAL RUST / SQLITE** when connected. The bridge binds only to loopback, invokes Rust CLI operations, and does not import demonstration tasks. **Development only:** it is not an authenticated remote service; do not expose it to your LAN, a proxy or a tunnel. For the threat model, limitations and `--database` override see [local web bridge](docs/engineering/LOCAL_WEB_BRIDGE.md).
+
 The optional calendar on **My day** can be collapsed; its state is saved in local storage. Select a date to filter the task list for that day, and select **Today** to reset.
 
-**M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the browser is still demo data, there is no assignee model or web-to-Rust bridge; task durations and prerequisite links are now stored in SQLite and used by the CLI planner, but there is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
+**M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the browser is still demo data, there is no assignee model or authenticated production API; task durations and prerequisite links are stored in SQLite and used by the CLI planner, while an optional development-only localhost bridge allows the web prototype to view and mutate that same task database. There is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
 
 ## Layout
 
 - `crates/shiori-core`: standalone task domain rules
 - `crates/shiori-storage`: SQLite adapter with indexed filters and tombstones
 - `apps/shiori-cli`: manual offline task operations
-- `apps/web`: responsive browser mockup (not linked to backend)
+- `apps/web`: responsive browser UI (static demo or optional localhost Rust/SQLite bridge)
+- `apps/local_bridge.py`: temporary development HTTP adapter; not a public REST API
 - `docs/adr`: architecture decisions
 - `.github/workflows`: automated formatting, lint and tests
 
