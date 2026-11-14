@@ -1,5 +1,18 @@
 # SHIORI Android offline shell (M2 alpha)
 
+> **Current M2.5 acceptance status:** Debug-only, **not release-ready**.
+> The app now includes an opt-in Rust/SQLite native task source, JNI commands
+> for task edits, tags and saved views, guarded migration/rollback and an
+> Android emulator lifecycle smoke test. Some earlier sections below describe
+> historical development states rather than today's capabilities. See the
+> [M2.5 release hold and physical-device test plan](../../docs/engineering/M2_5_ANDROID_ACCEPTANCE_AND_RELEASE_HOLD.md).
+>
+> **Do not uninstall an earlier debug build to install a new CI APK on a
+> real-data device.** Ephemeral CI debug certificates may differ between runs,
+> so an in-place update may fail. Uninstalling can delete app-private data.
+> Export and verify an independent backup, and test new builds on disposable
+> profiles until stable signing and upgrade validation are complete.
+
 This is an **actual native Android Activity**, deliberately small and self-contained. It serves the **same** responsive SHIORI web UI assets from the APK through a private HTTPS-like WebView origin. It has **no INTERNET permission**, no JavaScript bridge, and blocks outbound navigation.
 
 ## Mobile navigation and cancellation
@@ -49,6 +62,19 @@ you have verified that backup.
 See [canonical Android migration plan](../../docs/engineering/ANDROID_CANONICAL_MIGRATION.md)
 for how timestamp defaults and older hard-deleted records are handled.
 
+## Optional stable development signing for upgrade rehearsal
+
+Debug APKs built on different CI runners may have different certificates.
+For **disposable** in-place upgrade testing, the Gradle debug build can
+optionally use an external keystore via four `SHIORI_DEV_KEY*` environment
+variables, with `SHIORI_DEV_VERSION_CODE` to increase the candidate
+versionCode. Partial credentials, missing keystores and keystores inside the
+repository are rejected. This does **not** configure release signing or
+authorize deployment to a handset containing real data.
+
+See [M2.7 stable debug signing contract](../../docs/engineering/M2_7_STABLE_DEV_SIGNING.md)
+and [M2.6 upgrade preflight](../../docs/engineering/M2_6_ANDROID_UPGRADE_PREFLIGHT.md).
+
 ## Open and build
 
 Use Android Studio with JDK 17, Android SDK API 36 and Android Gradle Plugin 9.4. The project is rooted at `apps/android` and uses Gradle 9.9.1. It links `apps/web` as a **packaged asset source** at build time; do not copy a second stale UI.
@@ -78,7 +104,7 @@ The debug APK will be under `apps/android/app/build/outputs/apk/debug/` after a 
 
 ## Security
 
-The Activity only loads bundled app assets via `https://appassets.androidplatform.net` and intercepts all asset reads. Non-local origins are blocked, file/content URI access is disabled, JavaScript popups are disabled, and the manifest requests no network permission. There is no JavaScript-to-native interface.
+The Activity only loads bundled app assets via `https://appassets.androidplatform.net` and intercepts all asset reads. Non-local origins are blocked, file/content URI access is disabled, JavaScript popups are disabled, and the manifest requests no network permission. There is no `addJavascriptInterface` object exposed to page JavaScript. The reviewed, allowlisted `shiori-vault://` custom-URL bridge still carries explicitly bounded native commands to Rust; it is a real native integration and requires continued security review.
 
 Security review and Android device tests remain required before publication.
 

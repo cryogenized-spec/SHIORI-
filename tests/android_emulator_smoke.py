@@ -115,12 +115,30 @@ def optional_dialog_probe():
     print("PASS: native UIAutomator tap opens and dismisses the task modal")
 
 
+def check_instrumentation_result(report: str) -> None:
+    """Require two passing Android tests and the runner's success exit code.
+
+    ADB may exit zero even when instrumented tests failed or were skipped.
+    Keep the parser standalone so CI can exercise it without an emulator.
+    """
+    if ("FAILURES!!!" in report or "INSTRUMENTATION_FAILED" in report or
+            "INSTRUMENTATION_ABORTED" in report or
+            not re.search(r"(?m)^OK \(2 tests\)[ \t]*\r?$", report) or
+            not re.search(r"(?m)^INSTRUMENTATION_CODE: -1[ \t]*\r?$", report)):
+        raise RuntimeError(
+            "Android WebView touch instrumentation failed or skipped tests: "
+            + report[-2400:]
+        )
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("apk", type=Path)
+    p.add_argument("--test-apk", required=True, type=Path)
     args = p.parse_args()
-    if not args.apk.is_file() or args.apk.stat().st_size == 0:
-        p.error("the downloaded Android APK is missing/empty")
+    for target in (args.apk, args.test_apk):
+        if not target.is_file() or target.stat().st_size == 0:
+            p.error(f"the downloaded Android APK is missing/empty: {target}")
     try:
         adb("wait-for-device")
         adb("install", "-r", str(args.apk.resolve()), timeout=100)
@@ -149,7 +167,37 @@ def main():
         time.sleep(1)
         launch("Back navigation followed by relaunch")
 
-        print("M2.4c emulator launch/lifecycle smoke passed. This is NOT "
+        # This smoke deliberately rotates the device to landscape, then
+        # restores its user setting. On API 35 a settings write alone may not
+        # commit the WindowManager display rotation immediately. Lock actual
+        # portrait orientation before asserting the mobile FAB is visible.
+        # 'cmd window user-rotation' is the WindowManager command supported
+        # by Android 12+; this test targets Android 15.
+        adb("shell", "cmd", "window", "user-rotation", "lock", "0")
+        time.sleep(2)
+
+        # The AndroidX test APK injects genuine device screen-pointer touches
+        # into the packaged offline WebView. The instrumented tests inspect
+        # DOM/storage after those Android events; they do not call JS click().
+        # A test failure can still return an ADB exit code of zero, so insist
+        # on the JUnit summary as well as absence of failure markers.
+        adb("install", "-r", str(args.test_apk.resolve()), timeout=100)
+        runner = (
+            "dev.cryogenized.shiori.test/"
+            "androidx.test.runner.AndroidJUnitRunner"
+        )
+        # One green run was previously followed by a red run because
+        # Android IME/window state leaked across repeated task capture.
+        # Execute the real tests twice without clearing the app's data.
+        # This is not a JavaScript simulation or a skipped accessibility test.
+        for round_number in (1, 2):
+            report = adb("shell", "am", "instrument", "-w", "-r", runner, timeout=240)
+            check_instrumentation_result(report)
+            print(f"PASS: real Android touch suite {round_number}/2 (2 tests, 0 failures)")
+        print("PASS: repeated native pointer tests verified cancellation, "
+              "task creation, persisted data and Activity recreation")
+
+        print("M2.5b emulator lifecycle and Android touch tests passed. This is NOT "
               "physical-phone validation; document-picker and filesystem "
               "fault injection still require real-device QA.")
     except (RuntimeError, subprocess.TimeoutExpired) as err:

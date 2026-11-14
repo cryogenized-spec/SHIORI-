@@ -98,6 +98,18 @@
 #taskModal [data-close-modal],#editModal [data-close-edit]{
   min-width:44px;min-height:44px;touch-action:manipulation;
 }
+/* Keep both actions reachable when the mobile keyboard reduces the
+   available WebView height. Scroll the form, not the action buttons. */
+@media(max-width:760px){
+  #taskModal .modal-actions,#editModal .modal-actions{
+    position:sticky;bottom:-8px;z-index:3;
+    background:var(--panel);
+    margin-top:12px;padding:12px 0 6px;
+  }
+  #taskModal .modal-actions>button,#editModal .modal-actions>button{
+    flex:1 1 0;min-width:0;min-height:44px;
+  }
+}
 @media(max-height:620px){
   #taskModal,#editModal{
     align-items:flex-start;
