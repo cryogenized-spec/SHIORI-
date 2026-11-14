@@ -13,7 +13,7 @@ import re
 import sys
 import zipfile
 
-from apk_release_evidence import FORMAT, PACKAGE, verify
+from apk_release_evidence import FORMAT, PACKAGE, create, verify
 
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}")
 HEX_COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -63,20 +63,39 @@ def compare_records(previous, candidate):
     )
 
 
+def verify_against_apk(apk, manifest, record, aapt, apksigner):
+    """Compare CI manifest with independently inspected APK package/signature."""
+    verify(apk, manifest, record["git_commit"])
+    observed = create(apk, record["git_commit"], aapt, apksigner)
+    if record != observed:
+        raise ValueError(
+            "CI evidence disagrees with independently inspected APK metadata, "
+            "including the actual signing certificate and versionCode"
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--previous-apk", required=True, type=pathlib.Path)
     parser.add_argument("--previous-evidence", required=True, type=pathlib.Path)
     parser.add_argument("--candidate-apk", required=True, type=pathlib.Path)
     parser.add_argument("--candidate-evidence", required=True, type=pathlib.Path)
+    parser.add_argument("--aapt", default="aapt", help="Android SDK aapt binary")
+    parser.add_argument("--apksigner", default="apksigner", help="Android SDK apksigner binary")
     args = parser.parse_args(argv)
     try:
         previous = json.loads(args.previous_evidence.read_text(encoding="utf-8"))
         candidate = json.loads(args.candidate_evidence.read_text(encoding="utf-8"))
         # Verify both exact APK byte streams and embedded JNI/web assets against
         # the paired manifests before comparing untrusted manifest fields.
-        verify(args.previous_apk, args.previous_evidence, previous["git_commit"])
-        verify(args.candidate_apk, args.candidate_evidence, candidate["git_commit"])
+        verify_against_apk(
+            args.previous_apk, args.previous_evidence,
+            previous, args.aapt, args.apksigner
+        )
+        verify_against_apk(
+            args.candidate_apk, args.candidate_evidence,
+            candidate, args.aapt, args.apksigner
+        )
         print(compare_records(previous, candidate))
         return 0
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
