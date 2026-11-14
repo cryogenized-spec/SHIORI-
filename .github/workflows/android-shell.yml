@@ -54,6 +54,7 @@ jobs:
             test -s "$LIB"
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_loadSnapshot'
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_storeSnapshot'
+            readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_stageLegacyBackup'
           done
       - name: Build APK with bundled offline assets
         run: |

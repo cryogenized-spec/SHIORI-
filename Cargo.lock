@@ -568,6 +568,8 @@ dependencies = [
  "jni",
  "rusqlite",
  "serde_json",
+ "shiori-core",
+ "shiori-storage",
 ]
 
 [[package]]
