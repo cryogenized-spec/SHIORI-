@@ -28,12 +28,24 @@ The following are the first requirements confirmed from real use of task manager
 | SH-002 | **Fast automatic time blocking** | Respect per-user working hours, breaks, existing calendar commitments, time zones, task durations, priorities, dependencies, and deadlines. Allow separate work/personal calendars, preview changes, and flag work that cannot fit. Deterministic local scheduling first; AI optional. | P0 |
 | SH-003 | **Flexible views, saved filters, and FIFO** | Sort by created date, planned start, actual start, due date, priority, age, assignee, and dependency state; combine filters and save views. FIFO means *oldest eligible task first* and its sort basis must be explicit. | P0 |
 | SH-004 | **Android OCR capture** | Capture camera image or document, perform on-device OCR where feasible, review text, and save as task, memo, inbox item, or follow-up. Preserve image/source and require review before creating or changing tasks. | P1 |
+| SH-005 | **Universal capture inbox** | Independently capture and triage notes, ideas, images, OCR output and connected-source events as durable inbox items. Convert to a task, memo or follow-up only after an explicit action; support archive and source provenance. Expose inbox operations through the same application services used by SHIORI MCP and native clients. | P0 |
 
-**Suggested but not yet approved:** SH-005 Universal Capture Inbox — collect unprocessed text, images, forwarded content, and ideas, then triage to task, memo, reference, or follow-up. Keep this distinguishable from confirmed requirements until formally accepted.
+## Design memo — 2026-11-14: SHIORI inbox, MCP and ClickUp interoperation
+
+**Decision and intent (confirmed by user):** SHIORI owns a first-class universal inbox independent of any third-party provider. ChatGPT connects to SHIORI's own MCP and can inspect, triage, prepare conversions, link records and request scheduling through SHIORI domain/application services. This is **not** a replacement, duplicate or proxy for ClickUp Serviteur; Serviteur remains a separate AI-to-ClickUp integration.
+
+- **Three distinct roles:** SHIORI is the local-first task/inbox system of record for SHIORI-native items; the SHIORI MCP is an authenticated AI adapter to those services; the ClickUp REST connector is an optional external task provider adapter. UI, REST, CLI and MCP share authorization and application commands, not direct database writes.
+- **No assumed ClickUp Inbox access:** SHIORI's inbox is not ClickUp's proprietary notification Inbox. No claim of parity or unrestricted access to endpoints that the public ClickUp API does not expose. Import only supported ClickUp objects/events with explicit provenance and permission checks.
+- **Identity and linking:** use stable SHIORI IDs plus scoped external-provider IDs (provider, account/workspace, resource type, remote ID). Never deduplicate by title or overwrite local items solely because a matching remote task exists; an inbox item is not implicitly a task.
+- **Offline-safe sync:** local capture/triage must work without Internet, AI or Cloudflare. Remote state carries freshness metadata; writes are queued, idempotent and guarded against conflicts, duplicate retries, out-of-order webhooks and deleted record resurrection. Keep unsupported/mapped fields and any write failures visible to the user.
+- **Safe AI operations:** explicit typed inbox MCP operations (list/get/capture/triage/convert/archive/link) and scheduling previews; permission checks at the service boundary; agent bulk writes, deletion and rescheduling require user-controlled review and appropriate confirmation. No covert ClickUp writes merely because an inbox item was captured.
+- **Provider strategy:** the first preferred integration is ClickUp REST (read-only assigned tasks and selectable Lists first; bidirectional edits only after sync/conflict tests). Design the connector contract so Google Tasks and other sources can be added without changing SHIORI's core domain.
+
+**Implementation sequencing:** preserve the existing M2/M3 offline foundation. Specify inbox entities, service ports, provenance and migration contracts early; implement local inbox independently; build reliable M4 sync and authenticated M5 MCP before permitting external provider writes in M6. These are design commitments, **not claims of implemented sync or Inbox access**. See [ADR 0002](docs/adr/0002-application-ports-and-provider-boundaries.md) and [foundation gates](docs/engineering/FOUNDATION_EXTENSION_GATES.md).
 
 ## 3. Feature catalogue for scope evaluation
 
-**Foundational (P0):** tasks, notes/descriptions, projects, subtasks, tags, statuses, priorities, assignments, distinct created/planned-start/actual-start/due/completion timestamps, searchable indexes, task history, recurrence, dependencies, blocker reasons, quick capture, saved filters, reliable local notifications, data export/import, secure backups, accessibility, keyboard navigation, and user-configurable work schedules.
+**Foundational (P0):** tasks, notes/descriptions, projects, subtasks, tags, statuses, priorities, assignments, distinct created/planned-start/actual-start/due/completion timestamps, searchable indexes, task history, recurrence, dependencies, blocker reasons, a distinct durable inbox with capture/triage/archive, quick capture, saved filters, reliable local notifications, data export/import, secure backups, accessibility, keyboard navigation, and user-configurable work schedules.
 
 **Advanced productivity (P1):** Kanban, calendar, table, timeline and Gantt-like views; robust recurrence exceptions and templates; weekly planner; time estimates vs. actuals; transparent rescheduling suggestions; distraction-light focus mode; OCR capture; task provenance and source links; flexible widgets and shortcuts; dependency-aware prioritization.
 
@@ -41,7 +53,7 @@ The following are the first requirements confirmed from real use of task manager
 
 **Exploratory (P2):** habit tracking, sophisticated rules/automation builder, user-defined workflows, workload forecasting, team dashboards, extensive integrations, community plugins, optional local or external AI-driven planning, and more specialized project-management features.
 
-**Non-goals for the first release:** mandatory embedded AI, built-in LLM inference, enterprise ERP, complex HR/payroll features, requiring Cloudflare, or assuming all MCP clients can render rich UI.
+**Non-goals for the first release:** claiming access to ClickUp's native notification Inbox, mandatory embedded AI, built-in LLM inference, enterprise ERP, complex HR/payroll features, requiring Cloudflare, or assuming all MCP clients can render rich UI.
 
 ## 4. Architecture boundaries
 
@@ -92,7 +104,7 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** create, edit, search, complete, restore, and filter tasks offline; cyclic dependencies are rejected; recurrence and time-zone edge cases have automated tests.
 
 ### M2 — Daily-use app and instant attention views
-**Deliver:** usable responsive web UI; native Android shell and local task operations; SH-001 fast “Assigned to Me” drawer; actionable/blocked states; SH-003 saved filters and FIFO views; notifications and quick capture.
+**Deliver:** usable responsive web UI; native Android shell and local task operations; SH-001 fast “Assigned to Me” drawer; actionable/blocked states; SH-003 saved filters and FIFO views; local SH-005 inbox capture/triage/archive; notifications and quick capture.
 
 **Exit:** users can manage daily tasks without a server; attention panel opens from local data quickly under a defined benchmark, even with a realistic large fixture; filters behave consistently across clients.
 
@@ -107,12 +119,12 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** offline edits converge safely after reconnect; conflicts and deletes are not lost; a documented export/restore migration succeeds between two independently operated environments.
 
 ### M5 — MCP interoperability and compact UI
-**Deliver:** typed, separately named MCP tools for tasks, projects, assignments, filters, dependencies and schedules; scoped tokens/permissions; error contracts; optional lightweight versioned MCP Apps views.
+**Deliver:** typed, separately named MCP tools for tasks, inbox capture/triage/conversion/archive, projects, assignments, filters, dependencies and schedules; scoped tokens/permissions; error contracts; optional lightweight versioned MCP Apps views.
 
 **Exit:** supported MCP clients can read/manage permitted tasks; destructive operations have appropriate safeguards; clients without UI support still work; no model API key required by SHIORI.
 
 ### M6 — OCR capture, CalDAV and integrations
-**Deliver:** SH-004 on-device Android OCR capture-and-review flow; optional universal inbox if approved; CalDAV/VTODO adapter with round-trip tests; source provenance; first external connector selected from user demand.
+**Deliver:** SH-004 on-device Android OCR capture-and-review flow; optional universal inbox if approved; CalDAV/VTODO adapter with round-trip tests; source provenance; ClickUp as the preferred first external task-provider connector, subject to provider/API and sync acceptance gates.
 
 **Exit:** OCR produces editable text and a traceable source attachment; task/calendar interoperability documents unsupported fields and preserves user data rather than silently dropping it.
 

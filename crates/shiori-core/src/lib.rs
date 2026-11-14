@@ -1,6 +1,7 @@
 //! SHIORI's platform-independent task model.
 //! No filesystem, database, MCP, HTTP or UI dependencies belong here.
 
+pub mod inbox;
 pub mod scheduling;
 
 use chrono::{DateTime, NaiveDate, Utc};
