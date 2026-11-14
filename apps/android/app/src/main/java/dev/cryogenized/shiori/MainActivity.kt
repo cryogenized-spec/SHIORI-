@@ -36,6 +36,7 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private var backCallback: OnBackInvokedCallback? = null
     private var pendingExportJson: String? = null
+    private var pendingNativeExport: File? = null
     private val vaultExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,6 +69,7 @@ class MainActivity : Activity() {
                             "audit" -> auditCanonicalShadow()
                             "working" -> openOrCreateWorkingCopy()
                             "command" -> receiveNativeWorkingCommand()
+                            "native-export" -> beginNativeDatabaseExport()
                         }
                     }
                     return true
@@ -436,6 +438,85 @@ class MainActivity : Activity() {
         )
     }
 
+    /**
+     * Separate, explicitly requested SQLite backup of the experimental native
+     * working copy. SQLite VACUUM INTO produces a consistent private staging
+     * file even when the source uses WAL. Only Android's document picker can
+     * choose a destination. There is no native restore/cutover action here.
+     */
+    private fun beginNativeDatabaseExport() {
+        if (!File(workingPath()).isFile) {
+            notifyUser("Create a Rust working copy before exporting its database")
+            return
+        }
+        if (pendingNativeExport != null) {
+            notifyUser("Complete or cancel the current native database export")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Export native Rust task database?")
+            .setMessage(
+                "Create an independent SQLite backup of the experimental Rust " +
+                    "working copy, including its edited tasks, deleted-record " +
+                    "history, dependencies and original import archive. " +
+                    "Your normal Android tasks will not change. " +
+                    "Restoring this database is not yet supported in the app."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Choose backup location") { _, _ ->
+                prepareNativeDatabaseExport()
+            }
+            .show()
+    }
+
+    private fun prepareNativeDatabaseExport() {
+        vaultExecutor.execute {
+            var staging: File? = null
+            val ready = runCatching {
+                staging = File.createTempFile("shiori-native-export-", ".sqlite3", cacheDir)
+                // SQLite VACUUM INTO requires a new destination; delete the
+                // zero-byte placeholder before Rust creates its snapshot.
+                if (!staging!!.delete()) throw IOException("Cannot prepare staging path")
+                val report = NativeVault.exportWorkingCopy(
+                    workingPath(), staging!!.absolutePath
+                ) ?: throw IOException("Native SQLite export failed verification")
+                if (!staging!!.isFile ||
+                    staging!!.length() == 0L ||
+                    staging!!.length() > MAX_NATIVE_EXPORT_BYTES
+                ) throw IOException("Invalid SQLite export size")
+                report
+            }
+            if (ready.isFailure) {
+                staging?.delete()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) notifyUser(
+                        "Native SQLite backup failed; original tasks were kept"
+                    )
+                }
+                return@execute
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) {
+                    staging?.delete()
+                    return@runOnUiThread
+                }
+                pendingNativeExport = staging
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/vnd.sqlite3"
+                    putExtra(Intent.EXTRA_TITLE, "SHIORI-native-working-backup.sqlite3")
+                }
+                try {
+                    startActivityForResult(intent, NATIVE_EXPORT_REQUEST)
+                } catch (_: Exception) {
+                    pendingNativeExport?.delete()
+                    pendingNativeExport = null
+                    notifyUser("Could not open the document picker")
+                }
+            }
+        }
+    }
+
     private fun recoverVaultCopy() {
         vaultExecutor.execute {
             val snapshot = runCatching { NativeVault.loadSnapshot(vaultPath()) }.getOrNull()
@@ -550,6 +631,36 @@ class MainActivity : Activity() {
             } catch (_: Exception) {
                 notifyUser("Backup could not be written")
             }
+        } else if (requestCode == NATIVE_EXPORT_REQUEST) {
+            val staged = pendingNativeExport
+            pendingNativeExport = null
+            if (staged == null) return
+            val destination = if (resultCode == RESULT_OK) data?.data else null
+            if (destination == null) {
+                staged.delete()
+                return
+            }
+            vaultExecutor.execute {
+                val saved = runCatching {
+                    val output = contentResolver.openOutputStream(destination, "wt")
+                        ?: throw IOException("Document cannot be written")
+                    output.use { stream ->
+                        staged.inputStream().use { input ->
+                            val count = input.copyTo(stream, 8192)
+                            if (count <= 0 || count != staged.length()) {
+                                throw IOException("Incomplete native SQLite backup")
+                            }
+                        }
+                    }
+                }.isSuccess
+                staged.delete()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) notifyUser(
+                        if (saved) "Rust SQLite backup saved to your selected document"
+                        else "Native SQLite backup could not be written; original tasks unchanged"
+                    )
+                }
+            }
         } else if (requestCode == IMPORT_REQUEST) {
             if (resultCode != RESULT_OK || data?.data == null) return
             try {
@@ -591,6 +702,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        pendingNativeExport?.delete()
+        pendingNativeExport = null
         vaultExecutor.shutdown()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backCallback?.let {
@@ -608,7 +721,9 @@ class MainActivity : Activity() {
         private const val MAX_BACKUP_BYTES = 2_000_000
         private const val MAX_NATIVE_COMMAND_BYTES = 16_384
         private const val MAX_NATIVE_RESPONSE_BYTES = 768_000
+        private const val MAX_NATIVE_EXPORT_BYTES = 64L * 1024L * 1024L
         private const val EXPORT_REQUEST = 4001
         private const val IMPORT_REQUEST = 4002
+        private const val NATIVE_EXPORT_REQUEST = 4003
     }
 }

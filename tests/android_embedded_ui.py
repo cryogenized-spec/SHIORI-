@@ -198,6 +198,9 @@ def run():
             assert page.locator("#auditCanonicalShadow").count() == 1
             assert page.locator("#openNativeWorkingCopy").count() == 1
             assert page.locator("#openNativeWorkingCopy").is_visible()
+            assert page.locator("#exportNativeWorkingCopy").is_visible()
+            # SAF export is initiated by Kotlin only; browser tests never
+            # receive the private native database or any filesystem path.
             assert page.locator("#auditCanonicalShadow").is_visible()
             # The audit only signals an Android-local custom scheme; never
             # performs a browser-side migration or starts on page load.

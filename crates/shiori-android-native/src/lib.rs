@@ -4,6 +4,7 @@
 //! the WebView task format into canonical shiori-storage task records yet.
 //! Never silently overwrite the last native snapshot at Activity startup.
 mod audit;
+mod export;
 mod migration;
 mod working_copy;
 
@@ -329,6 +330,35 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_workingCopyReques
         Err(error) => serde_json::json!({"ok":false,"error":error.to_string()}),
     };
     env.new_string(result.to_string())
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Export-only, crash-consistent SQLite backup of the distinct native
+/// working copy. Kotlin supplies both app-private paths. Errors return null;
+/// the real working database and normal Android tasks are never overwritten.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_exportWorkingCopy(
+    mut env: JNIEnv,
+    _object: JObject,
+    source_path: JString,
+    staged_path: JString,
+) -> jstring {
+    let Ok(source) = env.get_string(&source_path) else {
+        return std::ptr::null_mut();
+    };
+    let source = String::from(source);
+    let Ok(target) = env.get_string(&staged_path) else {
+        return std::ptr::null_mut();
+    };
+    let target = String::from(target);
+    let Ok(report) = export::export_working_database(Path::new(&source), Path::new(&target)) else {
+        return std::ptr::null_mut();
+    };
+    let message = format!(
+        "Verified Rust SQLite backup: {} records ({} deletions), {} dependencies, {} bytes",
+        report.records, report.tombstones, report.dependencies, report.bytes
+    );
+    env.new_string(message)
         .map_or(std::ptr::null_mut(), |value| value.into_raw())
 }
 
