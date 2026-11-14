@@ -63,7 +63,8 @@ class WebViewTouchAcceptanceTest {
                 "document.readyState === 'complete' && " +
                     "typeof window.shioriExportBackup === 'function' && " +
                     "document.querySelector('#taskModal') !== null && " +
-                    "document.querySelector('.mobile-fab') !== null"
+                    "document.querySelector('.mobile-fab') !== null && " +
+                    "window.shioriNativeBridgeEnabled === true"
             ) == "true"
         }
         instrument.waitForIdleSync()
@@ -237,6 +238,10 @@ class WebViewTouchAcceptanceTest {
             javascript("!document.querySelector('[data-add]').disabled") == "true")
         touch(".mobile-fab")
         await("new task modal opens from an actual Android tap") { modalOpen() }
+        assertTrue(
+            "Native task form unexpectedly opened the software keyboard",
+            !androidImeVisible()
+        )
         touch("#taskModal .modal-head [data-close-modal]")
         await("header X dismisses new-task modal") { !modalOpen() }
 
