@@ -10,8 +10,8 @@ android {
         applicationId = "dev.cryogenized.shiori"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1-dev"
+        versionCode = 3
+        versionName = "0.1.2-dev"
     }
 
     // Reuse exactly the responsive web app rather than an independent UI.
