@@ -4,13 +4,13 @@ use rusqlite::{
     Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter,
     types::{Type, Value},
 };
-use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus};
+use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus, validate_assignee_id};
 use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
-const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at, estimate_minutes FROM tasks";
+const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at, estimate_minutes, assignee_id FROM tasks";
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -62,7 +62,7 @@ impl SqliteStore {
     fn initialize(mut db: Connection) -> Result<Self, StorageError> {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 4000;")?;
         let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version != 0 && version != 1 && version != SCHEMA_VERSION {
+        if version != 0 && version != 1 && version != 2 && version != SCHEMA_VERSION {
             return Err(StorageError::UnsupportedSchemaVersion {
                 found: version,
                 supported: SCHEMA_VERSION,
@@ -138,6 +138,16 @@ impl SqliteStore {
                  CREATE INDEX idx_task_dependencies_prerequisite
                     ON task_dependencies(depends_on_id);",
             )?;
+            tx.pragma_update(None, "user_version", 2_i64)?;
+            tx.commit()?;
+        }
+        if version < 3 {
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN assignee_id TEXT;
+                 CREATE INDEX idx_tasks_assignee_active
+                 ON tasks(assignee_id, deleted_at, status, due_on);",
+            )?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -146,8 +156,8 @@ impl SqliteStore {
 
     pub fn insert(&self, task: &Task) -> Result<(), StorageError> {
         self.db.execute(
-            "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(), task.completed_at.map(|t| t.to_rfc3339()), task.version, task.deleted_at.map(|t| t.to_rfc3339()), task.estimate_minutes]
+            "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes,assignee_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(), task.completed_at.map(|t| t.to_rfc3339()), task.version, task.deleted_at.map(|t| t.to_rfc3339()), task.estimate_minutes, task.assignee_id]
         )?;
         Ok(())
     }
@@ -195,6 +205,29 @@ impl SqliteStore {
         let mut stmt = self.db.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), task_from_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Indexed local assignment query. All incomplete records assigned to the
+    /// specified local identity are returned; blockers come from prerequisite
+    /// rows in SQLite (one query, not one DB lookup per task).
+    pub fn assigned_attention(&self, assignee: &str) -> Result<Vec<(Task, bool)>, StorageError> {
+        let assignee = validate_assignee_id(assignee)?;
+        let sql = format!(
+            "SELECT base.*, EXISTS(
+                SELECT 1 FROM task_dependencies edge
+                LEFT JOIN tasks prereq ON prereq.id=edge.depends_on_id
+                WHERE edge.task_id=base.id
+                  AND (prereq.id IS NULL OR prereq.deleted_at IS NOT NULL OR prereq.status!='done')
+            ) FROM ({SELECT} WHERE assignee_id=?1 AND deleted_at IS NULL AND status!='done') base
+            ORDER BY base.due_on IS NULL, base.due_on, base.created_at, base.id"
+        );
+        let mut stmt = self.db.prepare(&sql)?;
+        let rows = stmt.query_map(params![assignee], |row| {
+            let task = task_from_row(row)?;
+            let blocked = row.get::<_, i64>(14)? != 0;
+            Ok((task, blocked))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     pub fn set_status(&self, id: &str, status: TaskStatus) -> Result<Task, StorageError> {
@@ -359,14 +392,14 @@ impl SqliteStore {
 
     fn update_existing(&self, task: &Task) -> Result<(), StorageError> {
         let changed = self.db.execute(
-            "UPDATE tasks SET title=?2, notes=?3, project=?4, priority=?5, status=?6, due_on=?7, updated_at=?8, completed_at=?9, version=?10, deleted_at=?11, estimate_minutes=?13 WHERE id=?1 AND version=?12 AND deleted_at IS NULL",
+            "UPDATE tasks SET title=?2, notes=?3, project=?4, priority=?5, status=?6, due_on=?7, updated_at=?8, completed_at=?9, version=?10, deleted_at=?11, estimate_minutes=?13, assignee_id=?14 WHERE id=?1 AND version=?12 AND deleted_at IS NULL",
             params![
                 task.id, task.title, task.notes, task.project, task.priority.as_str(),
                 task.status.as_str(), task.due_on.map(|d| d.to_string()),
                 task.updated_at.to_rfc3339(),
                 task.completed_at.map(|t| t.to_rfc3339()),
                 task.version, task.deleted_at.map(|t| t.to_rfc3339()),
-                task.version - 1, task.estimate_minutes
+                task.version - 1, task.estimate_minutes, task.assignee_id
             ]
         )?;
         if changed == 0 {
@@ -412,12 +445,37 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         version: row.get(10)?,
         deleted_at: deleted.map(|v| timestamp(&v, 11)).transpose()?,
         estimate_minutes: row.get(12)?,
+        assignee_id: row.get(13)?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assigned_to_me_lookup_uses_the_local_index() {
+        let store = SqliteStore::in_memory().unwrap();
+        let mut statement = store
+            .db
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM tasks
+                 WHERE assignee_id=?1 AND deleted_at IS NULL AND status!='done'",
+            )
+            .unwrap();
+        let plans = statement
+            .query_map(params!["local"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plans
+                .iter()
+                .any(|plan| plan.contains("idx_tasks_assignee_active")),
+            "assigned-to-me must use its dedicated index: {plans:?}"
+        );
+    }
 
     #[test]
     fn roundtrip_filter_complete_rename_and_tombstone() {

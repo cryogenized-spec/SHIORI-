@@ -9,16 +9,19 @@ import json
 import re
 import struct
 import subprocess
-from datetime import date
+from datetime import date, datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "apps" / "web"
-MAGIC = b"SHIORI-BRIDGE-1\n"
+MAGIC = b"SHIORI-BRIDGE-2\n"
+ATTENTION_MAGIC = b"SHIORI-ATTENTION-1\n"
 FIELDS = ("id", "title", "notes", "project", "priority", "status",
-          "due_on", "created_at", "updated_at", "estimate_minutes", "version")
+          "due_on", "created_at", "updated_at", "estimate_minutes",
+          "version", "assignee_id")
+ATTENTION_FIELDS = FIELDS + ("blocked",)
 UUID = re.compile(r"^[a-fA-F0-9-]{36}$")
 MAX_BODY = 8192
 MAX_EXPORT = 16 * 1024 * 1024
@@ -60,14 +63,14 @@ def valid_fields(data):
     return title.strip(), project.strip(), notes, priority, due, minutes
 
 
-def decode_snapshot(data):
+def decode_snapshot(data, marker=MAGIC, columns=FIELDS):
     """Fail closed if a CLI/API version changes the machine protocol."""
-    if len(data) > MAX_EXPORT or not data.startswith(MAGIC):
+    if len(data) > MAX_EXPORT or not data.startswith(marker):
         raise ValueError("unexpected Rust task snapshot format")
-    rows, offset = [], len(MAGIC)
+    rows, offset = [], len(marker)
     while offset < len(data):
         values = []
-        for _ in FIELDS:
+        for _ in columns:
             if offset + 4 > len(data):
                 raise ValueError("truncated record header")
             size = struct.unpack_from(">I", data, offset)[0]
@@ -76,11 +79,16 @@ def decode_snapshot(data):
                 raise ValueError("truncated or oversized record field")
             values.append(data[offset:offset + size].decode("utf-8"))
             offset += size
-        task = dict(zip(FIELDS, values))
+        task = dict(zip(columns, values))
         task["estimate_minutes"] = (int(task["estimate_minutes"])
                                     if task["estimate_minutes"] else None)
         task["version"] = int(task["version"])
         task["due_on"] = task["due_on"] or None
+        task["assignee_id"] = task["assignee_id"] or None
+        if "blocked" in task:
+            if task["blocked"] not in ("true", "false"):
+                raise ValueError("invalid blocked state")
+            task["blocked"] = task["blocked"] == "true"
         rows.append(task)
     return rows
 
@@ -153,6 +161,20 @@ def make_server(port, cli, database):
                 except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
                     self.log_error("Rust read failed: %s", type(exc).__name__)
                     self.response(503, {"error": "local Rust storage unavailable"})
+            elif path == "/api/attention":
+                try:
+                    records = decode_snapshot(
+                        self.run_cli("bridge-attention"),
+                        ATTENTION_MAGIC, ATTENTION_FIELDS
+                    )
+                    self.response(200, {
+                        "tasks": records,
+                        "local_identity": "local",
+                        "fresh_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                    self.log_error("Attention query failed: %s", type(exc).__name__)
+                    self.response(503, {"error": "local Rust attention unavailable"})
             elif path.startswith("/api/"):
                 self.response(404, {"error": "unknown API route"})
             else:
@@ -231,10 +253,11 @@ def make_server(port, cli, database):
                         )
                         self.response(200, {"ok": True})
                         return
-                    if set(data) != {
+                    edit_fields = {
                         "title", "project", "notes", "priority",
                         "due_on", "estimate_minutes", "expected_version"
-                    }:
+                    }
+                    if set(data) not in (edit_fields, edit_fields | {"assignee_id"}):
                         raise ValueError("edit requires the complete task snapshot")
                     title, project, notes, priority, due, minutes = valid_fields(data)
                     command = [
@@ -250,6 +273,16 @@ def make_server(port, cli, database):
                         command.append("--clear-minutes")
                     else:
                         command.extend(["--minutes", str(minutes)])
+                    if "assignee_id" in data:
+                        assignee = data["assignee_id"]
+                        if assignee is None:
+                            command.append("--unassign")
+                        elif isinstance(assignee, str) and re.fullmatch(
+                            r"[A-Za-z0-9._:-]{1,64}", assignee
+                        ):
+                            command.extend(["--assign-to", assignee])
+                        else:
+                            raise ValueError("invalid assignee ID")
                     self.run_cli(*command)
                     self.response(200, {"ok": True})
                     return
