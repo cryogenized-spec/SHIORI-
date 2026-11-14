@@ -25,6 +25,7 @@ CANDIDATE = {
 SERIAL = "emulator-5554"
 BOOT_ID = "11111111-2222-3333-4444-555555555555"
 TRIAL_MARKER = ".shiori-m2-8-trial-" + "e" * 32
+REAL_READINESS = rehearsal.wait_for_app_readiness
 
 
 class UpgradeRehearsalTests(unittest.TestCase):
@@ -32,6 +33,7 @@ class UpgradeRehearsalTests(unittest.TestCase):
         for target, attr, value in (
             (rehearsal, "emulator_boot_id", BOOT_ID),
             (rehearsal, "verify_trial_marker", None),
+            (rehearsal, "wait_for_app_readiness", None),
             (rehearsal.secrets, "token_hex", "e" * 32),
         ):
             fake = patch.object(target, attr)
@@ -228,6 +230,78 @@ class UpgradeRehearsalTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "trial marker is missing"):
                 rehearsal.upgrade(self.args, PREVIOUS, CANDIDATE)
             adb.assert_not_called()
+
+
+    def test_launch_timeout_retains_baseline_hashes_before_upgrade(self):
+        self.args.state_file.write_text(json.dumps(self.state()))
+        def inject(*command, **kwargs):
+            if command[2:5] == ("shell", "am", "start"):
+                raise RuntimeError("synthetic launch timeout")
+            return "Success\n"
+        with patch.object(rehearsal, "sha256_file", return_value="f" * 64), patch.object(
+            rehearsal, "require_fresh_emulator"
+        ), patch.object(rehearsal, "installed_version", side_effect=[5, 6]), patch.object(
+            rehearsal, "private_metadata", return_value=self.before
+        ), patch.object(rehearsal, "webview_size", return_value=4), patch.object(
+            rehearsal, "adb", side_effect=inject
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic launch timeout"):
+                rehearsal.upgrade(self.args, PREVIOUS, CANDIDATE)
+        report = json.loads(self.args.report.read_text())
+        self.assertEqual(report["baseline_private_hashes"], self.before)
+        self.assertEqual(report["phase"], "launching-candidate")
+        self.assertEqual(report["status"], "incomplete")
+        self.assertIsNone(report["candidate_private_hashes"])
+
+    def test_failed_post_upgrade_snapshot_preserves_original_evidence(self):
+        self.args.state_file.write_text(json.dumps(self.state()))
+        with patch.object(rehearsal, "sha256_file", return_value="f" * 64), patch.object(
+            rehearsal, "require_fresh_emulator"
+        ), patch.object(rehearsal, "installed_version", side_effect=[5, 6]), patch.object(
+            rehearsal, "private_metadata", side_effect=[
+                self.before, RuntimeError("synthetic post-snapshot error")
+            ]
+        ), patch.object(rehearsal, "webview_size", return_value=4), patch.object(
+            rehearsal, "adb", return_value="Success\n"
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic post-snapshot error"):
+                rehearsal.upgrade(self.args, PREVIOUS, CANDIDATE)
+        report = json.loads(self.args.report.read_text())
+        self.assertEqual(report["baseline_private_hashes"], self.before)
+        self.assertEqual(report["phase"], "capturing-post-upgrade-metadata")
+        self.assertEqual(report["status"], "incomplete")
+
+    def test_delayed_readiness_succeeds_only_after_repeated_stable_observations(self):
+        counter = [0]
+        def tick():
+            counter[0] += 1
+            return counter[0]
+        def probe(*command, **kwargs):
+            if "pidof" in command:
+                return "123\n"
+            return "mCurrentFocus=Window{abc dev.cryogenized.shiori/.MainActivity}\n"
+        with patch.object(rehearsal, "adb", side_effect=probe), patch.object(
+            rehearsal, "webview_size", side_effect=[None, 4, 4, 4]
+        ), patch.object(rehearsal, "private_metadata", return_value=self.before
+        ), patch.object(rehearsal.time, "monotonic", side_effect=tick), patch.object(
+            rehearsal.time, "sleep"
+        ) as sleep:
+            REAL_READINESS(SERIAL, timeout_s=8, poll_interval_s=0)
+            self.assertGreaterEqual(sleep.call_count, 3)
+
+    def test_unready_or_crashed_app_times_out_without_reporting_success(self):
+        counter = [0]
+        def tick():
+            counter[0] += 1
+            return counter[0]
+        with patch.object(rehearsal, "adb", return_value=""), patch.object(
+            rehearsal, "webview_size", return_value=4
+        ), patch.object(rehearsal, "private_metadata", return_value=self.before
+        ), patch.object(rehearsal.time, "monotonic", side_effect=tick), patch.object(
+            rehearsal.time, "sleep"
+        ):
+            with self.assertRaisesRegex(RuntimeError, "did not reach stable"):
+                REAL_READINESS(SERIAL, timeout_s=3, poll_interval_s=0)
 
     def test_cli_requires_explicit_disposable_emulator_opt_in(self):
         with self.assertRaises(SystemExit) as ctx:
