@@ -150,19 +150,33 @@ class WebViewTouchAcceptanceTest {
         var width = 0
         var height = 0
         var imeVisible = false
+        var keyboardTop = Float.POSITIVE_INFINITY
         scenario.onActivity { activity ->
             webView.getLocationOnScreen(location)
             width = webView.width
             height = webView.height
-            imeVisible = activity.window.decorView.rootWindowInsets
-                ?.isVisible(WindowInsets.Type.ime()) == true
+            val decor = activity.window.decorView
+            val windowInsets = decor.rootWindowInsets
+            imeVisible = windowInsets?.isVisible(WindowInsets.Type.ime()) == true
+            if (imeVisible && windowInsets != null) {
+                val decorLocation = IntArray(2)
+                decor.getLocationOnScreen(decorLocation)
+                keyboardTop = (decorLocation[1] + decor.height -
+                    windowInsets.getInsets(WindowInsets.Type.ime()).bottom).toFloat()
+            }
         }
         val scale = width.toDouble() / bounds.getDouble("viewport")
         val x = (location[0] + bounds.getDouble("x") * scale).toFloat()
         val y = (location[1] + bounds.getDouble("y") * scale).toFloat()
         lastTouchDiagnostic = "selector=$selector, screen=($x,$y), " +
             "webView=${width}x$height at (${location[0]},${location[1]}), " +
-            "ime=$imeVisible, cssBounds=$bounds"
+            "ime=$imeVisible, keyboardTop=$keyboardTop, cssBounds=$bounds"
+        // The DOM hit test cannot detect an Android keyboard overlay.
+        // Refuse to inject an ostensibly successful tap into that overlay.
+        assertTrue(
+            "Android keyboard obscures intended WebView touch: $lastTouchDiagnostic",
+            !imeVisible || y + 3f < keyboardTop
+        )
         val start = SystemClock.uptimeMillis()
         val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, x, y, 0)
         val up = MotionEvent.obtain(start, start + 75, MotionEvent.ACTION_UP, x, y, 0)
