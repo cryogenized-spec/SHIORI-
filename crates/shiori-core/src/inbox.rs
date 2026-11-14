@@ -45,7 +45,10 @@ impl InboxSource {
                 resource_kind,
                 resource_id,
             ] {
-                if field.trim().is_empty() || field.chars().count() > 256 {
+                if field.trim().is_empty()
+                    || field.as_str() != field.trim()
+                    || field.chars().count() > 256
+                {
                     return Err(InboxError::InvalidSource);
                 }
             }
@@ -120,8 +123,7 @@ impl InboxItem {
         source: InboxSource,
         at: DateTime<Utc>,
     ) -> Result<Self, InboxError> {
-        let text = text.trim();
-        if text.is_empty() {
+        if text.trim().is_empty() {
             return Err(InboxError::EmptyCapture);
         }
         if text.chars().count() > MAX_INBOX_TEXT_CHARS {
@@ -248,7 +250,7 @@ mod tests {
     #[test]
     fn capturing_is_not_task_creation_or_automatic_triage() {
         let item = InboxItem::capture_text("  Call supplier  ", InboxSource::Local, now()).unwrap();
-        assert_eq!(item.text, "Call supplier");
+        assert_eq!(item.text, "  Call supplier  "); // Never silently rewrite capture text.
         assert_eq!(item.state, InboxState::Unprocessed);
         assert!(item.disposition.is_none());
         assert!(item.linked.is_none());
