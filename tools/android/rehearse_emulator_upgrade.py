@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 
@@ -68,9 +69,17 @@ def require_fresh_emulator(serial):
 
 
 def installed_version(serial):
-    output = adb("-s", serial, "shell", "pm", "path", APP_ID)
-    if not output.strip():
+    # Android 15 returns exit status 1 without output when the app is absent.
+    # Other package-manager or ADB errors remain fatal, not silent absences.
+    result = subprocess.run(
+        ["adb", "-s", serial, "shell", "pm", "path", APP_ID],
+        capture_output=True, text=True, timeout=45, check=False,
+    )
+    if result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
         return None
+    if result.returncode:
+        raise RuntimeError("Android package-manager query failed: " + result.stderr.strip()[:230])
+    output = result.stdout
     if not output.strip().startswith("package:"):
         raise RuntimeError("Could not establish installed SHIORI package")
     dump = adb("-s", serial, "shell", "dumpsys", "package", APP_ID)
@@ -105,7 +114,7 @@ def private_metadata(serial):
         'printf "%s|%s|%s\\n" "$f" "$bytes" "$hash"; ' +
         'else printf "%s|absent|absent\\n" "$f"; fi; done'
     )
-    out = adb("-s", serial, "shell", "run-as", APP_ID, "sh", "-c", script)
+    out = adb("-s", serial, "shell", "run-as", APP_ID, "sh", "-c", shlex.quote(script))
     result = {}
     for line in out.splitlines():
         parts = line.strip().split("|")
@@ -130,7 +139,7 @@ def webview_size(serial):
         'du -sk "app_webview/Default/Local Storage" | cut -f 1; ' +
         'else echo absent; fi'
     )
-    raw = adb("-s", serial, "shell", "run-as", APP_ID, "sh", "-c", script).strip()
+    raw = adb("-s", serial, "shell", "run-as", APP_ID, "sh", "-c", shlex.quote(script)).strip()
     if raw == "absent":
         return None
     if not raw.isdigit():
