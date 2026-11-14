@@ -832,10 +832,11 @@
   }
   function dismissAndroidIme(){
     // Blurring an HTML input may leave Android's software keyboard open.
-    // This app-private navigation is handled by MainActivity; desktop/web
-    // sessions never send it and the native Activity exposes no JS interface.
-    if(mode==='android-local' && window.shioriNativeBridgeEnabled===true)
-      window.location.href='shiori-ui://dismiss-ime';
+    // Only the trusted native host intercepts this app-private command.
+    if(nativeAndroidUi())window.location.href='shiori-ui://dismiss-ime';
+  }
+  function nativeAndroidUi(){
+    return mode==='android-local' && window.shioriNativeBridgeEnabled===true;
   }
   function openModal(){
     if(nativeCanary.pending){toast('Storage verification in progress');return;}
@@ -847,10 +848,13 @@
     $('#taskModal').setAttribute('aria-hidden','false');
     $('#taskForm').reset();$('#taskDue').value=newDate();
     setTimeout(()=>{
-      // Do not steal a user's already-changed focus (e.g. immediately
-      // reaching the X/Cancel control with the keyboard).
+      // Native Android only: do not summon the IME as soon as a task
+      // dialog opens. On API 35 the keyboard/inset transition can swallow
+      // the first physical X/Cancel tap or the following New Task tap.
+      // The input is still editable/tappable by the user.
+      // Desktop and browser-based Android UI regression retain autofocus.
       const modal=$('#taskModal');
-      if(modal.classList.contains('open') &&
+      if(!nativeAndroidUi() && modal.classList.contains('open') &&
          (!modal.contains(document.activeElement) ||
           document.activeElement===dialogOpeners.create)){
         $('#taskName').focus();
@@ -916,7 +920,7 @@
     $('#editModal').setAttribute('aria-hidden','false');
     setTimeout(()=>{
       const modal=$('#editModal');
-      if(modal.classList.contains('open') &&
+      if(!nativeAndroidUi() && modal.classList.contains('open') &&
          (!modal.contains(document.activeElement) ||
           document.activeElement===dialogOpeners.edit)){
         $('#editTaskName').focus();
