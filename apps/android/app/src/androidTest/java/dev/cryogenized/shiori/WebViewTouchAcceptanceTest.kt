@@ -51,7 +51,7 @@ class WebViewTouchAcceptanceTest {
                 val shown = webView.isShown
                 val attached = webView.windowToken != null
                 val focused = webView.hasWindowFocus()
-                visible = shown && attached && !activity.isFinishing &&
+                visible = shown && attached && focused && !activity.isFinishing &&
                     webView.width > 0 && webView.height > 0
                 // ActivityScenario can transiently take window focus while
                 // the WebView remains fully visible. Focus alone is not proof
@@ -154,6 +154,20 @@ class WebViewTouchAcceptanceTest {
      * All taps are real Android pointer events, never JS .click() calls.
      */
     private fun touch(selector: String) {
+        // The emulator may report a fully laid-out WebView before Android
+        // routes physical input to its window. Do not retry failed taps:
+        // wait for initial window focus and require the very first real
+        // pointer gesture to succeed.
+        if (selector == ".mobile-fab") {
+            await("New Task target has Android window input focus") {
+                var focused = false
+                scenario.onActivity {
+                    focused = webView.isShown && webView.hasWindowFocus() &&
+                        webView.windowToken != null
+                }
+                focused
+            }
+        }
         val quoted = JSONObject.quote(selector)
         javascript(
             "(function(){const e=document.querySelector($quoted); " +
