@@ -225,6 +225,17 @@ def stage(args, prev, next_):
           "--confirm-synthetic-data when ready; no real data was accessed.")
 
 
+def replace_trial_report(path, value):
+    """Atomically update only the report this process reserved with O_EXCL."""
+    temporary = path.with_name(path.name + ".tmp-" + secrets.token_hex(8))
+    try:
+        save_new_json(temporary, value)
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def upgrade(args, prev, next_):
     if not args.confirm_synthetic_data:
         raise RuntimeError("Upgrade requires --confirm-synthetic-data")
@@ -263,40 +274,68 @@ def upgrade(args, prev, next_):
         raise RuntimeError("Installed baseline version differs; no candidate was installed")
     verify_trial_marker(args.serial, marker)
 
-    # Quiesce the app before taking a read-only, hash-only baseline.
+    # Preserve evidence before any irreversible Android package-manager action.
     adb("-s", args.serial, "shell", "am", "force-stop", APP_ID)
     before = private_metadata(args.serial)
     before_webview = webview_size(args.serial)
-    adb("-s", args.serial, "install", "-r",
-        str(args.candidate_apk.resolve()), timeout=100)
-    if installed_version(args.serial) != next_["version_code"]:
-        raise RuntimeError("Candidate in-place install did not set expected versionCode")
-    adb("-s", args.serial, "shell", "am", "start", "-W", "-n", ACTIVITY)
-    adb("-s", args.serial, "shell", "am", "force-stop", APP_ID)
-    after = private_metadata(args.serial)
-    after_webview = webview_size(args.serial)
-
-    missing = [name for name in before if before[name] is not None and after[name] is None]
-    changed = [name for name in PROTECTED if before[name] != after[name]]
     report = {
         "format": REPORT_FORMAT, "emulator_serial": args.serial,
         "baseline_version_code": prev["version_code"],
         "candidate_version_code": next_["version_code"],
         "signer_certificate_sha256": prev["signer_certificate_sha256"],
         "baseline_private_hashes": before,
-        "candidate_private_hashes": after,
-        "changed_private_files": changed,
-        "missing_private_files": missing,
+        "candidate_private_hashes": None,
+        "changed_private_files": [],
+        "missing_private_files": [],
         "webview_store_kib_before": before_webview,
-        "webview_store_kib_after": after_webview,
+        "webview_store_kib_after": None,
         "physical_device_acceptance": "not-verified",
         "release_ready": False,
         "manual_task_parity": "pending",
         "manual_provider_testing": "pending",
+        "phase": "baseline-saved",
+        "status": "incomplete",
     }
     save_new_json(args.report, report)
-    if missing or (before_webview is not None and after_webview is None):
-        raise RuntimeError("WARNING: app-private storage vanished; inspect report, do not approve")
+    phase = "installing"
+    try:
+        report["phase"] = phase
+        replace_trial_report(args.report, report)
+        adb("-s", args.serial, "install", "-r",
+            str(args.candidate_apk.resolve()), timeout=100)
+        phase = "checking-installed-version"
+        if installed_version(args.serial) != next_["version_code"]:
+            raise RuntimeError("Candidate in-place install did not set expected versionCode")
+        phase = "launching-candidate"
+        adb("-s", args.serial, "shell", "am", "start", "-W", "-n", ACTIVITY)
+        phase = "waiting-for-readiness"
+        wait_for_app_readiness(args.serial)
+        phase = "capturing-post-upgrade-metadata"
+        adb("-s", args.serial, "shell", "am", "force-stop", APP_ID)
+        after = private_metadata(args.serial)
+        after_webview = webview_size(args.serial)
+
+        missing = [name for name in before if before[name] is not None and after[name] is None]
+        changed = [name for name in PROTECTED if before[name] != after[name]]
+        report.update({
+            "candidate_private_hashes": after,
+            "changed_private_files": changed,
+            "missing_private_files": missing,
+            "webview_store_kib_after": after_webview,
+        })
+        if missing or (before_webview is not None and after_webview is None):
+            raise RuntimeError("WARNING: app-private storage vanished; inspect report, do not approve")
+        report["phase"] = "complete"
+        report["status"] = "upgrade-completed-manual-parity-pending"
+        replace_trial_report(args.report, report)
+    except Exception as error:
+        # Never erase original baseline hashes or record task contents. Even
+        # on timeout/crash, a failure-stage report survives for forensic QA.
+        report["phase"] = phase
+        report["status"] = "incomplete"
+        report["error_type"] = type(error).__name__
+        replace_trial_report(args.report, report)
+        raise
     print("PASS: same-signer in-place APK upgrade completed on a verified disposable "
           "emulator; metadata report saved. App tasks, edits, tags, views, "
           "recovery and backup still require manual parity validation. "
