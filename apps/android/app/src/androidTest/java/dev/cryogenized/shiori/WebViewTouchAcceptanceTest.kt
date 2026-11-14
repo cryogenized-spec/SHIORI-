@@ -3,6 +3,7 @@ package dev.cryogenized.shiori
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.WindowInsets
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -33,6 +34,7 @@ class WebViewTouchAcceptanceTest {
     private val instrument = InstrumentationRegistry.getInstrumentation()
     private lateinit var scenario: ActivityScenario<MainActivity>
     private lateinit var webView: WebView
+    private var lastTouchDiagnostic = "no touch yet"
 
     @Before
     fun launchCleanActivity() {
@@ -97,7 +99,7 @@ class WebViewTouchAcceptanceTest {
             if (predicate()) return
             Thread.sleep(160)
         }
-        throw AssertionError("Android WebView acceptance timed out: $label")
+        throw AssertionError("Android WebView acceptance timed out: $label; last touch: $lastTouchDiagnostic")
     }
 
     private fun modalOpen(): Boolean =
@@ -129,7 +131,11 @@ class WebViewTouchAcceptanceTest {
                 "(function(){const e=document.querySelector($quoted);" +
                     "if(!e)return null;const r=e.getBoundingClientRect();" +
                     "return {x:r.left+r.width/2,y:r.top+r.height/2," +
-                    "width:r.width,height:r.height,viewport:window.innerWidth};})()"
+                    "width:r.width,height:r.height,viewport:window.innerWidth," +
+                    "viewportHeight:window.innerHeight," +
+                    "visualHeight:window.visualViewport?.height||window.innerHeight," +
+                    "hit:(()=>{const h=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);" +
+                    "return h===e||e.contains(h);})()};})()"
             )
         )
         assertTrue(
@@ -138,15 +144,25 @@ class WebViewTouchAcceptanceTest {
             bounds.getDouble("width") > 1
         )
         assertTrue("Element is not laid out: $selector", bounds.getDouble("height") > 1)
+        assertTrue("Target is obscured in the WebView DOM: $selector, $bounds",
+            bounds.getBoolean("hit"))
         val location = IntArray(2)
         var width = 0
-        instrument.runOnMainSync {
+        var height = 0
+        var imeVisible = false
+        scenario.onActivity { activity ->
             webView.getLocationOnScreen(location)
             width = webView.width
+            height = webView.height
+            imeVisible = activity.window.decorView.rootWindowInsets
+                ?.isVisible(WindowInsets.Type.ime()) == true
         }
         val scale = width.toDouble() / bounds.getDouble("viewport")
         val x = (location[0] + bounds.getDouble("x") * scale).toFloat()
         val y = (location[1] + bounds.getDouble("y") * scale).toFloat()
+        lastTouchDiagnostic = "selector=$selector, screen=($x,$y), " +
+            "webView=${width}x$height at (${location[0]},${location[1]}), " +
+            "ime=$imeVisible, cssBounds=$bounds"
         val start = SystemClock.uptimeMillis()
         val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, x, y, 0)
         val up = MotionEvent.obtain(start, start + 75, MotionEvent.ACTION_UP, x, y, 0)
