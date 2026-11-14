@@ -3,6 +3,7 @@
 //! This is a transitional persistence layer. It deliberately does NOT import
 //! the WebView task format into canonical shiori-storage task records yet.
 //! Never silently overwrite the last native snapshot at Activity startup.
+mod audit;
 mod migration;
 
 use chrono::NaiveDate;
@@ -235,6 +236,48 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_stageLegacyBackup
         report.inferred_timestamps
     );
     env.new_string(message)
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Verify the staged task database without modifying it or the live WebView
+/// records. A healthy but stale copy is never presented as current.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_auditLegacyShadow(
+    mut env: JNIEnv,
+    _object: JObject,
+    target_path: JString,
+    raw: JString,
+) -> jstring {
+    let Ok(path) = env.get_string(&target_path) else {
+        return std::ptr::null_mut();
+    };
+    let path = String::from(path);
+    let Ok(raw) = env.get_string(&raw) else {
+        return std::ptr::null_mut();
+    };
+    let raw = String::from(raw);
+    let report = match audit::audit_legacy_shadow(Path::new(&path), &raw) {
+        Ok(audit::ShadowAudit::Missing) =>
+            "No Rust migration preview exists. Stage one first.".to_owned(),
+        Ok(audit::ShadowAudit::Verified {
+            tasks, current_matches, unverified_timestamps,
+        }) => {
+            let status = if current_matches {
+                "MATCHES live Android tasks"
+            } else {
+                "STALE: Android tasks changed since staging"
+            };
+            let timestamp_note = if unverified_timestamps == 0 {
+                String::new()
+            } else {
+                format!("; {unverified_timestamps} historical times not independently verifiable")
+            };
+            format!("Rust preview verified: {tasks} canonical task(s); {status}{timestamp_note}. No data changed.")
+        }
+        Err(_) =>
+            "Rust preview audit FAILED: database/source could not be verified. Existing tasks were not changed.".to_owned(),
+    };
+    env.new_string(report)
         .map_or(std::ptr::null_mut(), |value| value.into_raw())
 }
 
