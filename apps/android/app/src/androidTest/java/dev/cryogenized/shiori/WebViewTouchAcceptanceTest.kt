@@ -151,8 +151,16 @@ class WebViewTouchAcceptanceTest {
         val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, x, y, 0)
         val up = MotionEvent.obtain(start, start + 75, MotionEvent.ACTION_UP, x, y, 0)
         try {
-            instrument.sendPointerSync(down)
-            instrument.sendPointerSync(up)
+            // On Android 15, Instrumentation.sendPointerSync targets
+            // only windows owned by the instrumented UID and can reject a
+            // valid WebView screen tap with a targeted-input UID error.
+            // UiAutomation injects real input through the automation session,
+            // not JS dispatch, and reports failure explicitly.
+            val automation = instrument.uiAutomation
+            assertTrue("Android rejected pointer DOWN at ($x,$y)",
+                automation.injectInputEvent(down, true))
+            assertTrue("Android rejected pointer UP at ($x,$y)",
+                automation.injectInputEvent(up, true))
             instrument.waitForIdleSync()
         } finally {
             down.recycle()
