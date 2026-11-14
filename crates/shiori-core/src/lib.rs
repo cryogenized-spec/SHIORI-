@@ -84,6 +84,15 @@ pub enum TaskError {
     InvalidPriority,
     #[error("invalid task status")]
     InvalidStatus,
+    #[error("estimate must be between 1 and 1440 minutes")]
+    InvalidEstimate,
+}
+
+pub fn validate_estimate(minutes: i64) -> Result<i64, TaskError> {
+    if !(1..=1440).contains(&minutes) {
+        return Err(TaskError::InvalidEstimate);
+    }
+    Ok(minutes)
 }
 
 pub fn validate_project(value: &str) -> Result<String, TaskError> {
@@ -103,6 +112,7 @@ pub struct TaskPatch {
     pub project: Option<String>,
     pub priority: Option<Priority>,
     pub due_on: Option<Option<NaiveDate>>,
+    pub estimate_minutes: Option<Option<i64>>,
 }
 
 pub fn validate_title(value: &str) -> Result<String, TaskError> {
@@ -126,6 +136,9 @@ pub struct Task {
     pub status: TaskStatus,
     /// A calendar date, not a UTC midnight timestamp.
     pub due_on: Option<NaiveDate>,
+    /// Optional effort estimate in whole minutes. A missing estimate is not zero.
+    #[serde(default)]
+    pub estimate_minutes: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
@@ -153,6 +166,7 @@ impl Task {
             priority,
             status: TaskStatus::Todo,
             due_on,
+            estimate_minutes: None,
             created_at: now,
             updated_at: now,
             completed_at: None,
@@ -186,14 +200,19 @@ impl Task {
             project,
             priority,
             due_on,
+            estimate_minutes,
         } = patch;
         let title = title.as_deref().map(validate_title).transpose()?;
         let project = project.as_deref().map(validate_project).transpose()?;
+        if let Some(Some(minutes)) = estimate_minutes {
+            validate_estimate(minutes)?;
+        }
         let changed = title.as_ref().is_some_and(|value| value != &self.title)
             || notes.as_ref().is_some_and(|value| value != &self.notes)
             || project.as_ref().is_some_and(|value| value != &self.project)
             || priority.is_some_and(|value| value != self.priority)
-            || due_on.is_some_and(|value| value != self.due_on);
+            || due_on.is_some_and(|value| value != self.due_on)
+            || estimate_minutes.is_some_and(|value| value != self.estimate_minutes);
         if !changed {
             return Ok(false);
         }
@@ -212,6 +231,9 @@ impl Task {
         }
         if let Some(value) = due_on {
             self.due_on = value;
+        }
+        if let Some(value) = estimate_minutes {
+            self.estimate_minutes = value;
         }
         self.bump();
         Ok(true)

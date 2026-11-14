@@ -1,7 +1,7 @@
 //! Offline editing and schema-baseline migration regressions.
 //! No live-backup or cross-device synchronization behaviour is claimed here.
 use chrono::NaiveDate;
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use shiori_core::{Priority, Task, TaskError, TaskPatch};
 use shiori_storage::{SqliteStore, StorageError, TaskFilter};
 
@@ -25,6 +25,7 @@ fn edits_survive_reopen_clear_dates_and_preserve_existing_identity() {
                     project: Some("  SHIORI  ".into()),
                     priority: Some(Priority::Urgent),
                     due_on: Some(None),
+                    estimate_minutes: None,
                 },
             )
             .unwrap();
@@ -88,19 +89,40 @@ fn unversioned_legacy_database_upgrades_without_dropping_tombstones() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("legacy.sqlite3");
     let active = Task::new("Active", "Inbox", Priority::Medium, None).unwrap();
-    let deleted = Task::new("Deleted", "Inbox", Priority::Medium, None).unwrap();
+    let mut deleted = Task::new("Deleted", "Inbox", Priority::Medium, None).unwrap();
+    deleted.soft_delete();
     {
-        let db = SqliteStore::open(&path).unwrap();
-        db.insert(&active).unwrap();
-        db.insert(&deleted).unwrap();
-        db.delete(&deleted.id).unwrap();
-    }
-    // Recreate the precise pre-versioning state: the same schema and records
-    // were already present, but SQLite user_version was still zero.
-    Connection::open(&path)
-        .unwrap()
-        .execute_batch("PRAGMA user_version = 0;")
+        // Genuine pre-versioning schema: exactly the original twelve columns,
+        // without v2's estimate_minutes column or dependency relation.
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+                project TEXT NOT NULL,
+                priority TEXT NOT NULL CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
+                status TEXT NOT NULL CHECK(status IN ('todo', 'in_progress', 'done')),
+                due_on TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                completed_at TEXT, version INTEGER NOT NULL CHECK(version > 0),
+                deleted_at TEXT
+            );",
+        )
         .unwrap();
+        for task in [&active, &deleted] {
+            db.execute(
+                "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                params![
+                    task.id, task.title, task.notes, task.project,
+                    task.priority.as_str(), task.status.as_str(),
+                    task.due_on.map(|d| d.to_string()),
+                    task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(),
+                    task.completed_at.map(|t| t.to_rfc3339()),
+                    task.version, task.deleted_at.map(|t| t.to_rfc3339())
+                ],
+            )
+            .unwrap();
+        }
+    }
     for _ in 0..2 {
         let db = SqliteStore::open(&path).unwrap();
         assert_eq!(db.get(&active.id).unwrap().version, 1);
@@ -121,7 +143,7 @@ fn unversioned_legacy_database_upgrades_without_dropping_tombstones() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 1);
+    assert_eq!(version, 2);
 }
 
 #[test]
@@ -135,7 +157,7 @@ fn refuses_unknown_newer_schema_without_modifying_database() {
         SqliteStore::open(&path),
         Err(StorageError::UnsupportedSchemaVersion {
             found: 42,
-            supported: 1
+            supported: 2
         })
     ));
     let db = Connection::open(&path).unwrap();

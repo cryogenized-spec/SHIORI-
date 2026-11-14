@@ -8,9 +8,9 @@ use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus};
 use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
-const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at FROM tasks";
+const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at, estimate_minutes FROM tasks";
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -26,6 +26,14 @@ pub enum StorageError {
     UnsupportedSchemaVersion { found: i64, supported: i64 },
     #[error("unversioned SQLite database has an incompatible task schema")]
     IncompatibleLegacySchema,
+    #[error("dependency must reference a different, active task")]
+    InvalidDependency,
+    #[error("dependency is missing or deleted: {0}")]
+    MissingDependency(String),
+    #[error("duplicate dependency ID")]
+    DuplicateDependency,
+    #[error("this prerequisite would create a task cycle")]
+    DependencyCycle,
 }
 
 #[derive(Default)]
@@ -54,7 +62,7 @@ impl SqliteStore {
     fn initialize(mut db: Connection) -> Result<Self, StorageError> {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 4000;")?;
         let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version != 0 && version != SCHEMA_VERSION {
+        if version != 0 && version != 1 && version != SCHEMA_VERSION {
             return Err(StorageError::UnsupportedSchemaVersion {
                 found: version,
                 supported: SCHEMA_VERSION,
@@ -111,6 +119,25 @@ impl SqliteStore {
             {
                 return Err(StorageError::IncompatibleLegacySchema);
             }
+            tx.pragma_update(None, "user_version", 1_i64)?;
+            tx.commit()?;
+        }
+        if version < 2 {
+            // A separate atomic migration from the stable v1 schema. A crash
+            // between v0->v1 and v1->v2 can safely resume next time.
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN estimate_minutes INTEGER
+                    CHECK (estimate_minutes IS NULL OR (estimate_minutes BETWEEN 1 AND 1440));
+                 CREATE TABLE task_dependencies (
+                    task_id TEXT NOT NULL REFERENCES tasks(id),
+                    depends_on_id TEXT NOT NULL REFERENCES tasks(id),
+                    PRIMARY KEY (task_id, depends_on_id),
+                    CHECK (task_id <> depends_on_id)
+                 );
+                 CREATE INDEX idx_task_dependencies_prerequisite
+                    ON task_dependencies(depends_on_id);",
+            )?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -119,8 +146,8 @@ impl SqliteStore {
 
     pub fn insert(&self, task: &Task) -> Result<(), StorageError> {
         self.db.execute(
-            "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(), task.completed_at.map(|t| t.to_rfc3339()), task.version, task.deleted_at.map(|t| t.to_rfc3339())]
+            "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(), task.completed_at.map(|t| t.to_rfc3339()), task.version, task.deleted_at.map(|t| t.to_rfc3339()), task.estimate_minutes]
         )?;
         Ok(())
     }
@@ -211,6 +238,108 @@ impl SqliteStore {
         Ok(task)
     }
 
+    /// List immediate prerequisites of an active task. A tombstoned
+    /// prerequisite remains referenced and must not silently unblock work.
+    pub fn get_dependencies(&self, id: &str) -> Result<Vec<String>, StorageError> {
+        self.get(id)?;
+        let mut statement = self.db.prepare(
+            "SELECT depends_on_id FROM task_dependencies
+             WHERE task_id=?1 ORDER BY depends_on_id",
+        )?;
+        let rows = statement.query_map(params![id], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Atomically replace a task's immediate prerequisites. The entire
+    /// directed graph is kept acyclic and task revision changes at most once.
+    /// Soft-deleted tasks cannot be used as new prerequisites.
+    pub fn set_dependencies(
+        &mut self,
+        id: &str,
+        dependencies: &[String],
+    ) -> Result<Task, StorageError> {
+        let mut requested = dependencies.to_vec();
+        if requested.iter().any(|dep| dep.trim().is_empty()) {
+            return Err(StorageError::InvalidDependency);
+        }
+        if requested.iter().any(|dep| dep == id) {
+            return Err(StorageError::DependencyCycle);
+        }
+        requested.sort();
+        if requested.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(StorageError::DuplicateDependency);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let version: i64 = tx
+            .query_row(
+                "SELECT version FROM tasks WHERE id=?1 AND deleted_at IS NULL",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StorageError::NotFound)?;
+        let current: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT depends_on_id FROM task_dependencies
+                 WHERE task_id=?1 ORDER BY depends_on_id",
+            )?;
+            let rows = stmt.query_map(params![id], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for dep in &requested {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND deleted_at IS NULL)",
+                params![dep],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err(StorageError::MissingDependency(dep.clone()));
+            }
+            // The outgoing edges for the edited task will be replaced below.
+            // Traversing from each prerequisite must not reach the edited ID.
+            let cycle: bool = tx.query_row(
+                "WITH RECURSIVE reachable(id) AS (
+                    SELECT depends_on_id FROM task_dependencies WHERE task_id=?1
+                    UNION
+                    SELECT edges.depends_on_id
+                    FROM task_dependencies edges JOIN reachable r ON edges.task_id=r.id
+                 )
+                 SELECT EXISTS(SELECT 1 FROM reachable WHERE id=?2)",
+                params![dep, id],
+                |row| row.get(0),
+            )?;
+            if cycle {
+                return Err(StorageError::DependencyCycle);
+            }
+        }
+        if current == requested {
+            tx.commit()?;
+            return self.get(id);
+        }
+        tx.execute(
+            "DELETE FROM task_dependencies WHERE task_id=?1",
+            params![id],
+        )?;
+        for dep in &requested {
+            tx.execute(
+                "INSERT INTO task_dependencies(task_id,depends_on_id) VALUES (?1,?2)",
+                params![id, dep],
+            )?;
+        }
+        let updated = tx.execute(
+            "UPDATE tasks SET version=version+1, updated_at=?2
+             WHERE id=?1 AND version=?3 AND deleted_at IS NULL",
+            params![id, Utc::now().to_rfc3339(), version],
+        )?;
+        if updated != 1 {
+            return Err(StorageError::RevisionConflict);
+        }
+        tx.commit()?;
+        self.get(id)
+    }
+
     pub fn delete(&self, id: &str) -> Result<(), StorageError> {
         let mut task = self.get(id)?;
         task.soft_delete();
@@ -219,14 +348,14 @@ impl SqliteStore {
 
     fn update_existing(&self, task: &Task) -> Result<(), StorageError> {
         let changed = self.db.execute(
-            "UPDATE tasks SET title=?2, notes=?3, project=?4, priority=?5, status=?6, due_on=?7, updated_at=?8, completed_at=?9, version=?10, deleted_at=?11 WHERE id=?1 AND version=?12 AND deleted_at IS NULL",
+            "UPDATE tasks SET title=?2, notes=?3, project=?4, priority=?5, status=?6, due_on=?7, updated_at=?8, completed_at=?9, version=?10, deleted_at=?11, estimate_minutes=?13 WHERE id=?1 AND version=?12 AND deleted_at IS NULL",
             params![
                 task.id, task.title, task.notes, task.project, task.priority.as_str(),
                 task.status.as_str(), task.due_on.map(|d| d.to_string()),
                 task.updated_at.to_rfc3339(),
                 task.completed_at.map(|t| t.to_rfc3339()),
                 task.version, task.deleted_at.map(|t| t.to_rfc3339()),
-                task.version - 1
+                task.version - 1, task.estimate_minutes
             ]
         )?;
         if changed == 0 {
@@ -271,6 +400,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         completed_at: completed.map(|v| timestamp(&v, 9)).transpose()?,
         version: row.get(10)?,
         deleted_at: deleted.map(|v| timestamp(&v, 11)).transpose()?,
+        estimate_minutes: row.get(12)?,
     })
 }
 
