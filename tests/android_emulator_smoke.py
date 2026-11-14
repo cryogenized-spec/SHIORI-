@@ -123,8 +123,8 @@ def check_instrumentation_result(report: str) -> None:
     """
     if ("FAILURES!!!" in report or "INSTRUMENTATION_FAILED" in report or
             "INSTRUMENTATION_ABORTED" in report or
-            not re.search(r"(?m)^OK \(2 tests\)[ \t]*$", report) or
-            not re.search(r"(?m)^INSTRUMENTATION_CODE: -1[ \t]*$", report)):
+            not re.search(r"(?m)^OK \(2 tests\)[ \t]*\r?$", report) or
+            not re.search(r"(?m)^INSTRUMENTATION_CODE: -1[ \t]*\r?$", report)):
         raise RuntimeError(
             "Android WebView touch instrumentation failed or skipped tests: "
             + report[-2400:]
