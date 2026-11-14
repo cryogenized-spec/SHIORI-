@@ -14,10 +14,13 @@ The build output/CI artifact for each commit needs its own matching
 and [M2.6 independent APK preflight](M2_6_ANDROID_UPGRADE_PREFLIGHT.md).
 
 Use a separate disposable AVD with no SHIORI installation, task records, or
-personal login. Start it and run `adb devices`. The helper refuses any
-serial other than `emulator-NNNN`, rejects `ro.kernel.qemu != 1`, and
-requires **exactly one connected device**. With a phone connected too,
-disconnect the phone before testing.
+personal login. Start it and run `adb devices`. The helper refuses any serial other than `emulator-NNNN`, rejects
+`ro.kernel.qemu != 1`, and requires **exactly one connected device**.
+It also binds the two stages to the same Android kernel boot identity and a
+random installation-specific marker in the test app's private directory.
+Do **not** stop/reboot the AVD or switch to another emulator between stages;
+a re-used `emulator-5554` serial cannot substitute for the staged instance.
+With a phone connected too, disconnect the phone before testing.
 
 The helper independently checks the actual APK signer and version via SDK
 `aapt` and `apksigner`, validates both complete CI evidence manifests,
@@ -39,8 +42,9 @@ python3 tools/android/rehearse_emulator_upgrade.py stage \
   --confirm-disposable-emulator
 ```
 
-This installs **only the previous APK** on a fresh emulator, launches
-SHIORI, and writes a non-sensitive stage manifest outside the repository.
+This installs **only the previous APK** on a fresh emulator, creates a
+random test-only marker under that installation's private app directory,
+launches SHIORI, and writes a non-sensitive stage manifest outside the repository.
 It will not overwrite an existing stage file or an existing app package.
 If it fails after installing the baseline, reset or recreate the disposable
 AVD; never work around the refusal by deleting a real installation.
@@ -71,10 +75,19 @@ The helper checks that the installed baseline matches the stage file and
 the current APKs. It force-stops SHIORI to quiesce file writes, records
 **only SHA-256 and sizes** of the protected app-private SQLite files, and
 checks the approximate size of the WebView local-storage directory. It
+**writes that baseline into the reserved 0600 report before any upgrade**,
 then runs `adb install -r` with the candidate APK, verifies the new
-versionCode, launches and stops the application, and records another
-metadata snapshot. It rejects missing protected databases and complete
+versionCode, launches the application, and waits for bounded, read-only
+evidence of a live foreground process and stable persisted WebView/private
+storage across multiple observations before taking the post-upgrade snapshot. It rejects missing protected databases and complete
 disappearance of a previously present WebView directory.
+
+If the install, app launch, readiness check or final metadata inspection
+fails, the report retains the baseline hashes, an incomplete status and the
+last failed phase. This makes an interrupted attempt inspectable even though
+the same version cannot simply be reinstalled as a fresh trial. Readiness is
+a filesystem/window liveness gate, **not** proof that every JavaScript
+callback or native database operation completed.
 
 A successful package-manager upgrade is **not** data integrity
 confirmation. The report explicitly records
