@@ -11,6 +11,7 @@ import json
 import pathlib
 import re
 import sys
+import zipfile
 
 from apk_release_evidence import FORMAT, PACKAGE, verify
 
@@ -78,7 +79,7 @@ def main(argv=None):
         verify(args.candidate_apk, args.candidate_evidence, candidate["git_commit"])
         print(compare_records(previous, candidate))
         return 0
-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
         print(f"BLOCKED: SHIORI debug upgrade preflight: {exc}", file=sys.stderr)
         return 1
 
