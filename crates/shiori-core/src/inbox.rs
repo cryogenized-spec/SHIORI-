@@ -282,14 +282,16 @@ mod tests {
                     resource_id: "t".into()
                 },
                 now()
-            ).unwrap_err(),
+            )
+            .unwrap_err(),
             InboxError::InvalidSource
         );
     }
 
     #[test]
     fn link_requires_explicit_matching_triage_and_is_idempotent() {
-        let mut item = InboxItem::capture_text("Supplier reply", InboxSource::Local, now()).unwrap();
+        let mut item =
+            InboxItem::capture_text("Supplier reply", InboxSource::Local, now()).unwrap();
         let t1 = now() + Duration::seconds(1);
         assert_eq!(
             item.link_existing(InboxDisposition::Task, "task-1", t1),
@@ -302,8 +304,15 @@ mod tests {
             item.link_existing(InboxDisposition::Memo, "memo-1", t2),
             Err(InboxError::NotTriagedForTarget)
         );
-        assert!(item.link_existing(InboxDisposition::Task, "task-1", t2).unwrap());
-        assert!(!item.link_existing(InboxDisposition::Task, "task-1", t2).unwrap());
+        assert!(
+            item.link_existing(InboxDisposition::Task, "task-1", t2)
+                .unwrap()
+        );
+        assert!(
+            !item
+                .link_existing(InboxDisposition::Task, "task-1", t2)
+                .unwrap()
+        );
         assert_eq!(
             item.link_existing(InboxDisposition::Task, "task-2", t2),
             Err(InboxError::AlreadyLinked)
@@ -317,10 +326,14 @@ mod tests {
         let mut item = InboxItem::capture_text("Note", InboxSource::Ocr, now()).unwrap();
         let at = now() + Duration::seconds(1);
         item.triage(InboxDisposition::Memo, at).unwrap();
-        item.link_existing(InboxDisposition::Memo, "memo-1", at).unwrap();
+        item.link_existing(InboxDisposition::Memo, "memo-1", at)
+            .unwrap();
         item.archive(at).unwrap();
         assert!(!item.archive(at).unwrap());
-        assert_eq!(item.triage(InboxDisposition::Task, at), Err(InboxError::Archived));
+        assert_eq!(
+            item.triage(InboxDisposition::Task, at),
+            Err(InboxError::Archived)
+        );
         assert!(item.restore(at).unwrap());
         assert_eq!(item.state, InboxState::Linked);
         assert_eq!(item.source, InboxSource::Ocr);
@@ -331,7 +344,10 @@ mod tests {
     fn stale_timestamps_do_not_partially_mutate() {
         let mut item = InboxItem::capture_text("Note", InboxSource::Local, now()).unwrap();
         let old = now() - Duration::seconds(1);
-        assert_eq!(item.triage(InboxDisposition::Task, old), Err(InboxError::TimestampRegressed));
+        assert_eq!(
+            item.triage(InboxDisposition::Task, old),
+            Err(InboxError::TimestampRegressed)
+        );
         assert_eq!(item.disposition, None);
         assert_eq!(item.state, InboxState::Unprocessed);
         assert_eq!(item.version, 1);
