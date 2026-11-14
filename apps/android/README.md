@@ -62,6 +62,19 @@ you have verified that backup.
 See [canonical Android migration plan](../../docs/engineering/ANDROID_CANONICAL_MIGRATION.md)
 for how timestamp defaults and older hard-deleted records are handled.
 
+## Optional stable development signing for upgrade rehearsal
+
+Debug APKs built on different CI runners may have different certificates.
+For **disposable** in-place upgrade testing, the Gradle debug build can
+optionally use an external keystore via four `SHIORI_DEV_KEY*` environment
+variables, with `SHIORI_DEV_VERSION_CODE` to increase the candidate
+versionCode. Partial credentials, missing keystores and keystores inside the
+repository are rejected. This does **not** configure release signing or
+authorize deployment to a handset containing real data.
+
+See [M2.7 stable debug signing contract](../../docs/engineering/M2_7_STABLE_DEV_SIGNING.md)
+and [M2.6 upgrade preflight](../../docs/engineering/M2_6_ANDROID_UPGRADE_PREFLIGHT.md).
+
 ## Open and build
 
 Use Android Studio with JDK 17, Android SDK API 36 and Android Gradle Plugin 9.4. The project is rooted at `apps/android` and uses Gradle 9.9.1. It links `apps/web` as a **packaged asset source** at build time; do not copy a second stale UI.

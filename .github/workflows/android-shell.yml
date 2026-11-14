@@ -29,6 +29,23 @@ jobs:
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
           yes | "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null || test "${PIPESTATUS[1]}" -eq 0
+      - name: Confirm incomplete debug signing fails closed
+        run: |
+          set -euo pipefail
+          GRADLE=/tmp/gradle-9.9.1/bin/gradle
+          if SHIORI_DEV_KEYSTORE_PATH=/tmp/shiori-no-signing-key.jks \
+             "$GRADLE" -p apps/android :app:help --no-daemon \
+             >/tmp/shiori-signing-partial.log 2>&1; then
+            echo "Partial debug signing unexpectedly succeeded" >&2; exit 1
+          fi
+          grep -Fq 'partial configuration is refused' /tmp/shiori-signing-partial.log
+          if SHIORI_DEV_VERSION_CODE=6 \
+             "$GRADLE" -p apps/android :app:help --no-daemon \
+             >/tmp/shiori-signing-version.log 2>&1; then
+            echo "Unsigned override of debug versionCode unexpectedly succeeded" >&2; exit 1
+          fi
+          grep -Fq 'requires an explicitly configured stable debug signer' /tmp/shiori-signing-version.log
+          echo "PASS: Gradle refuses incomplete signing and unsigned version override"
       - name: Install Android NDK and pinned Rust cross-compilation targets
         run: |
           set -euo pipefail
@@ -66,9 +83,33 @@ jobs:
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_verifyLegacyRollback'
             readelf --dyn-syms --wide "$LIB" | grep -Fq 'Java_dev_cryogenized_shiori_NativeVault_inspectInterruptedCanary'
           done
+      - name: Exercise stable debug signer with a disposable CI-only key
+        run: |
+          set -euo pipefail
+          KEYSTORE=/tmp/shiori-synthetic-signing-ci.jks
+          keytool -genkeypair -noprompt -storetype PKCS12 \
+            -keystore "$KEYSTORE" -alias shiori-ci-synthetic \
+            -keyalg RSA -keysize 2048 -validity 2 \
+            -dname 'CN=SHIORI CI Synthetic, O=Local-only Test' \
+            -storepass 'ci-only-not-a-secret' -keypass 'ci-only-not-a-secret' \
+            >/dev/null 2>&1
+          SHIORI_DEV_KEYSTORE_PATH="$KEYSTORE" \
+          SHIORI_DEV_KEYSTORE_PASSWORD='ci-only-not-a-secret' \
+          SHIORI_DEV_KEY_ALIAS='shiori-ci-synthetic' \
+          SHIORI_DEV_KEY_PASSWORD='ci-only-not-a-secret' \
+          SHIORI_DEV_VERSION_CODE=6 \
+            /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug --no-daemon
+          APK=apps/android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | grep -Fq "versionCode='6'"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$APK"
+          rm -f "$KEYSTORE"
+          echo "PASS: synthetic external debug signing and versionCode 6"
       - name: Build APK with bundled offline assets
         run: |
           /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging \
+            apps/android/app/build/outputs/apk/debug/app-debug.apk \
+            | grep -Fq "versionCode='5'"
       - name: Assert the APK is self-contained and network-permission-free
         run: |
           set -euo pipefail
