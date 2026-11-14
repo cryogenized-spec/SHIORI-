@@ -6,6 +6,8 @@ import android.util.Log
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import android.view.inputmethod.InputMethodManager
+import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -114,6 +116,18 @@ class MainActivity : Activity() {
                             "native-rollback" -> rollbackNativeCanary()
                             "native-resume" -> beginResumeInterruptedCanary()
                         }
+                    }
+                    return true
+                }
+                // Closing a WebView dialog must dismiss Android's IME, not
+                // merely blur its HTML input. Otherwise the first subsequent
+                // tap on New Task can be swallowed while the keyboard closes.
+                // Only the bundled offline page may navigate to this command.
+                if (uri.scheme == "shiori-ui") {
+                    if (request.isForMainFrame && uri.host == "dismiss-ime") {
+                        val input = getSystemService(Context.INPUT_METHOD_SERVICE)
+                            as InputMethodManager
+                        input.hideSoftInputFromWindow(webView.windowToken, 0)
                     }
                     return true
                 }

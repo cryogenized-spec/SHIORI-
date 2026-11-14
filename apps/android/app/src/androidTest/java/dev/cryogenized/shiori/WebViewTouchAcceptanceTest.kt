@@ -119,6 +119,15 @@ class WebViewTouchAcceptanceTest {
     private fun modalOpen(): Boolean =
         javascript("document.querySelector('#taskModal')?.classList.contains('open') === true") == "true"
 
+    private fun androidImeVisible(): Boolean {
+        var visible = false
+        scenario.onActivity { activity ->
+            visible = activity.window.decorView.rootWindowInsets
+                ?.isVisible(WindowInsets.Type.ime()) == true
+        }
+        return visible
+    }
+
     private fun taskExists(title: String): Boolean {
         val literal = JSONObject.quote(title)
         return javascript(
@@ -232,6 +241,9 @@ class WebViewTouchAcceptanceTest {
         }
         touch("#taskForm [data-close-modal]")
         await("Cancel dismisses task with unsaved typing") { !modalOpen() }
+        await("Cancel actually hides Android's software keyboard") {
+            !androidImeVisible()
+        }
         assertTrue("Cancel created a task unexpectedly", !taskExists(unsavedTitle))
 
         touch(".mobile-fab")
