@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -27,6 +28,9 @@ from verify_recovery_device import APP_ID, PROTECTED, RECOVERY
 ACTIVITY = f"{APP_ID}/.MainActivity"
 FORMAT = "shiori-m2-8-emulator-upgrade-stage-v1"
 REPORT_FORMAT = "shiori-m2-8-emulator-upgrade-report-v1"
+TRIAL_PREFIX = ".shiori-m2-8-trial-"
+BOOT_ID_PATTERN = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+TRIAL_PATTERN = re.compile(r"\.shiori-m2-8-trial-[0-9a-f]{32}")
 
 
 def sha256_file(path):
@@ -66,6 +70,35 @@ def require_fresh_emulator(serial):
     if adb("-s", serial, "shell", "getprop", "ro.kernel.qemu").strip() != "1":
         raise RuntimeError("ADB target is not verified as an Android emulator")
     return serial
+
+
+def emulator_boot_id(serial):
+    """Boot-unique identity, separate from a reusable emulator-5554 serial."""
+    identity = adb("-s", serial, "shell", "cat",
+                   "/proc/sys/kernel/random/boot_id").strip().lower()
+    if not BOOT_ID_PATTERN.fullmatch(identity):
+        raise RuntimeError("Cannot verify boot-specific emulator identity")
+    return identity
+
+
+def stage_trial_marker(serial, marker):
+    """Create an app-private, installation-specific directory, never overwrite."""
+    if not TRIAL_PATTERN.fullmatch(marker):
+        raise RuntimeError("Invalid upgrade trial marker")
+    command = "set -e; umask 077; mkdir -p files; mkdir files/" + marker
+    adb("-s", serial, "shell", "run-as", APP_ID, "sh", "-c",
+        shlex.quote(command))
+
+
+def verify_trial_marker(serial, marker):
+    if not TRIAL_PATTERN.fullmatch(marker):
+        raise RuntimeError("Invalid upgrade trial marker")
+    command = "test -d files/" + marker
+    try:
+        adb("-s", serial, "shell", "run-as", APP_ID, "sh", "-c",
+            shlex.quote(command))
+    except RuntimeError as error:
+        raise RuntimeError("Staged emulator trial marker is missing") from error
 
 
 def installed_version(serial):
@@ -160,6 +193,8 @@ def stage(args, prev, next_):
     if args.state_file.exists():
         raise RuntimeError("Stage file already exists; refusing to install over an old trial")
     require_fresh_emulator(args.serial)
+    boot_identity = emulator_boot_id(args.serial)
+    marker = TRIAL_PREFIX + secrets.token_hex(16)
     if installed_version(args.serial) is not None:
         raise RuntimeError(
             "SHIORI already installed on emulator; refusing to replace or uninstall it"
@@ -167,8 +202,13 @@ def stage(args, prev, next_):
     adb("-s", args.serial, "install", str(args.previous_apk.resolve()), timeout=100)
     if installed_version(args.serial) != prev["version_code"]:
         raise RuntimeError("Baseline install did not report the expected versionCode")
+    stage_trial_marker(args.serial, marker)
     adb("-s", args.serial, "shell", "am", "start", "-W", "-n", ACTIVITY)
+    if emulator_boot_id(args.serial) != boot_identity:
+        raise RuntimeError("Emulator restarted during baseline staging")
     save_new_json(args.state_file, {
+        "emulator_boot_id": boot_identity,
+        "trial_marker": marker,
         "format": FORMAT, "serial": args.serial,
         "previous_apk_sha256": sha256_file(args.previous_apk),
         "candidate_apk_sha256": sha256_file(args.candidate_apk),
@@ -191,7 +231,18 @@ def upgrade(args, prev, next_):
     if args.report.exists():
         raise RuntimeError("Report already exists; refusing to overwrite a previous trial")
     state = json.loads(args.state_file.read_text(encoding="utf-8"))
+    if not isinstance(state, dict):
+        raise RuntimeError("Invalid staged emulator trial file")
+    boot_identity = state.get("emulator_boot_id")
+    marker = state.get("trial_marker")
+    if (not isinstance(boot_identity, str) or
+            not BOOT_ID_PATTERN.fullmatch(boot_identity) or
+            not isinstance(marker, str) or
+            not TRIAL_PATTERN.fullmatch(marker)):
+        raise RuntimeError("Staged emulator identity/marker missing or invalid")
     expected = {
+        "emulator_boot_id": boot_identity,
+        "trial_marker": marker,
         "format": FORMAT, "serial": args.serial,
         "previous_apk_sha256": sha256_file(args.previous_apk),
         "candidate_apk_sha256": sha256_file(args.candidate_apk),
@@ -206,8 +257,11 @@ def upgrade(args, prev, next_):
     if state != expected:
         raise RuntimeError("Emulator trial provenance changed; refusing to install candidate")
     require_fresh_emulator(args.serial)
+    if emulator_boot_id(args.serial) != boot_identity:
+        raise RuntimeError("Staged emulator has been replaced or restarted")
     if installed_version(args.serial) != prev["version_code"]:
         raise RuntimeError("Installed baseline version differs; no candidate was installed")
+    verify_trial_marker(args.serial, marker)
 
     # Quiesce the app before taking a read-only, hash-only baseline.
     adb("-s", args.serial, "shell", "am", "force-stop", APP_ID)
