@@ -1,0 +1,11 @@
+[package]
+name = "shiori-perf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+shiori-core = { path = "../../crates/shiori-core" }
+shiori-storage = { path = "../../crates/shiori-storage" }
+chrono.workspace = true

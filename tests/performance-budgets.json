@@ -1,0 +1,7 @@
+{
+  "database_open_ms": 250.0,
+  "point_lookup": 15.0,
+  "project_filter": 200.0,
+  "due_filter": 200.0,
+  "text_search": 200.0
+}

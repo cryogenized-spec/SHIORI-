@@ -1,0 +1,156 @@
+name: SHIORI quality gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1' # weekly reproducible performance/health snapshots (UTC)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shiori-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+jobs:
+  rust-quality:
+    name: Rust quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - name: Verify committed Cargo.lock
+        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null
+      - name: Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Strict Rust lint (all packages and targets)
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Rust unit and integration tests
+        run: cargo test --workspace --all-features --locked
+      - name: Rust documentation tests
+        run: cargo test --doc --workspace --locked
+      - name: Release compile smoke test
+        run: cargo build --workspace --release --locked
+
+  rust-security:
+    name: Rust dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Verify committed Cargo.lock
+        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null
+      - name: Install pinned RustSec audit tool
+        run: cargo install cargo-audit --version 0.23.0 --locked
+      - name: Block vulnerable dependencies
+        run: cargo audit --file Cargo.lock --deny warnings
+
+  rust-coverage:
+    name: Rust coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain + LLVM
+        run: rustup toolchain install 1.99.1 --profile minimal --component llvm-tools-preview
+      - name: Verify committed Cargo.lock
+        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null
+      - name: Install coverage tool
+        run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Run coverage instrumentation
+        run: cargo llvm-cov --workspace --all-features --locked --lcov --output-path coverage.lcov --fail-under-lines 60
+      - name: Store Rust coverage report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-rust-coverage
+          path: coverage.lcov
+          if-no-files-found: warn
+          retention-days: 30
+
+  web-interactions:
+    name: Browser UI regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Validate JavaScript and Python test harness
+        run: |
+          node --check apps/web/app.js
+          python -m compileall -q tests
+          python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Install pinned browser automation
+        run: |
+          python -m pip install 'playwright==1.56.0'
+          python -m playwright install --with-deps chromium
+      - name: Install pinned axe-core accessibility scanner
+        run: npm install --no-save --no-package-lock --ignore-scripts axe-core@4.14.0
+      - name: Check accessibility for desktop and mobile
+        run: python tests/a11y_audit.py --report accessibility-report.json
+      - name: Save accessibility findings
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-accessibility
+          path: accessibility-report.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Check desktop and mobile interactions and latency
+        if: ${{ !cancelled() }}
+        run: python tests/ui_smoke.py --report browser-metrics.json
+      - name: Save local browser performance report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-browser-metrics
+          path: browser-metrics.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  performance:
+    name: SQLite performance budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Verify committed Cargo.lock
+        run: test -f Cargo.lock && cargo metadata --locked --no-deps > /dev/null
+      - name: Run repeatable synthetic SQLite benchmark
+        run: cargo run --release --locked -p shiori-perf -- --rows 3000 > rust-perf.json
+      - name: Enforce meaningful performance budgets
+        run: python3 tests/perf_gate.py rust-perf.json
+      - name: Publish summary
+        run: python3 tests/metrics_summary.py rust-perf.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive performance measurements
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-rust-perf
+          path: rust-perf.json
+          if-no-files-found: warn
+          retention-days: 90

@@ -1,0 +1,77 @@
+name: SHIORI deep quality (scheduled and manual)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '43 2 * * 0' # Sunday UTC; workflow active on default branch only
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz Rust task-title validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install nightly Rust for libFuzzer
+        run: rustup toolchain install nightly --profile minimal
+      - name: Install pinned cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Run bounded libFuzzer session
+        run: cargo +nightly fuzz run validate_title -- -max_total_time=45
+      - name: Preserve crashing inputs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-fuzz-crashes
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  mutation:
+    name: Rust mutation testing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install stable Rust
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Install pinned cargo-mutants
+        run: cargo install cargo-mutants --version 27.1.0 --locked
+      - name: Detect untested task-domain logic
+        run: cargo mutants --package shiori-core --timeout 90 --jobs 2 --output mutants-out
+      - name: Archive mutation results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-mutation-report
+          path: mutants-out/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  stress:
+    name: Large database performance snapshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Measure synthetic 30000-task SQLite database
+        run: cargo run --release --locked -p shiori-perf -- --rows 30000 > rust-stress.json
+      - name: Save measurements
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-30k-stress-metrics
+          path: rust-stress.json
+          if-no-files-found: warn
+          retention-days: 90
