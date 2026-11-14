@@ -72,8 +72,11 @@ versionCode. Partial credentials, missing keystores and keystores inside the
 repository are rejected. This does **not** configure release signing or
 authorize deployment to a handset containing real data.
 
-See [M2.7 stable debug signing contract](../../docs/engineering/M2_7_STABLE_DEV_SIGNING.md)
-and [M2.6 upgrade preflight](../../docs/engineering/M2_6_ANDROID_UPGRADE_PREFLIGHT.md).
+See [M2.7 stable debug signing contract](../../docs/engineering/M2_7_STABLE_DEV_SIGNING.md),
+[M2.6 upgrade preflight](../../docs/engineering/M2_6_ANDROID_UPGRADE_PREFLIGHT.md)
+and [M2.8 disposable-emulator upgrade rehearsal](../../docs/engineering/M2_8_DISPOSABLE_EMULATOR_UPGRADE.md).
+The M2.8 helper refuses real handsets, pre-existing installations and changed
+APK provenance; it never uninstalls the app. It does not replace real-device QA.
 
 ## Open and build
 

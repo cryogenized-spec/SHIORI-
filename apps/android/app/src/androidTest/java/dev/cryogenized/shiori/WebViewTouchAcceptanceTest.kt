@@ -1,6 +1,7 @@
 package dev.cryogenized.shiori
 
 import android.os.SystemClock
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowInsets
@@ -50,7 +51,7 @@ class WebViewTouchAcceptanceTest {
                 val shown = webView.isShown
                 val attached = webView.windowToken != null
                 val focused = webView.hasWindowFocus()
-                visible = shown && attached && !activity.isFinishing &&
+                visible = shown && attached && focused && !activity.isFinishing &&
                     webView.width > 0 && webView.height > 0
                 // ActivityScenario can transiently take window focus while
                 // the WebView remains fully visible. Focus alone is not proof
@@ -153,6 +154,20 @@ class WebViewTouchAcceptanceTest {
      * All taps are real Android pointer events, never JS .click() calls.
      */
     private fun touch(selector: String) {
+        // The emulator may report a fully laid-out WebView before Android
+        // routes physical input to its window. Do not retry failed taps:
+        // wait for initial window focus and require the very first real
+        // pointer gesture to succeed.
+        if (selector == ".mobile-fab") {
+            await("New Task target has Android window input focus") {
+                var focused = false
+                scenario.onActivity {
+                    focused = webView.isShown && webView.hasWindowFocus() &&
+                        webView.windowToken != null
+                }
+                focused
+            }
+        }
         val quoted = JSONObject.quote(selector)
         javascript(
             "(function(){const e=document.querySelector($quoted); " +
@@ -214,6 +229,11 @@ class WebViewTouchAcceptanceTest {
         val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, x, y, 0)
         val up = MotionEvent.obtain(start, start + 75, MotionEvent.ACTION_UP, x, y, 0)
         try {
+            // MotionEvent.obtain defaults to SOURCE_UNKNOWN. InputDispatcher
+            // needs an explicit pointer-class source for genuine WebView taps.
+            // Without it UiAutomation may accept events but dispatch no click.
+            down.source = InputDevice.SOURCE_TOUCHSCREEN
+            up.source = InputDevice.SOURCE_TOUCHSCREEN
             // On Android 15, Instrumentation.sendPointerSync targets
             // only windows owned by the instrumented UID and can reject a
             // valid WebView screen tap with a targeted-input UID error.
@@ -222,6 +242,7 @@ class WebViewTouchAcceptanceTest {
             val automation = instrument.uiAutomation
             assertTrue("Android rejected pointer DOWN at ($x,$y)",
                 automation.injectInputEvent(down, true))
+            SystemClock.sleep(75)
             assertTrue("Android rejected pointer UP at ($x,$y)",
                 automation.injectInputEvent(up, true))
             instrument.waitForIdleSync()
