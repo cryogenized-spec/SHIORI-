@@ -29,6 +29,23 @@ jobs:
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
           yes | "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null || test "${PIPESTATUS[1]}" -eq 0
+      - name: Confirm incomplete debug signing fails closed
+        run: |
+          set -euo pipefail
+          GRADLE=/tmp/gradle-9.9.1/bin/gradle
+          if SHIORI_DEV_KEYSTORE_PATH=/tmp/shiori-no-signing-key.jks \
+             "$GRADLE" -p apps/android :app:help --no-daemon \
+             >/tmp/shiori-signing-partial.log 2>&1; then
+            echo "Partial debug signing unexpectedly succeeded" >&2; exit 1
+          fi
+          grep -Fq 'partial configuration is refused' /tmp/shiori-signing-partial.log
+          if SHIORI_DEV_VERSION_CODE=6 \
+             "$GRADLE" -p apps/android :app:help --no-daemon \
+             >/tmp/shiori-signing-version.log 2>&1; then
+            echo "Unsigned override of debug versionCode unexpectedly succeeded" >&2; exit 1
+          fi
+          grep -Fq 'requires an explicitly configured stable debug signer' /tmp/shiori-signing-version.log
+          echo "PASS: Gradle refuses incomplete signing and unsigned version override"
       - name: Install Android NDK and pinned Rust cross-compilation targets
         run: |
           set -euo pipefail
