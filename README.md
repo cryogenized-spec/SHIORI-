@@ -32,7 +32,7 @@ cargo run -p shiori-cli -- attention --on 2026-11-12
 cargo run -p shiori-cli -- plan 2026-11-12 --start 08:00 --end 17:00 --break-start 13:00 --break-end 14:00 --utc-offset-minutes 120 --default-minutes 30
 ```
 
-By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support. Existing pre-versioning and v1 SQLite files are upgraded transactionally to schema version 2 while retaining task records and tombstones; unknown future schema versions are refused rather than overwritten. Full multi-version migrations and safe live backup are still future work.
+By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support. Existing pre-versioning and v1 SQLite files are upgraded transactionally to schema version 3 while retaining task records and tombstones; unknown future schema versions are refused rather than overwritten. Full multi-version migrations and safe live backup are still future work.
 
 The web design concept runs standalone in Firefox by opening `apps/web/index.html`, or via a local static server (demo tasks only):
 
@@ -51,7 +51,7 @@ Open `http://127.0.0.1:8765`. The footer changes to **LOCAL RUST / SQLITE** when
 
 The optional calendar on **My day** can be collapsed; its state is saved in local storage. Select a date to filter the task list for that day, and select **Today** to reset.
 
-**M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the browser is still demo data, there is no assignee model or authenticated production API; task durations and prerequisite links are stored in SQLite and used by the CLI planner, while an optional development-only localhost bridge allows the web prototype to view and mutate that same task database. There is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
+**M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the standalone browser mode still uses demo data, while the optional development bridge exposes local SQLite assignments (not authenticated multi-user permissions); there is no authenticated production API; task durations and prerequisite links are stored in SQLite and used by the CLI planner, while an optional development-only localhost bridge allows the web prototype to view and mutate that same task database. There is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
 
 ## Layout
 
@@ -63,7 +63,11 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 - `docs/adr`: architecture decisions
 - `.github/workflows`: automated formatting, lint and tests
 
-This project follows the existing `ROADMAP.md`. Dependency and licence review remain mandatory before distribution; AGPLv3 is proposed, not yet finalized.
+This project follows the existing [`ROADMAP.md`](ROADMAP.md). Dependency and licence review remain mandatory before distribution; AGPLv3 is proposed, not yet finalized.
+
+## Extensible architecture
+
+[`ADR 0001`](docs/adr/0001-rust-core-sqlite.md) defines the local Rust/SQLite base. [`ADR 0002`](docs/adr/0002-application-ports-and-provider-boundaries.md) defines the application-service, inbox, MCP and external provider boundaries, with the [`foundation extension gates`](docs/engineering/FOUNDATION_EXTENSION_GATES.md) guiding future changes. The new `shiori-core::inbox` module defines local SH-005 capture/triage/link/archive rules and tests only; **persistent inbox operations, user-facing inbox screens, MCP and ClickUp integration are not yet implemented**.
 
 ## Quality, performance, CI
 
