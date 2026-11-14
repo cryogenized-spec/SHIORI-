@@ -346,6 +346,17 @@ impl SqliteStore {
         self.update_existing(&task)
     }
 
+    /// Soft-delete only if the caller has seen the latest revision. Preserve
+    /// tombstones for future synchronization and prevent stale UI deletions.
+    pub fn delete_if_version(&self, id: &str, expected_version: i64) -> Result<(), StorageError> {
+        let mut task = self.get(id)?;
+        if task.version != expected_version {
+            return Err(StorageError::RevisionConflict);
+        }
+        task.soft_delete();
+        self.update_existing(&task)
+    }
+
     fn update_existing(&self, task: &Task) -> Result<(), StorageError> {
         let changed = self.db.execute(
             "UPDATE tasks SET title=?2, notes=?3, project=?4, priority=?5, status=?6, due_on=?7, updated_at=?8, completed_at=?9, version=?10, deleted_at=?11, estimate_minutes=?13 WHERE id=?1 AND version=?12 AND deleted_at IS NULL",

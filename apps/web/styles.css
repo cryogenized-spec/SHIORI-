@@ -64,3 +64,18 @@
   .sort-control{min-width:0}
   .sort-control select{min-width:0}
 }
+
+/* M2: editable task inspector and reviewable deletion */
+.detail-actions{display:flex;gap:9px;margin:16px 0;flex-wrap:wrap}
+.detail-actions .secondary-btn{flex:1;min-width:115px}
+.delete-task-btn{border-color:#ad6565!important;color:#da9696!important}
+.edit-revision-hint{font-size:11px;color:var(--muted);line-height:1.5;margin:14px 0 0}
+#editModal .task-modal{max-height:calc(100dvh - 34px);overflow-y:auto}
+#editModal input:focus-visible,#editModal textarea:focus-visible,#editModal select:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
+
+/* M2 reusable views */
+.saved-view-controls{display:inline-flex;align-items:center;flex-wrap:wrap;gap:5px;min-width:0}
+.saved-view-controls select{max-width:128px;padding:8px 5px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:11px}
+.saved-view-controls .filter-btn{font-size:11px;padding:8px 9px}
+.visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:720px){.saved-view-controls{flex:1 1 100%;justify-content:flex-end}.saved-view-controls select{flex:1;max-width:148px}}

@@ -124,7 +124,12 @@ enum Command {
         if_version: Option<i64>,
     },
     /// Soft-delete a task (retains a tombstone)
-    Remove { id: String },
+    Remove {
+        id: String,
+        /// Reject a stale delete from another UI or process
+        #[arg(long)]
+        if_version: Option<i64>,
+    },
 }
 
 fn default_database() -> Result<PathBuf, Box<dyn Error>> {
@@ -383,8 +388,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             println!("Updated {} [revision {}]", updated.title, updated.version);
         }
-        Command::Remove { id } => {
-            store.delete(&id)?;
+        Command::Remove { id, if_version } => {
+            if let Some(version) = if_version {
+                store.delete_if_version(&id, version)?;
+            } else {
+                store.delete(&id)?;
+            }
             println!("Task moved to tombstones");
         }
     }
