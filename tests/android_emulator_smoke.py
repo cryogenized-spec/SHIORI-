@@ -172,7 +172,7 @@ def main():
         )
         report = adb("shell", "am", "instrument", "-w", "-r", runner, timeout=240)
         if ("FAILURES!!!" in report or "INSTRUMENTATION_FAILED" in report or
-                not re.search(r"OK \\(2 tests?\\)", report)):
+                not re.search(r"(?m)^OK \(2 tests?\)[ \t]*$", report)):
             raise RuntimeError(
                 "Android WebView touch instrumentation failed or skipped tests: "
                 + report[-2400:]
