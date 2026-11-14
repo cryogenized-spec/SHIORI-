@@ -199,6 +199,11 @@ def run():
             assert page.locator("#openNativeWorkingCopy").count() == 1
             assert page.locator("#openNativeWorkingCopy").is_visible()
             assert page.locator("#exportNativeWorkingCopy").is_visible()
+            assert page.locator("#recoverNativeSQLite").is_visible()
+            assert page.locator("#inspectNativeSQLiteRecovery").is_visible()
+            # Both recovery actions are native-only SAF/JNI signals: they
+            # cannot access private files or mutate WebView tasks in browser CI.
+            assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
             # SAF export is initiated by Kotlin only; browser tests never
             # receive the private native database or any filesystem path.
             assert page.locator("#auditCanonicalShadow").is_visible()

@@ -15,10 +15,15 @@ pub struct ExportReport {
     pub bytes: u64,
 }
 
-fn read_manifest(db: &Connection) -> Result<(String, i64, i64, i64), Box<dyn Error>> {
-    let integrity: String = db.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+pub(crate) fn read_manifest(db: &Connection) -> Result<(String, i64, i64, i64), Box<dyn Error>> {
+    let integrity: String = db.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
     if integrity != "ok" {
         return Err("SQLite integrity check failed".into());
+    }
+    // SQLite's integrity_check does not validate cross-table foreign keys.
+    let mut foreign_keys = db.prepare("PRAGMA foreign_key_check")?;
+    if foreign_keys.exists([])? {
+        return Err("SQLite foreign key relationships are invalid".into());
     }
     let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version != CANONICAL_SCHEMA {

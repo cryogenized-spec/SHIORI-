@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private var backCallback: OnBackInvokedCallback? = null
     private var pendingExportJson: String? = null
     private var pendingNativeExport: File? = null
+    private var nativeRecoveryPending = false
     private val vaultExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,6 +71,8 @@ class MainActivity : Activity() {
                             "working" -> openOrCreateWorkingCopy()
                             "command" -> receiveNativeWorkingCommand()
                             "native-export" -> beginNativeDatabaseExport()
+                            "native-recover" -> beginIsolatedDatabaseRecovery()
+                            "native-inspect" -> inspectIsolatedRecovery()
                         }
                     }
                     return true
@@ -192,6 +195,10 @@ class MainActivity : Activity() {
     /** Separate from the live WebView store, vault and immutable audit shadow. */
     private fun workingPath(): String =
         File(filesDir, "shiori-native-working-v1.sqlite3").absolutePath
+
+    /** Restored backups never overwrite the editable Rust working copy. */
+    private fun recoveredPath(): String =
+        File(filesDir, "shiori-native-recovery-preview-v1.sqlite3").absolutePath
 
     /**
      * The bundled page only signals a custom-scheme navigation; Kotlin pulls
@@ -517,6 +524,152 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * User-initiated recovery trial only. An Android DocumentsProvider is
+     * allowed to supply bytes, never app-private database paths. The Rust
+     * validator runs on a private copy using the serial I/O executor.
+     */
+    private fun beginIsolatedDatabaseRecovery() {
+        if (nativeRecoveryPending) {
+            notifyUser("Complete the existing native backup recovery first")
+            return
+        }
+        if (File(recoveredPath()).exists()) {
+            notifyUser("An isolated recovery already exists. Inspect it; no files were replaced.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Stage a separate SQLite recovery?")
+            .setMessage(
+                "Choose a SHIORI native SQLite backup. It will be verified and " +
+                    "restored into an independent, inactive database. It will NOT " +
+                    "replace your Android tasks, native working copy, or any existing " +
+                    "backup. This preview cannot be promoted automatically."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Select SQLite backup") { _, _ ->
+                nativeRecoveryPending = true
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    // Document providers differ in SQLite MIME types.
+                    type = "*/*"
+                }
+                try {
+                    startActivityForResult(intent, NATIVE_RECOVERY_REQUEST)
+                } catch (_: Exception) {
+                    nativeRecoveryPending = false
+                    notifyUser("Could not open the backup document picker")
+                }
+            }
+            .show()
+    }
+
+    private fun inspectIsolatedRecovery() {
+        val recovered = File(recoveredPath())
+        if (!recovered.isFile) {
+            notifyUser("No isolated recovered SQLite database is available")
+            return
+        }
+        vaultExecutor.execute {
+            val message = runCatching {
+                NativeVault.inspectRecoveredCopy(recovered.absolutePath)
+            }.getOrNull()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                AlertDialog.Builder(this)
+                    .setTitle("Isolated SQLite recovery")
+                    .setMessage(
+                        message ?: "Recovered preview could not be verified. " +
+                            "No active task store was changed."
+                    )
+                    .setPositiveButton("Close", null)
+                    .show()
+            }
+        }
+    }
+
+    /**
+     * Bound the bytes supplied by an untrusted document provider before
+     * passing its app-private staging path to the native SQLite validator.
+     */
+    private fun stageSelectedSqliteBackup(uri: Uri): File {
+        val staged = File.createTempFile("shiori-recovery-input-", ".sqlite3", cacheDir)
+        try {
+            val source = contentResolver.openInputStream(uri)
+                ?: throw IOException("Could not open selected document")
+            source.use { input ->
+                staged.outputStream().use { output ->
+                    val buf = ByteArray(8192)
+                    var total = 0L
+                    while (true) {
+                        val size = input.read(buf)
+                        if (size < 0) break
+                        if (size == 0) continue
+                        total += size.toLong()
+                        if (total > MAX_NATIVE_EXPORT_BYTES) {
+                            throw IOException("Native SQLite backup exceeds 64 MB")
+                        }
+                        output.write(buf, 0, size)
+                    }
+                    if (total == 0L) throw IOException("Selected backup is empty")
+                }
+            }
+            return staged
+        } catch (error: Exception) {
+            staged.delete()
+            throw error
+        }
+    }
+
+    private fun processIsolatedRecovery(uri: Uri) {
+        vaultExecutor.execute {
+            var input: File? = null
+            var candidate: File? = null
+            val status = runCatching {
+                // Refuse overwriting an existing recovery, even on a second
+                // picker result or a recovered Activity.
+                val target = File(recoveredPath())
+                if (target.exists()) throw IOException("Recovery preview already exists")
+                input = stageSelectedSqliteBackup(uri)
+                candidate = File.createTempFile(
+                    "shiori-recovery-verified-", ".sqlite3", filesDir
+                )
+                if (!candidate!!.delete()) throw IOException("Cannot prepare recovery path")
+                val report = NativeVault.recoverWorkingCopy(
+                    input!!.absolutePath, candidate!!.absolutePath
+                ) ?: throw IOException("SQLite backup failed native validation")
+                if (!candidate!!.isFile || target.exists() ||
+                    !candidate!!.renameTo(target)
+                ) throw IOException("Cannot commit separate recovered preview")
+                val inspected = NativeVault.inspectRecoveredCopy(target.absolutePath)
+                if (inspected == null) {
+                    // We just created this path; remove only this unverified
+                    // recovery, never another pre-existing user database.
+                    target.delete()
+                    throw IOException("Committed recovered preview did not verify")
+                }
+                "$report. $inspected"
+            }
+            input?.delete()
+            candidate?.delete()
+            runOnUiThread {
+                nativeRecoveryPending = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                AlertDialog.Builder(this)
+                    .setTitle(if (status.isSuccess) "Recovery preview created" else "Recovery refused")
+                    .setMessage(
+                        status.getOrElse {
+                            "The selected SQLite backup was invalid, incompatible, " +
+                                "already recovered, or could not be staged. " +
+                                "Your existing Android tasks and working database were not changed."
+                        }
+                    )
+                    .setPositiveButton("Close", null)
+                    .show()
+            }
+        }
+    }
+
     private fun recoverVaultCopy() {
         vaultExecutor.execute {
             val snapshot = runCatching { NativeVault.loadSnapshot(vaultPath()) }.getOrNull()
@@ -661,6 +814,13 @@ class MainActivity : Activity() {
                     )
                 }
             }
+        } else if (requestCode == NATIVE_RECOVERY_REQUEST) {
+            val uri = if (resultCode == RESULT_OK) data?.data else null
+            if (uri == null) {
+                nativeRecoveryPending = false
+                return
+            }
+            processIsolatedRecovery(uri)
         } else if (requestCode == IMPORT_REQUEST) {
             if (resultCode != RESULT_OK || data?.data == null) return
             try {
@@ -725,5 +885,6 @@ class MainActivity : Activity() {
         private const val EXPORT_REQUEST = 4001
         private const val IMPORT_REQUEST = 4002
         private const val NATIVE_EXPORT_REQUEST = 4003
+        private const val NATIVE_RECOVERY_REQUEST = 4004
     }
 }
