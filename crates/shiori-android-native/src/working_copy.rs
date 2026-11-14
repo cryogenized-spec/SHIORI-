@@ -8,7 +8,7 @@ use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, v
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{error::Error, path::Path, str::FromStr};
 
-use crate::migration::stage_legacy_backup;
+use crate::{migration::stage_legacy_backup, native_metadata};
 
 const MAX_REQUEST_BYTES: usize = 16_384;
 const PAGE_SIZE: usize = 50;
@@ -272,6 +272,8 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
             store.delete_if_version(requested(&input, "id")?, version(&input)?)?;
             Ok(json!({"ok":true,"deleted":true}))
         }
+        "tags_set" => native_metadata::set_task_tags(path, &input),
+        "workspace_set" => native_metadata::set_workspace(path, &input),
         _ => Err("unknown native working operation".into()),
     }
 }

@@ -186,7 +186,7 @@
       return Promise.reject(new Error('Native Rust bridge unavailable in this preview'));
     if(nativeInFlight)
       return Promise.reject(new Error('Another native operation is in progress'));
-    const allowed=['list','create','rename','edit','status','delete','metadata'];
+    const allowed=['list','create','rename','edit','status','delete','metadata','tags_set','workspace_set'];
     if(!command || !allowed.includes(command.op))
       return Promise.reject(new Error('Unsupported native operation'));
     const id=String(++nativeNextId);
@@ -339,6 +339,59 @@
     $('#editModal').classList.remove('open');
     $('#editModal').setAttribute('aria-hidden','true');
   }
+  function applyNativeWorkspaceMetadata(metadata){
+    if(!metadata || !Array.isArray(metadata.saved_views) ||
+       !Number.isSafeInteger(metadata.revision)||metadata.revision<1 ||
+       !['focus','fifo','due','priority'].includes(metadata.sort))
+      throw new Error('Invalid native workspace metadata');
+    const unique=new Set();
+    const viewsFromNative=metadata.saved_views.map(entry=>{
+      if(!entry || typeof entry.name!=='string'||!entry.name.trim()||
+         entry.name.length>40||unique.has(entry.name.toLowerCase())||
+         !['today','attention','inbox','board'].includes(entry.view)||
+         !['all','urgent','high','medium','low'].includes(entry.filter)||
+         !['focus','fifo','due','priority'].includes(entry.sort)||
+         typeof entry.query!=='string'||entry.query.length>240)
+        throw new Error('Invalid native saved-view metadata');
+      unique.add(entry.name.toLowerCase());
+      return {...entry};
+    });
+    if(viewsFromNative.length>30)throw new Error('Native saved views exceed safety limit');
+    // Never write these values into legacy localStorage. Once Rust is
+    // selected, these preferences belong entirely to the native DB.
+    savedViews=viewsFromNative;
+    sortMode=metadata.sort;
+    $('#sortMode').value=sortMode;
+    renderSavedViews();
+  }
+
+  function restoreLegacyWorkspaceMetadata(){
+    try{
+      const parsed=JSON.parse(localStorage.getItem('shiori-saved-views')||'[]');
+      savedViews=Array.isArray(parsed)?parsed.filter(x=>x&&
+        typeof x.name==='string'&&['today','attention','inbox','board'].includes(x.view)&&
+        ['all','high','medium','low','urgent'].includes(x.filter)&&
+        ['focus','fifo','due','priority'].includes(x.sort)&&typeof x.query==='string').slice(0,30):[];
+    }catch{savedViews=[];}
+    sortMode='focus';
+    try{
+      const order=localStorage.getItem('shiori-demo-sort');
+      if(['focus','fifo','due','priority'].includes(order))sortMode=order;
+    }catch{}
+    $('#sortMode').value=sortMode;
+    renderSavedViews();
+  }
+
+  async function saveNativeWorkspace(change){
+    if(!nativeCanary.selected||!nativeCanary.active||
+       !nativeCanary.metadata||nativeCanary.busy||nativeCanary.pending)return false;
+    const revision=nativeCanary.metadata.revision;
+    if(!Number.isSafeInteger(revision)||revision<1)return false;
+    return mutateNativeCanary(Object.assign(
+      {op:'workspace_set',expected_revision:revision},change
+    ));
+  }
+
   async function loadNativeCanary(){
     if(mode!=='android-local'||!nativeCanary.selected||nativeCanary.busy)return false;
     const generation=nativeCanary.generation;
@@ -354,7 +407,9 @@
       if(!response.ok||!response.metadata||
          !Array.isArray(response.metadata.saved_views)||
          typeof response.metadata.tags_by_id!=='object'||
-         response.metadata.tags_by_id===null)
+         response.metadata.tags_by_id===null||
+         !Number.isSafeInteger(response.metadata.revision)||
+         response.metadata.revision<1)
         throw new Error('Native metadata unavailable; no source cutover');
       if(!(await nativePreviewRefresh()))
         throw new Error(nativeWorking.error||'Native task read failed');
@@ -368,6 +423,7 @@
         task.tags=[...values];
         return task;
       });
+      applyNativeWorkspaceMetadata(response.metadata);
       tasks=candidate;
       nativeCanary.metadata=response.metadata;
       nativeCanary.active=true;
@@ -450,12 +506,7 @@
     }catch{tasks=[];}
     $('#footerMode').textContent='ANDROID · OFFLINE LOCAL DEVICE';
     $('#railMode').textContent='● OFFLINE DEVICE';
-    try{
-      const originalOrder=localStorage.getItem('shiori-demo-sort');
-      if(['focus','fifo','due','priority'].includes(originalOrder)){
-        sortMode=originalOrder;$('#sortMode').value=sortMode;
-      }
-    }catch{}
+    restoreLegacyWorkspaceMetadata();
     setView('inbox');
     return true;
   };
@@ -885,7 +936,17 @@
     activeDetail=null;
     toast('Task moved to deleted records');
   }
-  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div><div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?(nativeCanary.selected?'Debug Rust/SQLite task · original Android tasks kept':'Offline Android task · stored on this device'):'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
+  function nativeTagEditor(t){
+    if(!nativeCanary.selected||!nativeCanary.active)return '';
+    return '<form id="nativeDetailTagsForm" class="native-tag-editor" aria-label="Edit native task tags">'+
+      '<label for="nativeDetailTagInput">Tags · stored in Rust SQLite</label>'+
+      '<input id="nativeDetailTagInput" type="text" maxlength="700" value="'+
+      escapeHTML((t.tags||[]).join(', '))+'" placeholder="Comma-separated tags" '+
+      'aria-describedby="nativeTagHelp">'+
+      '<p id="nativeTagHelp">Up to 16 tags, 40 characters each. Changing tags updates the task revision.</p>'+
+      '<button type="submit" class="secondary-btn">Save tags</button></form>';
+  }
+  function showDetail(id){const t=tasks.find(item=>item.id===id);if(!t)return;activeDetail=id;$('#detailPane').innerHTML=`<div class="detail-top"><span class="detail-label">TASK RECORD / ${escapeHTML(id.toUpperCase())}</span><button class="icon-button" data-close-detail aria-label="Close task details">${icon('x')}</button></div><h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.description || 'No additional notes yet.')}</p><div class="detail-rows"><div class="detail-row"><span>Project</span><strong>${escapeHTML(t.project)}</strong></div><div class="detail-row"><span>Priority</span><strong>${escapeHTML(t.priority)}</strong></div><div class="detail-row"><span>Due</span><strong>${displayDate(t.due)}</strong></div><div class="detail-row"><span>Stage</span><strong>${t.status==='progress'?'In progress':t.status==='done'?'Completed':'To do'}</strong></div><div class="detail-row"><span>Estimated effort</span><strong>${t.mins==null?'Not estimated':t.mins+' min'}</strong></div><div class="detail-row"><span>Tags</span><strong>${escapeHTML((t.tags||[]).join(', '))||'None'}</strong></div></div>${nativeTagEditor(t)}<div class="detail-actions"><button class="secondary-btn" data-edit-task>Edit</button><button class="secondary-btn delete-task-btn" data-remove-task>Delete</button></div><button class="primary-btn detail-done" data-complete="${escapeHTML(id)}">${icon(t.status==='done'?'arrow':'check')} ${t.status==='done'?'Reopen task':'Mark complete'}</button><p style="margin-top:18px;font-size:10px">${mode==='live'?'Local SQLite task · Rust-backed changes':mode==='android-local'?(nativeCanary.selected?'Debug Rust/SQLite task · original Android tasks kept':'Offline Android task · stored on this device'):'Demo task · not connected to a backend'}.</p>`;$('#detailOverlay').classList.add('open');}
   async function toggleTask(id){
     if(nativeReadOnly.active||nativeCanary.pending)return;
     const t=tasks.find(x=>x.id===id);if(!t)return;
@@ -1070,6 +1131,27 @@
     showDetail(t.id);
     toast('Task updated');
   });
+  document.addEventListener('submit',async event=>{
+    if(event.target.id!=='nativeDetailTagsForm')return;
+    event.preventDefault();
+    if(!nativeCanary.selected||!nativeCanary.active||nativeCanary.busy||
+       nativeCanary.pending)return;
+    const task=tasks.find(item=>item.id===activeDetail);
+    const input=$('#nativeDetailTagInput');
+    if(!task||!input)return;
+    const text=input.value.trim();
+    const tags=text?text.split(',').map(tag=>tag.trim()):[];
+    if(tags.length>16||tags.some(tag=>!tag||tag.length>40)){
+      toast('Use up to 16 tags, each 1–40 characters');return;
+    }
+    const id=task.id;
+    if(await mutateNativeCanary({
+      op:'tags_set',id,expected_version:task.version,tags
+    })){
+      showDetail(id);
+      toast('Native task tags saved to SQLite');
+    }
+  });
   document.addEventListener('submit',event=>{
     if(event.target.id!=='nativeWorkingCreate')return;
     event.preventDefault();
@@ -1108,12 +1190,23 @@
   });
   $('#searchInput').addEventListener('input',e=>{query=e.target.value;nativeReadOnly.page=0;render();});
   $('#filterButton').addEventListener('click',()=>{const options=['all','urgent','high','medium','low'];filter=options[(options.indexOf(filter)+1)%options.length];nativeReadOnly.page=0;render();});
-  $('#sortMode').addEventListener('change',e=>{
-    if (!['focus','fifo','due','priority'].includes(e.target.value)) return;
-    sortMode=e.target.value;
-    if(!nativeCanary.selected){
-      try {localStorage.setItem('shiori-demo-sort',sortMode);signalNativeVault();} catch {}
+  $('#sortMode').addEventListener('change',async e=>{
+    const selected=e.target.value;
+    if(!['focus','fifo','due','priority'].includes(selected))return;
+    if(nativeCanary.selected){
+      const previous=nativeCanary.metadata?.sort||sortMode;
+      e.target.value=previous;
+      if(await saveNativeWorkspace({sort:selected})){
+        toast('Native task ordering saved in SQLite');
+      }else{
+        e.target.value=previous;
+        toast('Native ordering not saved; reload and try again');
+      }
+      return;
     }
+    if(nativeCanary.pending)return;
+    sortMode=selected;
+    try{localStorage.setItem('shiori-demo-sort',sortMode);signalNativeVault();}catch{}
     render();
   });
   $('#savedViewSelect').addEventListener('change',e=>{
@@ -1126,31 +1219,49 @@
     $('#searchInput').value=query;
     render();
   });
-  $('#saveView').addEventListener('click',()=>{
-    if(nativeCanary.selected||nativeCanary.pending){
-      toast('Saved-view editing is paused during native source verification');return;
+  $('#saveView').addEventListener('click',async ()=>{
+    if(nativeCanary.pending||(nativeCanary.selected&&!nativeCanary.active)){
+      toast('Task source is being verified; saved views are unavailable');return;
     }
     if(!['today','attention','inbox','board'].includes(view)){toast('Open a task list before saving a view');return;}
     const name=prompt('Name for this saved view (up to 40 characters):','My focus');
     if(name===null)return;
     const normalized=name.trim();
-    if(!normalized || normalized.length>40){toast('Enter a name with up to 40 characters');return;}
+    if(!normalized||normalized.length>40){toast('Enter a name with up to 40 characters');return;}
     const entry={name:normalized,view,filter,sort:sortMode,query};
-    const index=savedViews.findIndex(x=>x.name===normalized);
-    if(index>=0)savedViews[index]=entry;
+    const next=[...savedViews];
+    const index=next.findIndex(x=>x.name===normalized);
+    if(index>=0)next[index]=entry;
     else{
-      if(savedViews.length>=30){toast('30 saved views maximum');return;}
-      savedViews.push(entry);
+      if(next.length>=30){toast('30 saved views maximum');return;}
+      next.push(entry);
     }
-    persistSavedViews();
+    if(nativeCanary.selected){
+      if(!(await saveNativeWorkspace({saved_views:next}))){
+        toast('Native saved view was not changed; refresh before retrying');return;
+      }
+    }else{
+      savedViews=next;
+      persistSavedViews();
+    }
     $('#savedViewSelect').value=normalized;
     toast('Saved view: '+normalized);
   });
-  $('#removeView').addEventListener('click',()=>{
-    if(nativeCanary.selected){toast('Saved-view editing is disabled in debug canary');return;}
-    const name=$('#savedViewSelect').value;if(!name){toast('Select a saved view first');return;}
-    savedViews=savedViews.filter(v=>v.name!==name);
-    persistSavedViews();
+  $('#removeView').addEventListener('click',async ()=>{
+    if(nativeCanary.pending||(nativeCanary.selected&&!nativeCanary.active)){
+      toast('Task source is being verified; saved views are unavailable');return;
+    }
+    const name=$('#savedViewSelect').value;
+    if(!name){toast('Select a saved view first');return;}
+    const next=savedViews.filter(v=>v.name!==name);
+    if(nativeCanary.selected){
+      if(!(await saveNativeWorkspace({saved_views:next}))){
+        toast('Native saved view was not removed; refresh before retrying');return;
+      }
+    }else{
+      savedViews=next;
+      persistSavedViews();
+    }
     toast('Saved view removed');
   });
   $('#viewSwitch').addEventListener('click',()=>setView(view==='board'?'today':'board'));

@@ -6,6 +6,7 @@
 mod audit;
 mod export;
 mod migration;
+mod native_metadata;
 mod parity;
 mod recovery;
 mod resume;

@@ -80,6 +80,10 @@ pub fn export_working_database(
         if copied != manifest {
             return Err("exported database did not match the source manifest".into());
         }
+        let original = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        if !crate::recovery::records_match(&original, &exported)? {
+            return Err("native backup differs in tasks, tags or workspace metadata".into());
+        }
         Ok(ExportReport {
             records: copied.1,
             tombstones: copied.2,

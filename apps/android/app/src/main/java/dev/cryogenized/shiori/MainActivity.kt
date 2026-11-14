@@ -21,6 +21,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebChromeClient
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.nio.file.Files
@@ -78,6 +79,10 @@ class MainActivity : Activity() {
             cacheMode = WebSettings.LOAD_DEFAULT
         }
 
+        // A local trusted page uses native JS prompt/confirm for saved-view
+        // names and irreversible task actions. Without a WebChromeClient,
+        // Android WebView can silently suppress these dialogs.
+        webView.webChromeClient = WebChromeClient()
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView?,

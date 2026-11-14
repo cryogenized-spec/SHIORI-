@@ -116,7 +116,8 @@ pub fn read_android_metadata(db_path: &Path) -> Result<Value, Box<dyn Error>> {
     Ok(serde_json::json!({
         "saved_views": serde_json::from_str::<Value>(&views)?,
         "sort": order,
-        "tags_by_id": tags
+        "tags_by_id": tags,
+        "revision": crate::native_metadata::workspace_revision(&connection)?
     }))
 }
 
