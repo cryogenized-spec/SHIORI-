@@ -175,7 +175,7 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** supported MCP clients can read/manage permitted tasks; destructive operations have appropriate safeguards; clients without UI support still work; no model API key required by SHIORI.
 
 ### M6 — OCR capture, CalDAV and integrations
-**Deliver:** SH-004 on-device Android OCR capture-and-review flow; optional universal inbox if approved; CalDAV/VTODO adapter with round-trip tests; source provenance; ClickUp as the preferred first external task-provider connector, subject to provider/API and sync acceptance gates.
+**Deliver:** SH-004 on-device Android OCR capture-and-review flow integrated with the confirmed SH-005 local inbox; CalDAV/VTODO adapter with round-trip tests; source provenance; ClickUp as the preferred first external task-provider connector, subject to provider/API and sync acceptance gates.
 
 **Exit:** OCR produces editable text and a traceable source attachment; task/calendar interoperability documents unsupported fields and preserves user data rather than silently dropping it.
 
