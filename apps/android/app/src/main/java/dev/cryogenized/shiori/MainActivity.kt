@@ -14,6 +14,9 @@ import java.io.File
 import java.util.concurrent.Executors
 import android.os.Bundle
 import android.os.Build
+import android.view.WindowInsets
+import android.widget.FrameLayout
+import android.graphics.Insets
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.webkit.WebResourceRequest
@@ -72,6 +75,10 @@ class MainActivity : Activity() {
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
+            // Respect <meta name="viewport" content="width=device-width">.
+            // Android WebView's default wide-viewport setting can leave the
+            // mobile FAB hidden behind the desktop-only responsive breakpoint.
+            useWideViewPort = true
             allowFileAccess = false
             allowContentAccess = false
             javaScriptCanOpenWindowsAutomatically = false
@@ -207,7 +214,44 @@ class MainActivity : Activity() {
             }
         }
 
-        setContentView(webView)
+        // Android 15 enforces edge-to-edge for targetSdk 35. A full-height
+        // WebView can otherwise leave Create/Cancel behind the software keyboard
+        // despite adjustResize. Size the WebView to the *unobscured* content
+        // area, then zero the handled insets before dispatching them to WebView
+        // so its own safe-area/IME logic cannot apply the spacing twice.
+        val contentFrame = FrameLayout(this)
+        contentFrame.addView(
+            webView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            contentFrame.setOnApplyWindowInsetsListener { container, insets ->
+                val systemTypes =
+                    WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
+                val system = insets.getInsets(systemTypes)
+                val keyboardBottom = if (insets.isVisible(WindowInsets.Type.ime())) {
+                    insets.getInsets(WindowInsets.Type.ime()).bottom
+                } else 0
+                container.setPadding(
+                    system.left,
+                    system.top,
+                    system.right,
+                    maxOf(system.bottom, keyboardBottom)
+                )
+                // Pass updates, not CONSUMED: WebView must see keyboard-hide
+                // changes to avoid stale/ghost viewport padding.
+                WindowInsets.Builder(insets)
+                    .setInsets(systemTypes or WindowInsets.Type.ime(), Insets.NONE)
+                    .build()
+            }
+        }
+        setContentView(contentFrame)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            contentFrame.requestApplyInsets()
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val callback = OnBackInvokedCallback { navigateBack() }
             onBackInvokedDispatcher.registerOnBackInvokedCallback(
