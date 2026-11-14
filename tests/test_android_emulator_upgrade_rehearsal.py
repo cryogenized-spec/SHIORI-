@@ -1,6 +1,7 @@
 """Safety contracts for the M2.8 emulator-only upgrade rehearsal (no actual ADB)."""
 import copy
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -89,6 +90,7 @@ class UpgradeRehearsalTests(unittest.TestCase):
         ):
             rehearsal.stage(self.args, PREVIOUS, CANDIDATE)
         self.assertEqual(json.loads(self.args.state_file.read_text()), self.state())
+        self.assertEqual(os.stat(self.args.state_file).st_mode & 0o777, 0o600)
         self.assertTrue(any(x.args[:3] == ("-s", SERIAL, "install") for x in adb.call_args_list))
         self.assertFalse(any("uninstall" in x.args for x in adb.call_args_list))
         self.assertNotIn("task", json.dumps(self.state()).lower())
