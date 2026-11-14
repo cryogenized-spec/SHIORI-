@@ -1,6 +1,7 @@
 package dev.cryogenized.shiori
 
 import android.os.SystemClock
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowInsets
@@ -214,6 +215,11 @@ class WebViewTouchAcceptanceTest {
         val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, x, y, 0)
         val up = MotionEvent.obtain(start, start + 75, MotionEvent.ACTION_UP, x, y, 0)
         try {
+            // MotionEvent.obtain defaults to SOURCE_UNKNOWN. InputDispatcher
+            // needs an explicit pointer-class source for genuine WebView taps.
+            // Without it UiAutomation may accept events but dispatch no click.
+            down.source = InputDevice.SOURCE_TOUCHSCREEN
+            up.source = InputDevice.SOURCE_TOUCHSCREEN
             // On Android 15, Instrumentation.sendPointerSync targets
             // only windows owned by the instrumented UID and can reject a
             // valid WebView screen tap with a targeted-input UID error.
@@ -222,6 +228,7 @@ class WebViewTouchAcceptanceTest {
             val automation = instrument.uiAutomation
             assertTrue("Android rejected pointer DOWN at ($x,$y)",
                 automation.injectInputEvent(down, true))
+            SystemClock.sleep(75)
             assertTrue("Android rejected pointer UP at ($x,$y)",
                 automation.injectInputEvent(up, true))
             instrument.waitForIdleSync()
