@@ -834,7 +834,8 @@
     // Blurring an HTML input may leave Android's software keyboard open.
     // This app-private navigation is handled by MainActivity; desktop/web
     // sessions never send it and the native Activity exposes no JS interface.
-    if(mode==='android-local')window.location.href='shiori-ui://dismiss-ime';
+    if(mode==='android-local' && window.shioriNativeBridgeEnabled===true)
+      window.location.href='shiori-ui://dismiss-ime';
   }
   function openModal(){
     if(nativeCanary.pending){toast('Storage verification in progress');return;}
