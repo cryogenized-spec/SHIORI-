@@ -1,0 +1,61 @@
+name: SHIORI Android offline shell
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-alpha:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Configure Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Install verified Gradle 9.9.1 distribution
+        run: |
+          curl --fail --location --retry 3 --silent --show-error             https://services.gradle.org/distributions/gradle-9.9.1-bin.zip             -o /tmp/gradle-9.9.1-bin.zip
+          echo 'd8a18a7a841dd5df825d35a685fad6f2d7f12ac0c280e57b67c27b4a520ba228  /tmp/gradle-9.9.1-bin.zip' | sha256sum --check
+          unzip -q /tmp/gradle-9.9.1-bin.zip -d /tmp
+      - name: Install Android SDK platform
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          yes | "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null || test "${PIPESTATUS[1]}" -eq 0
+      - name: Build APK with bundled offline assets
+        run: |
+          /tmp/gradle-9.9.1/bin/gradle -p apps/android :app:assembleDebug --no-daemon --stacktrace
+      - name: Assert the APK is self-contained and network-permission-free
+        run: |
+          set -euo pipefail
+          APK=apps/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          for asset in assets/index.html assets/app.js assets/styles.css assets/assets/shiori-muse.webp; do
+            unzip -Z1 "$APK" | grep -Fxq "$asset"
+          done
+          unzip -p "$APK" assets/app.js | grep -Fq "android-local"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$APK" > /tmp/shiori-permissions.txt
+          if grep -Fq 'android.permission.INTERNET' /tmp/shiori-permissions.txt; then
+            echo "Offline shell unexpectedly declares INTERNET permission" >&2
+            exit 1
+          fi
+          if grep -Fq 'android.permission.READ_EXTERNAL_STORAGE' /tmp/shiori-permissions.txt; then
+            echo "Offline shell unexpectedly declares external storage access" >&2
+            exit 1
+          fi
+          echo "Bundled assets and offline permissions verified."
+      - name: Archive debug APK
+        if: success()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-android-alpha
+          path: apps/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
