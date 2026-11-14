@@ -50,3 +50,11 @@ This patch is not proof of correction on its own: both genuine injected
 touch tests must pass in the same emulator job; a successful APK build,
 DOM hit test or JavaScript-only action is insufficient. Device-specific
 keyboard behaviour and physical-handset sign-off remain unverified.
+
+## Reopen-after-Cancel keyboard regression
+
+An integration run of M2.5b revealed a second Android 15 edge case even after both tests had once passed: Cancel closed the HTML dialog but the Android keyboard stayed visible. The next injected tap on the mobile New Task button was accepted as a screen touch but failed to reopen the form. The recorded Android IME visibility was true, even while `elementFromPoint` reported that the button itself was unobscured in the DOM.
+
+The bundled Android web app now requests `shiori-ui://dismiss-ime` when either task modal is dismissed. MainActivity handles this **app-internal, main-frame-only** command by calling Android's `InputMethodManager.hideSoftInputFromWindow`; it does not expose a JavaScript interface or add Android permissions. This is in addition to blurring the HTML input and restoring focus to the opening control. Non-Android browser sessions do not send the command.
+
+The instrumentation requires the real keyboard to become invisible after Cancel **before** tapping New Task for the Back-navigation scenario. This gate still requires both actual pointer-event tests to pass, including task persistence after Android Activity recreation. Passing general quality checks without the emulator job is insufficient.
