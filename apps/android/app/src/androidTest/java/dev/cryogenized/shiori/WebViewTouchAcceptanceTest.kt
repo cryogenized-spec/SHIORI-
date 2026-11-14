@@ -40,10 +40,24 @@ class WebViewTouchAcceptanceTest {
     fun launchCleanActivity() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         captureWebView()
-        await("bundled offline WebView initialisation") {
-            javascript("typeof window.shioriExportBackup === 'function' && " +
-                "document.querySelector('#taskModal') !== null") == "true"
+        // JS execution can finish while MainActivity still has the WebView
+        // INVISIBLE for its first native-vault inspection/onPageFinished. A
+        // pointer sent in that gap is accepted by UiAutomation but cannot
+        // open the task modal. Wait for the real window, not just DOM nodes.
+        await("bundled offline WebView rendered and foreground-ready") {
+            var visible = false
+            scenario.onActivity { activity ->
+                visible = webView.isShown && webView.hasWindowFocus() &&
+                    !activity.isFinishing && webView.width > 0 && webView.height > 0
+            }
+            visible && javascript(
+                "document.readyState === 'complete' && " +
+                    "typeof window.shioriExportBackup === 'function' && " +
+                    "document.querySelector('#taskModal') !== null && " +
+                    "document.querySelector('.mobile-fab') !== null"
+            ) == "true"
         }
+        instrument.waitForIdleSync()
         val viewport = javascript(
             "(function(){return {width:window.innerWidth,height:window.innerHeight," +
                 "mobile:window.matchMedia('(max-width:760px)').matches," +
