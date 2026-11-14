@@ -830,6 +830,12 @@
       element.focus({preventScroll:true});
     }
   }
+  function dismissAndroidIme(){
+    // Blurring an HTML input may leave Android's software keyboard open.
+    // This app-private navigation is handled by MainActivity; desktop/web
+    // sessions never send it and the native Activity exposes no JS interface.
+    if(mode==='android-local')window.location.href='shiori-ui://dismiss-ime';
+  }
   function openModal(){
     if(nativeCanary.pending){toast('Storage verification in progress');return;}
     if(nativeCanary.selected&&!nativeCanary.active){toast('Rust task source unavailable · return to Settings');return;}
@@ -856,6 +862,7 @@
     if(wasOpen){
       if(modal.contains(document.activeElement))document.activeElement.blur();
       restoreDialogFocus(dialogOpeners.create);
+      dismissAndroidIme();
     }
     dialogOpeners.create=null;
   }
@@ -881,6 +888,7 @@
     if(wasOpen){
       if(modal.contains(document.activeElement))document.activeElement.blur();
       restoreDialogFocus(dialogOpeners.edit);
+      dismissAndroidIme();
     }
     dialogOpeners.edit=null;
   }
