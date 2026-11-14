@@ -8,6 +8,7 @@ mod export;
 mod migration;
 mod parity;
 mod recovery;
+mod resume;
 mod rollback;
 mod working_copy;
 
@@ -501,6 +502,49 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_verifyLegacyRollb
     } else {
         JNI_FALSE
     }
+}
+
+/// Read-only M2.4b inspection of an existing interrupted debug cutover.
+/// Returns missing, safely recoverable stages only when the canonical
+/// candidate and any existing rollback/primary are fully consistent.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_inspectInterruptedCanary(
+    mut env: JNIEnv,
+    _object: JObject,
+    migration_candidate_path: JString,
+    rollback_vault_path: JString,
+    native_primary_path: JString,
+    current_legacy_json: JString,
+) -> jstring {
+    let Ok(candidate) = env.get_string(&migration_candidate_path) else {
+        return std::ptr::null_mut();
+    };
+    let candidate = String::from(candidate);
+    let Ok(vault) = env.get_string(&rollback_vault_path) else {
+        return std::ptr::null_mut();
+    };
+    let vault = String::from(vault);
+    let Ok(primary) = env.get_string(&native_primary_path) else {
+        return std::ptr::null_mut();
+    };
+    let primary = String::from(primary);
+    let Ok(current) = env.get_string(&current_legacy_json) else {
+        return std::ptr::null_mut();
+    };
+    let current = String::from(current);
+    let response = match resume::inspect_interrupted_stage(
+        Path::new(&candidate),
+        Path::new(&vault),
+        Path::new(&primary),
+        &current,
+    ) {
+        Ok(report) => report,
+        Err(error) => serde_json::json!({
+            "ok":false,"ready":false,"error":error.to_string()
+        }),
+    };
+    env.new_string(response.to_string())
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
 }
 
 #[cfg(test)]

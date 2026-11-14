@@ -202,6 +202,14 @@ def run():
             assert page.locator("#recoverNativeSQLite").is_visible()
             assert page.locator("#inspectNativeSQLiteRecovery").is_visible()
             assert page.locator("#auditNativeMigrationParity").is_visible()
+            # Interrupted cutover recovery is an opt-in operation that must
+            # never be offered to release or non-debug Android WebViews.
+            assert page.locator("#resumeInterruptedNativeCanary").count() == 0
+            page.evaluate("""() => {
+                window.shioriNativeDebugCanaryAvailable = true;
+                document.querySelector('[data-view=settings]').click();
+            }""")
+            assert page.locator("#resumeInterruptedNativeCanary").is_visible()
             # Native preflight is opt-in; merely opening settings must never
             # create a working DB or mutate legacy WebView localStorage.
             # Both recovery actions are native-only SAF/JNI signals: they

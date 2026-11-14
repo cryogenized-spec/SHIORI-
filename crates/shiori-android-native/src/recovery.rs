@@ -30,7 +30,10 @@ fn table_rows(db: &Connection, sql: &str) -> Result<Vec<Vec<Value>>, Box<dyn Err
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-fn records_match(original: &Connection, recovered: &Connection) -> Result<bool, Box<dyn Error>> {
+pub(crate) fn records_match(
+    original: &Connection,
+    recovered: &Connection,
+) -> Result<bool, Box<dyn Error>> {
     // Comparing every canonical column catches differences that counts alone
     // miss, including status, revision and deleted_at differences.
     const TASKS: &str = "SELECT id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes,assignee_id FROM tasks ORDER BY id";

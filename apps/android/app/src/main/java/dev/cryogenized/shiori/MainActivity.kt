@@ -23,6 +23,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.FileAlreadyExistsException
 
 /**
  * Minimal native Android container around the same offline-responsive SHIORI UI.
@@ -38,6 +40,9 @@ class MainActivity : Activity() {
     private var pendingExportJson: String? = null
     private var pendingNativeExport: File? = null
     private var nativeRecoveryPending = false
+    // UI-thread gate: no second cutover/rollback may abort the first one's
+    // freeze while a SQLite I/O transition is pending.
+    private var nativeTransitionPending = false
     private val vaultExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,6 +100,7 @@ class MainActivity : Activity() {
                             "migration-parity" -> auditNativeMigrationParity()
                             "native-activate" -> beginGuardedNativeCanary()
                             "native-rollback" -> rollbackNativeCanary()
+                            "native-resume" -> beginResumeInterruptedCanary()
                         }
                     }
                     return true
@@ -261,6 +267,22 @@ class MainActivity : Activity() {
     private fun cutoverRollbackPath(): String =
         File(filesDir, "shiori-legacy-cutover-rollback-v1.sqlite3").absolutePath
 
+    /**
+     * File.renameTo() may replace an existing POSIX destination during an
+     * Activity recreation race. NIO move without REPLACE_EXISTING refuses a
+     * duplicate target instead of silently destroying a prior database.
+     */
+    private fun installNewPrivateSqlite(staged: File, target: File) {
+        if (!staged.isFile || target.exists()) {
+            throw IOException("Native SQLite destination already exists or source is missing")
+        }
+        try {
+            Files.move(staged.toPath(), target.toPath())
+        } catch (_: FileAlreadyExistsException) {
+            throw IOException("Native SQLite destination was created by another operation")
+        }
+    }
+
     private fun isDebugCanaryAllowed(): Boolean =
         (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
@@ -271,6 +293,23 @@ class MainActivity : Activity() {
     private fun selectNativeCanary(enabled: Boolean): Boolean =
         getSharedPreferences("shiori-native-canary", MODE_PRIVATE).edit()
             .putBoolean("selected", enabled).commit()
+
+    private fun startNativeTransition(): Boolean {
+        if (nativeTransitionPending) {
+            notifyUser("Another native storage transition is still running")
+            return false
+        }
+        nativeTransitionPending = true
+        return true
+    }
+
+    private fun finishNativeTransition(script: String) {
+        // Release the guard after the trusted WebView has received the
+        // source change / abort signal, not before asynchronous JS dispatch.
+        webView.evaluateJavascript(script) {
+            nativeTransitionPending = false
+        }
+    }
 
     /**
      * The bundled page only signals a custom-scheme navigation; Kotlin pulls
@@ -550,6 +589,7 @@ class MainActivity : Activity() {
 
     private fun activateGuardedNativeCanary() {
         if (isFinishing || isDestroyed) return
+        if (!startNativeTransition()) return
         // The JS callback freezes all legacy edits *before* capturing data;
         // a field parity check against an unfrozen snapshot is insufficient.
         webView.evaluateJavascript("window.shioriFreezeLegacyForCutover()") { encoded ->
@@ -560,7 +600,7 @@ class MainActivity : Activity() {
                 ) throw IOException("Invalid Android backup")
                 raw
             } catch (_: Exception) {
-                webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                finishNativeTransition("window.shioriAbortCutover()")
                 notifyUser("Cannot make an unchanged legacy rollback snapshot")
                 return@evaluateJavascript
             }
@@ -590,9 +630,7 @@ class MainActivity : Activity() {
                         candidatePath(), candidateExport!!.absolutePath
                     ) ?: throw IOException("Failed canonical SQLite export verification")
                     val primary = File(primaryPath())
-                    if (primary.exists() || !candidateExport!!.renameTo(primary)) {
-                        throw IOException("Cannot commit native canary database")
-                    }
+                    installNewPrivateSqlite(candidateExport!!, primary)
                     NativeVault.inspectRecoveredCopy(primary.absolutePath)
                         ?: throw IOException("Native source failed post-install inspection")
                     if (!selectNativeCanary(true)) {
@@ -604,12 +642,146 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (status.isSuccess) {
-                        webView.evaluateJavascript("window.shioriNativeActivate()", null)
+                        finishNativeTransition("window.shioriNativeActivate()")
                         notifyUser("Rust SQLite debug canary selected; legacy tasks kept")
                     } else {
-                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        finishNativeTransition("window.shioriAbortCutover()")
                         notifyUser("Native cutover BLOCKED: " +
                             (status.exceptionOrNull()?.message ?: "verification failed"))
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * M2.4b: user-initiated resume of an interrupted debug cutover. The old
+     * WebView source stays active unless three independent, non-overwritten
+     * SQLite artifacts all verify against the current frozen legacy export.
+     *
+     * This also handles a cutover interrupted before the rollback or primary
+     * file was created. If a pre-existing vault/primary is invalid, refuse:
+     * never delete or overwrite it just to make progress.
+     */
+    private fun beginResumeInterruptedCanary() {
+        if (!isDebugCanaryAllowed()) {
+            notifyUser("Interrupted native cutover recovery is debug-only")
+            return
+        }
+        if (isNativeCanarySelected()) {
+            notifyUser("Rust SQLite is already selected; use its regular task view")
+            return
+        }
+        if (!File(candidatePath()).isFile) {
+            notifyUser("No staged migration candidate exists. Run field parity first.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Resume interrupted native cutover?")
+            .setMessage(
+                "Experimental debug-only recovery. SHIORI will verify your " +
+                    "original Android tasks and every existing native cutover " +
+                    "file. Missing independent backup stages may be completed, " +
+                    "but existing files will NEVER be overwritten. If a previous " +
+                    "native database has changed, the operation is refused. " +
+                    "Keep external backups before proceeding."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Verify and resume") { _, _ ->
+                resumeInterruptedCanary()
+            }
+            .show()
+    }
+
+    private fun resumeInterruptedCanary() {
+        if (isFinishing || isDestroyed) return
+        if (!startNativeTransition()) return
+        webView.evaluateJavascript("window.shioriFreezeLegacyForCutover()") { encoded ->
+            val source = try {
+                val raw = JSONArray("[$encoded]").getString(0)
+                if (raw.toByteArray(Charsets.UTF_8).size > MAX_BACKUP_BYTES ||
+                    JSONObject(raw).optString("format") != BACKUP_FORMAT
+                ) throw IOException("Invalid Android backup")
+                raw
+            } catch (_: Exception) {
+                finishNativeTransition("window.shioriAbortCutover()")
+                notifyUser("Cannot capture unchanged Android source for native recovery")
+                return@evaluateJavascript
+            }
+
+            vaultExecutor.execute {
+                var candidateExport: File? = null
+                val status = runCatching {
+                    if (isNativeCanarySelected() || !File(candidatePath()).isFile) {
+                        throw IOException("Cutover source is missing or already active")
+                    }
+                    // The validator reads existing files only; no migration
+                    // DB creation, data deletion, or hidden file replacement.
+                    fun inspect(): JSONObject {
+                        val raw = NativeVault.inspectInterruptedCanary(
+                            candidatePath(), cutoverRollbackPath(), primaryPath(), source
+                        ) ?: throw IOException("Native cutover inspection unavailable")
+                        val report = JSONObject(raw)
+                        if (!report.optBoolean("ok", false)) {
+                            throw IOException(
+                                report.optString("error", "Interrupted cutover is not safe to resume")
+                            )
+                        }
+                        return report
+                    }
+
+                    val initial = inspect()
+                    if (initial.optBoolean("needs_rollback_vault", false)) {
+                        if (File(cutoverRollbackPath()).exists()) {
+                            throw IOException("Existing rollback vault must not be replaced")
+                        }
+                        if (!NativeVault.storeSnapshot(cutoverRollbackPath(), source) ||
+                            NativeVault.loadSnapshot(cutoverRollbackPath()) != source
+                        ) throw IOException("New rollback vault could not be verified")
+                    }
+                    // Check again before copying: if a new rollback vault
+                    // differs from the source, stop without touching primary.
+                    val afterVault = inspect()
+                    if (afterVault.optBoolean("needs_native_primary", false)) {
+                        if (File(primaryPath()).exists()) {
+                            throw IOException("Existing native primary must not be replaced")
+                        }
+                        candidateExport = File.createTempFile(
+                            "shiori-native-resume-", ".sqlite3", filesDir
+                        )
+                        if (!candidateExport!!.delete()) {
+                            throw IOException("Cannot prepare native recovery staging")
+                        }
+                        NativeVault.exportWorkingCopy(
+                            candidatePath(), candidateExport!!.absolutePath
+                        ) ?: throw IOException("Cannot verify new native SQLite source")
+                        installNewPrivateSqlite(
+                            candidateExport!!, File(primaryPath())
+                        )
+                    }
+                    val final = inspect()
+                    if (!final.optBoolean("ready", false)) {
+                        throw IOException("Verified cutover stages are incomplete")
+                    }
+                    if (!selectNativeCanary(true)) {
+                        throw IOException("Could not persist verified Rust source selection")
+                    }
+                    true
+                }
+                // Delete only our temporary export, never primary, migration
+                // candidate, recovery archive or rollback vault.
+                candidateExport?.delete()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (status.isSuccess) {
+                        finishNativeTransition("window.shioriNativeActivate()")
+                        notifyUser("Verified native cutover resumed; legacy tasks preserved")
+                    } else {
+                        finishNativeTransition("window.shioriAbortCutover()")
+                        notifyUser(
+                            "Cannot resume native source: " +
+                                (status.exceptionOrNull()?.message ?: "validation failed")
+                        )
                     }
                 }
             }
@@ -645,6 +817,7 @@ class MainActivity : Activity() {
      */
     private fun verifyAndRollbackNativeCanary() {
         if (isFinishing || isDestroyed) return
+        if (!startNativeTransition()) return
         webView.evaluateJavascript("window.shioriNativeFreezeForRollback()") { encoded ->
             val legacy = try {
                 val raw = JSONArray("[$encoded]").getString(0)
@@ -653,7 +826,7 @@ class MainActivity : Activity() {
                 ) throw IOException("Legacy source cannot be inspected")
                 raw
             } catch (_: Exception) {
-                webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                finishNativeTransition("window.shioriAbortCutover()")
                 notifyUser("Cannot verify rollback while a native task operation is running")
                 return@evaluateJavascript
             }
@@ -666,16 +839,16 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (!checked) {
-                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        finishNativeTransition("window.shioriAbortCutover()")
                         notifyUser(
                             "Rollback BLOCKED: preserved legacy tasks no longer match " +
                                 "the migration backup. Native source remains selected."
                         )
                     } else if (!selectNativeCanary(false)) {
-                        webView.evaluateJavascript("window.shioriAbortCutover()", null)
+                        finishNativeTransition("window.shioriAbortCutover()")
                         notifyUser("Cannot save rollback selection; Rust remains active")
                     } else {
-                        webView.evaluateJavascript("window.shioriNativeDeactivate()", null)
+                        finishNativeTransition("window.shioriNativeDeactivate()")
                         notifyUser("Verified rollback: original Android tasks selected")
                     }
                 }
@@ -954,9 +1127,7 @@ class MainActivity : Activity() {
                 val report = NativeVault.recoverWorkingCopy(
                     input!!.absolutePath, candidate!!.absolutePath
                 ) ?: throw IOException("SQLite backup failed native validation")
-                if (!candidate!!.isFile || target.exists() ||
-                    !candidate!!.renameTo(target)
-                ) throw IOException("Cannot commit separate recovered preview")
+                installNewPrivateSqlite(candidate!!, target)
                 val inspected = NativeVault.inspectRecoveredCopy(target.absolutePath)
                 if (inspected == null) {
                     // We just created this path; remove only this unverified
