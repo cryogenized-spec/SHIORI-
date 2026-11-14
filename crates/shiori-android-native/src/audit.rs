@@ -22,7 +22,7 @@ pub enum ShadowAudit {
     },
 }
 
-fn normalized_snapshot(raw: &str) -> Result<Value, Box<dyn Error>> {
+pub(crate) fn normalized_snapshot(raw: &str) -> Result<Value, Box<dyn Error>> {
     validate_snapshot(raw)?;
     let mut json: Value = serde_json::from_str(raw)?;
     json.as_object_mut()

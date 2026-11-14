@@ -8,6 +8,7 @@ mod export;
 mod migration;
 mod parity;
 mod recovery;
+mod rollback;
 mod working_copy;
 
 use chrono::NaiveDate;
@@ -469,6 +470,37 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_readWorkingMetada
     };
     env.new_string(metadata.to_string())
         .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// M2.4: validate all independent legacy source copies before switching
+/// the debug-only task UI away from Rust. No SQLite files are created or
+/// mutated: Kotlin must retain native selection on any false result.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_verifyLegacyRollback(
+    mut env: JNIEnv,
+    _object: JObject,
+    rollback_vault_path: JString,
+    migration_candidate_path: JString,
+    current_legacy_json: JString,
+) -> jboolean {
+    let Ok(vault) = env.get_string(&rollback_vault_path) else {
+        return JNI_FALSE;
+    };
+    let vault = String::from(vault);
+    let Ok(candidate) = env.get_string(&migration_candidate_path) else {
+        return JNI_FALSE;
+    };
+    let candidate = String::from(candidate);
+    let Ok(current) = env.get_string(&current_legacy_json) else {
+        return JNI_FALSE;
+    };
+    let current = String::from(current);
+    if rollback::verify_legacy_rollback(Path::new(&vault), Path::new(&candidate), &current).is_ok()
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
 }
 
 #[cfg(test)]
