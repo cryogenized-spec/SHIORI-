@@ -5,3 +5,8 @@
 *.sqlite3-shm
 *.sqlite3-wal
 /node_modules/
+
+# Generated Android NDK libraries are packaged in CI, not committed.
+/apps/android/app/src/main/jniLibs/
+/apps/android/.gradle/
+/apps/android/app/build/
