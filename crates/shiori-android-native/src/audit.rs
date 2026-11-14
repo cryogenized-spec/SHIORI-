@@ -167,6 +167,45 @@ pub fn audit_legacy_shadow(
         }
     }
 
+    // Workspace metadata and tags are real SQLite records, not merely
+    // comments inside the archived JSON sidecar. Require exact parity before
+    // authorizing any future source cutover.
+    let metadata = crate::migration::read_android_metadata(db_path)?;
+    if metadata["saved_views"] != source["saved_views"] || metadata["sort"] != source["sort"] {
+        return Err("native saved view or sort metadata differs from Android".into());
+    }
+    let tags_by_id = metadata["tags_by_id"]
+        .as_object()
+        .ok_or("native tag metadata is malformed")?;
+    let mut expected_tags = 0_usize;
+    for original in original_tasks {
+        let id = original["id"]
+            .as_str()
+            .ok_or("missing original tag owner")?;
+        let empty = Vec::new();
+        let tags = original
+            .get("tags")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        expected_tags += tags.len();
+        if tags_by_id
+            .get(id)
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            != tags.as_slice()
+        {
+            return Err("native task tags do not match archived Android tags".into());
+        }
+    }
+    let total_tags: usize = tags_by_id
+        .values()
+        .map(|value| value.as_array().map_or(0, Vec::len))
+        .sum();
+    if total_tags != expected_tags {
+        return Err("native tag rows contain unexpected owners or values".into());
+    }
+
     Ok(ShadowAudit::Verified {
         tasks: original_tasks.len(),
         current_matches: staged == current,

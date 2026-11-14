@@ -6,6 +6,7 @@
 mod audit;
 mod export;
 mod migration;
+mod parity;
 mod recovery;
 mod working_copy;
 
@@ -422,6 +423,51 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_inspectRecoveredC
         "Verified recovered preview: {records} task records ({tombstones} deletions), {dependencies} dependencies. Neither task source is active here."
     );
     env.new_string(message)
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Explicit M2.2 parity preflight for a NEW, non-authoritative native
+/// candidate. The response includes a typed 'ready' gate; this does not
+/// activate or replace any existing Android task source.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_stageCutoverCandidate(
+    mut env: JNIEnv,
+    _object: JObject,
+    candidate_path: JString,
+    legacy_json: JString,
+) -> jstring {
+    let Ok(path) = env.get_string(&candidate_path) else {
+        return std::ptr::null_mut();
+    };
+    let path = String::from(path);
+    let Ok(snapshot) = env.get_string(&legacy_json) else {
+        return std::ptr::null_mut();
+    };
+    let snapshot = String::from(snapshot);
+    let result = match parity::preflight(Path::new(&path), &snapshot) {
+        Ok(report) => report,
+        Err(error) => serde_json::json!({"ok": false,"ready":false,"error":error.to_string()}),
+    };
+    env.new_string(result.to_string())
+        .map_or(std::ptr::null_mut(), |value| value.into_raw())
+}
+
+/// Source-only native metadata for Android tags and saved view projection.
+/// No arbitrary SQLite path is accepted from JavaScript.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_readWorkingMetadata(
+    mut env: JNIEnv,
+    _object: JObject,
+    candidate_path: JString,
+) -> jstring {
+    let Ok(path) = env.get_string(&candidate_path) else {
+        return std::ptr::null_mut();
+    };
+    let path = String::from(path);
+    let Ok(metadata) = migration::read_android_metadata(Path::new(&path)) else {
+        return std::ptr::null_mut();
+    };
+    env.new_string(metadata.to_string())
         .map_or(std::ptr::null_mut(), |value| value.into_raw())
 }
 

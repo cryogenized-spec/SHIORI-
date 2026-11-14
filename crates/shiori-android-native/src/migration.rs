@@ -3,6 +3,7 @@
 //! The entire original JSON (including tags, saved views and sort settings)
 //! is archived transactionally next to the imported rows for lossless recovery.
 use chrono::{DateTime, NaiveDate, Utc};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::Value;
 use shiori_core::{Priority, Task, TaskStatus, validate_assignee_id};
 use shiori_storage::{SqliteStore, TaskFilter};
@@ -21,6 +22,102 @@ pub struct ShadowReport {
 
 fn timestamp(s: &str) -> Result<DateTime<Utc>, Box<dyn Error>> {
     Ok(DateTime::parse_from_rfc3339(s)?.with_timezone(&Utc))
+}
+
+/// Preserve legacy per-task tags and workspace preferences as first-class
+/// SQLite metadata, in addition to the original immutable JSON archive.
+/// A resumed import is idempotent; it never overwrites existing metadata.
+fn persist_android_metadata(db_path: &Path, snapshot: &Value) -> Result<(), Box<dyn Error>> {
+    let tasks = snapshot["tasks"].as_array().ok_or("missing task records")?;
+    let views = snapshot["saved_views"]
+        .as_array()
+        .ok_or("missing saved views")?;
+    let order = snapshot["sort"].as_str().ok_or("missing sort mode")?;
+    let mut connection = Connection::open(db_path)?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS android_task_tags (
+            task_id TEXT NOT NULL REFERENCES tasks(id),
+            position INTEGER NOT NULL CHECK(position >= 0),
+            value TEXT NOT NULL,
+            PRIMARY KEY(task_id, position)
+        );
+        CREATE TABLE IF NOT EXISTS android_workspace_metadata (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            saved_views_json TEXT NOT NULL,
+            sort_mode TEXT NOT NULL
+        );",
+    )?;
+    let existing: Option<(String, String)> = tx
+        .query_row(
+            "SELECT saved_views_json,sort_mode FROM android_workspace_metadata WHERE id=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((old_views, old_order)) = existing {
+        let prior: Value = serde_json::from_str(&old_views)?;
+        if prior != Value::Array(views.clone()) || old_order != order {
+            return Err("archived native workspace metadata differs from the source".into());
+        }
+        // Once seeded, edits to native task tags are not overwritten by any
+        // further import call. Compare the *original* archive separately.
+        tx.commit()?;
+        return Ok(());
+    }
+    for legacy in tasks {
+        let id = legacy["id"].as_str().ok_or("missing tag owner")?;
+        if let Some(tags) = legacy.get("tags").and_then(Value::as_array) {
+            for (position, tag) in tags.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO android_task_tags(task_id,position,value) VALUES(?1,?2,?3)",
+                    params![
+                        id,
+                        i64::try_from(position)?,
+                        tag.as_str().ok_or("invalid tag")?
+                    ],
+                )?;
+            }
+        }
+    }
+    tx.execute(
+        "INSERT INTO android_workspace_metadata(id,saved_views_json,sort_mode)
+            VALUES(1,?1,?2)",
+        params![serde_json::to_string(views)?, order],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// A normalized, read-only workspace metadata lookup for Android native UI.
+/// Never reads from the WebView task array, and never mutates SQLite.
+pub fn read_android_metadata(db_path: &Path) -> Result<Value, Box<dyn Error>> {
+    let connection =
+        Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let (views, order): (String, String) = connection.query_row(
+        "SELECT saved_views_json,sort_mode FROM android_workspace_metadata WHERE id=1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut tags = serde_json::Map::new();
+    let mut stmt = connection
+        .prepare("SELECT task_id,value FROM android_task_tags ORDER BY task_id,position")?;
+    let entries = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for record in entries {
+        let (id, tag) = record?;
+        let value = tags.entry(id).or_insert_with(|| Value::Array(Vec::new()));
+        value
+            .as_array_mut()
+            .ok_or("invalid tags")?
+            .push(Value::String(tag));
+    }
+    Ok(serde_json::json!({
+        "saved_views": serde_json::from_str::<Value>(&views)?,
+        "sort": order,
+        "tags_by_id": tags
+    }))
 }
 
 /// Converts a legacy Android JSON snapshot and archives that exact source.
@@ -139,6 +236,7 @@ pub fn stage_legacy_backup(db_path: &Path, raw: &str) -> Result<ShadowReport, Bo
     }
 
     let created = store.stage_legacy_shadow(&converted, chosen_source)?;
+    persist_android_metadata(db_path, &snapshot)?;
     let rows = store.list(TaskFilter::default())?;
     if rows.len() != converted.len() {
         return Err("shadow read-back count mismatch".into());

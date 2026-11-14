@@ -201,6 +201,9 @@ def run():
             assert page.locator("#exportNativeWorkingCopy").is_visible()
             assert page.locator("#recoverNativeSQLite").is_visible()
             assert page.locator("#inspectNativeSQLiteRecovery").is_visible()
+            assert page.locator("#auditNativeMigrationParity").is_visible()
+            # Native preflight is opt-in; merely opening settings must never
+            # create a working DB or mutate legacy WebView localStorage.
             # Both recovery actions are native-only SAF/JNI signals: they
             # cannot access private files or mutate WebView tasks in browser CI.
             assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
