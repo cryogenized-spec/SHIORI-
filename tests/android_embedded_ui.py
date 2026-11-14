@@ -230,9 +230,10 @@ def run():
 
             # Native titles are escaped and cannot inject browser markup.
             page.evaluate("""({rid}) => window.shioriNativeComplete(
-                rid, JSON.stringify({ok:true,total:1,tasks:[{
+                rid, JSON.stringify({ok:true,total:1,offset:0,next_offset:null,
+                snapshot:"0000000000000001-1",tasks:[{
                     id:"native-1",title:"<img src=x onerror=alert(1)>",
-                    project:"Rust",status:"todo",version:2
+                    project:"Rust",status:"todo",priority:"high",version:2
                 }]})
             )""", {"rid":listed["request_id"]})
             page.locator('#nativeWorkingPanel .native-working-row').wait_for()
@@ -259,9 +260,10 @@ def run():
             )
             assert refreshed_req["op"] == "list"
             page.evaluate("""(rid) => window.shioriNativeComplete(
-                rid, JSON.stringify({ok:true,total:1,tasks:[{
+                rid, JSON.stringify({ok:true,total:1,offset:0,next_offset:null,
+                snapshot:"0000000000000002-1",tasks:[{
                     id:"native-1",title:"Native status update",project:"Rust",
-                    status:"done",version:3
+                    priority:"high",status:"done",version:3
                 }]})
             )""", refreshed_req["request_id"])
             page.get_by_text("Native status update").wait_for()
@@ -277,7 +279,8 @@ def run():
             preview_req = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
             assert preview_req["op"] == "list"
             page.evaluate("""(rid) => window.shioriNativeComplete(
-                rid, JSON.stringify({ok:true,total:1,tasks:[{
+                rid, JSON.stringify({ok:true,total:1,offset:0,next_offset:null,
+                snapshot:"0000000000000002-1",tasks:[{
                     id:"native-1",title:"Native preview record",project:"Rust",
                     priority:"high",status:"done",notes:"Only in SQLite",
                     version:3,due_on:null
@@ -309,21 +312,72 @@ def run():
             assert page.locator("[data-add]").first.is_enabled()
             assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
 
-            # A truncated native list is not allowed to masquerade as a
-            # complete source preview. Pagination is a separate M2 gate.
+            # The former >50 hard stop now reads consistent 50+11 pages
+            # before showing a complete 61-record source preview.
             page.evaluate("document.querySelector('[data-view=settings]').click()")
             page.locator("#showNativeReadOnly").click()
-            oversized_req = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
-            assert oversized_req["op"] == "list"
-            page.evaluate("""(rid) => window.shioriNativeComplete(
-                rid, JSON.stringify({ok:true,total:61,tasks:[{
-                    id:"native-1",title:"One of 61",project:"Rust",
-                    status:"todo",priority:"high",version:4
-                }]})
-            )""", oversized_req["request_id"])
-            page.get_by_text("Pagination is required before full-list comparison.", exact=False).wait_for()
-            assert page.locator("#nativeWorkingPanel").count() == 1
+            large_req = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
+            assert large_req["op"] == "list"
+            assert large_req["offset"] == 0
+            page.evaluate("""(rid) => window.shioriNativeComplete(rid,
+                JSON.stringify({ok:true,total:61,offset:0,next_offset:50,
+                snapshot:"aaaaaaaaaaaaaaaa-61",
+                tasks:Array.from({length:50},(_,i)=>({
+                    id:"n-"+i,title:"Native page "+i,project:"Rust",
+                    status:"todo",priority:"medium",version:1
+                }))})
+            )""", large_req["request_id"])
+            continuation = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
+            assert continuation["op"] == "list"
+            assert continuation["offset"] == 50
+            assert continuation["snapshot"] == "aaaaaaaaaaaaaaaa-61"
             assert page.locator("#mainData .native-readonly-banner").count() == 0
+            page.evaluate("""(rid) => window.shioriNativeComplete(rid,
+                JSON.stringify({ok:true,total:61,offset:50,next_offset:null,
+                snapshot:"aaaaaaaaaaaaaaaa-61",
+                tasks:Array.from({length:11},(_,i)=>({
+                    id:"n-"+(i+50),title:"Native page "+(i+50),project:"Rust",
+                    status:"todo",priority:"medium",version:1
+                }))})
+            )""", continuation["request_id"])
+            page.locator("#closeNativeReadOnly").wait_for()
+            assert page.locator("#mainData .task-row").count() == 50
+            assert page.get_by_text("Showing 1–50 of 61 matching native records").count() == 1
+            page.locator('[data-native-page="next"]').click()
+            assert page.locator("#mainData .task-row").count() == 11
+            assert page.get_by_text("Native page 60").count() == 1
+            page.locator('[data-native-page="prev"]').click()
+            assert page.locator("#mainData .task-row").count() == 50
+            assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
+            page.locator("#closeNativeReadOnly").click()
+            assert page.locator("#mainData .task-row").count() == 0
+
+            # A changed DB between two pages rejects the entire set and
+            # never exposes a partial list as a valid source preview.
+            page.evaluate("document.querySelector('[data-view=settings]').click()")
+            page.locator("#showNativeReadOnly").click()
+            stale_first = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
+            page.evaluate("""(rid) => window.shioriNativeComplete(rid,
+                JSON.stringify({ok:true,total:61,offset:0,next_offset:50,
+                snapshot:"bbbbbbbbbbbbbbbb-61",
+                tasks:Array.from({length:50},(_,i)=>({
+                    id:"old-"+i,title:"Stale "+i,project:"Rust",
+                    status:"todo",priority:"low",version:1
+                }))})
+            )""", stale_first["request_id"])
+            stale_next = json.loads(page.evaluate("window.shioriNativeTakeRequest()"))
+            assert stale_next["offset"] == 50
+            assert stale_next["snapshot"] == "bbbbbbbbbbbbbbbb-61"
+            page.evaluate("""(rid) => window.shioriNativeComplete(rid,
+                JSON.stringify({ok:true,total:61,offset:50,next_offset:null,
+                snapshot:"cccccccccccccccc-61",tasks:[{
+                    id:"old-50",title:"Changed source",project:"Rust",
+                    status:"todo",priority:"low",version:2
+                }]})
+            )""", stale_next["request_id"])
+            page.get_by_text("Native tasks changed during paging", exact=False).wait_for()
+            assert page.locator("#mainData .native-readonly-banner").count() == 0
+            assert page.locator("#nativeWorkingPanel .native-working-row").count() == 0
             assert page.evaluate("localStorage.getItem('shiori-android-local-tasks')") == "[]"
 
             # Source selection is not saved or resumed on a new app launch.

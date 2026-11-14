@@ -11,7 +11,8 @@ use std::{error::Error, path::Path, str::FromStr};
 use crate::migration::stage_legacy_backup;
 
 const MAX_REQUEST_BYTES: usize = 16_384;
-const MAX_VISIBLE_TASKS: usize = 50;
+const PAGE_SIZE: usize = 50;
+const MAX_NATIVE_TASKS: usize = 5_000;
 const PROTOCOL: &str = "shiori-native-working-v1";
 
 /// Seed a *third*, separately named SQLite file from the existing Android
@@ -85,14 +86,70 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
     let op = requested(&input, "op")?;
     match op {
         "list" => {
-            let all = store.list(TaskFilter::default())?;
+            let requested_offset = input.get("offset").map_or(Ok(0_u64), |raw| {
+                raw.as_u64().ok_or("offset must be an unsigned integer")
+            })?;
+            let offset = usize::try_from(requested_offset)?;
+            if offset > MAX_NATIVE_TASKS {
+                return Err("native task offset is above the 5000-record safety bound".into());
+            }
+            // Stable identity order for offset paging. Do not rely on the
+            // ordinary filtered list's due-date/priority ordering.
+            let mut all = store.list(TaskFilter::default())?;
+            all.sort_by(|a, b| a.id.cmp(&b.id));
             let total = all.len();
+            if total > MAX_NATIVE_TASKS {
+                return Err(
+                    "native source exceeds 5000 tasks; pagination safety limit reached".into(),
+                );
+            }
+            if offset > total {
+                return Err("offset is beyond the native task count".into());
+            }
+            // Non-cryptographic consistency token, not an authenticity or
+            // backup checksum. Every domain mutation bumps the revision.
+            // The client refuses mixed-page results if a task changes.
+            let mut fingerprint = 14_695_981_039_346_656_037_u64;
+            for task in &all {
+                let marker = format!(
+                    "{}:{}:{}:{};",
+                    task.id.len(),
+                    task.id,
+                    task.version,
+                    task.updated_at.to_rfc3339()
+                );
+                for byte in marker.bytes() {
+                    fingerprint ^= u64::from(byte);
+                    fingerprint = fingerprint.wrapping_mul(1_099_511_628_211);
+                }
+            }
+            let snapshot = format!("{fingerprint:016x}-{total}");
+            let expected = input.get("snapshot").and_then(Value::as_str);
+            if offset != 0 && expected.is_none() {
+                return Err("continuing a page requires the original snapshot token".into());
+            }
+            if let Some(expected) = expected
+                && expected != snapshot
+            {
+                return Err(
+                    "native tasks changed during paging; restart from the first page".into(),
+                );
+            }
+            let next_offset = if offset + PAGE_SIZE < total {
+                Some(offset + PAGE_SIZE)
+            } else {
+                None
+            };
             let tasks: Vec<Value> = all
                 .into_iter()
-                .take(MAX_VISIBLE_TASKS)
+                .skip(offset)
+                .take(PAGE_SIZE)
                 .map(summary)
                 .collect();
-            Ok(json!({"ok":true,"tasks":tasks,"total":total}))
+            Ok(json!({
+                "ok":true,"tasks":tasks,"total":total,"offset":offset,
+                "next_offset":next_offset,"snapshot":snapshot
+            }))
         }
         "create" => {
             let title = requested(&input, "title")?;
@@ -272,6 +329,113 @@ mod tests {
             send(&path, command("list")).unwrap()["tasks"][0]["title"],
             "Legacy 栞"
         );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn paginated_native_read_is_stable_complete_and_detects_writes() {
+        let path = location();
+        initialize_working_copy(&path, &backup()).unwrap();
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            for index in 0..122 {
+                let task = Task::new(
+                    &format!("Page task {index:03}"),
+                    "Pagination",
+                    Priority::Low,
+                    None,
+                )
+                .unwrap();
+                store.insert(&task).unwrap();
+            }
+        }
+
+        let first = send(&path, command("list")).unwrap();
+        assert_eq!(first["total"], 123);
+        assert_eq!(first["offset"], 0);
+        assert_eq!(first["next_offset"], 50);
+        assert_eq!(first["tasks"].as_array().unwrap().len(), 50);
+        let token = first["snapshot"].as_str().unwrap().to_owned();
+        let mut ids: Vec<String> = first["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_owned())
+            .collect();
+
+        let second = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL,"op":"list","offset":50,"snapshot":token
+            }),
+        )
+        .unwrap();
+        assert_eq!(second["total"], 123);
+        assert_eq!(second["next_offset"], 100);
+        assert_eq!(second["snapshot"], token);
+        ids.extend(
+            second["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["id"].as_str().unwrap().to_owned()),
+        );
+        let third = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL,"op":"list","offset":100,"snapshot":token
+            }),
+        )
+        .unwrap();
+        assert!(third["next_offset"].is_null());
+        assert_eq!(third["tasks"].as_array().unwrap().len(), 23);
+        ids.extend(
+            third["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["id"].as_str().unwrap().to_owned()),
+        );
+        assert_eq!(ids.len(), 123);
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids, sorted);
+
+        // No unchecked offsets, missing token, or wrong snapshot.
+        for request in [
+            json!({"protocol":PROTOCOL,"op":"list","offset":50}),
+            json!({"protocol":PROTOCOL,"op":"list","offset":50,"snapshot":"fake"}),
+            json!({"protocol":PROTOCOL,"op":"list","offset":-1}),
+            json!({"protocol":PROTOCOL,"op":"list","offset":0.5}),
+            json!({"protocol":PROTOCOL,"op":"list","offset":5001}),
+            json!({"protocol":PROTOCOL,"op":"list","offset":124}),
+        ] {
+            assert!(send(&path, request).is_err());
+        }
+
+        let row = first["tasks"][0].clone();
+        let edited = send(
+            &path,
+            json!({
+                "protocol":PROTOCOL,"op":"rename",
+                "id":row["id"],"title":"Changed between pages",
+                "expected_version":row["version"]
+            }),
+        )
+        .unwrap();
+        assert!(edited["ok"].as_bool().unwrap());
+        assert!(
+            send(
+                &path,
+                json!({
+                    "protocol":PROTOCOL,"op":"list","offset":50,"snapshot":token
+                })
+            )
+            .is_err()
+        );
+        let restart = send(&path, command("list")).unwrap();
+        assert_ne!(restart["snapshot"], token);
         std::fs::remove_file(&path).unwrap();
     }
 
