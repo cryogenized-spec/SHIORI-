@@ -138,3 +138,30 @@
   .native-working-create button{min-height:44px}
   .native-working-row .settings-actions button{flex:1 1 112px}
 }
+
+/* Native Rust read-only source view: visually distinct from editable tasks. */
+.native-readonly-banner{
+  display:flex;flex-direction:column;align-items:flex-start;gap:10px;
+  padding:16px 18px;margin-bottom:16px;border:1px solid var(--plum);
+  border-radius:12px;background:var(--panel);
+}
+.native-readonly-banner strong{font-size:14px;color:var(--text)}
+.native-readonly-banner p{color:var(--muted);font-size:12px;line-height:1.6}
+.native-readonly-banner button{
+  border:1px solid var(--plum);border-radius:8px;background:var(--surface2);
+  color:var(--text);font-weight:650;font-size:12px;min-height:44px;padding:10px 15px;
+}
+.native-readonly-banner button:focus-visible{
+  outline:2px solid var(--plum);outline-offset:2px;
+}
+.native-readonly-row{cursor:default}
+.native-readonly-row .task-info{cursor:default}
+.native-readonly-marker{
+  display:grid;place-items:center;color:var(--plum);
+  width:22px;height:22px;flex-shrink:0;
+}
+.native-readonly-marker svg{width:17px;height:17px}
+@media(max-width:760px){
+  .native-readonly-banner{padding:14px}
+  .native-readonly-banner button{width:100%}
+}
