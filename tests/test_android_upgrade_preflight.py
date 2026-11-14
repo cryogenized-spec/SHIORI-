@@ -3,8 +3,10 @@ import copy
 import pathlib
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools" / "android"))
+import compare_debug_upgrades as upgrade  # noqa: E402
 from compare_debug_upgrades import compare_records  # noqa: E402
 
 
@@ -31,6 +33,48 @@ class DebugUpgradePreflightTests(unittest.TestCase):
     def test_accepts_distinct_evidenced_builds_same_signer_higher_code(self):
         self.assertIn("NOT handset upgrade approval",
                       compare_records(self.previous, self.candidate))
+
+    def test_verifies_manifest_metadata_against_actual_apk(self):
+        record = copy.deepcopy(self.previous)
+        with patch.object(upgrade, "verify") as checksum, patch.object(
+            upgrade, "create", return_value=record
+        ) as direct:
+            upgrade.verify_against_apk(
+                pathlib.Path("previous.apk"), pathlib.Path("evidence.json"),
+                record, "aapt", "apksigner"
+            )
+            checksum.assert_called_once()
+            direct.assert_called_once()
+
+        forged = copy.deepcopy(record)
+        forged["signer_certificate_sha256"] = "d" * 64
+        with patch.object(upgrade, "verify"), patch.object(
+            upgrade, "create", return_value=record
+        ):
+            with self.assertRaisesRegex(ValueError, "independently inspected"):
+                upgrade.verify_against_apk(
+                    pathlib.Path("forged.apk"), pathlib.Path("forged.json"),
+                    forged, "aapt", "apksigner"
+                )
+
+    def test_rejects_forged_version_and_permissions_in_evidence(self):
+        actual = copy.deepcopy(self.candidate)
+        for field, value in (
+            ("version_code", 999),
+            ("version_name", "100.0-dev"),
+            ("network_permission", True),
+        ):
+            with self.subTest(field=field):
+                forged = copy.deepcopy(actual)
+                forged[field] = value
+                with patch.object(upgrade, "verify"), patch.object(
+                    upgrade, "create", return_value=actual
+                ):
+                    with self.assertRaisesRegex(ValueError, "independently inspected"):
+                        upgrade.verify_against_apk(
+                            pathlib.Path("app.apk"), pathlib.Path("evidence.json"),
+                            forged, "aapt", "apksigner"
+                        )
 
     def test_rejects_different_signer(self):
         self.candidate["signer_certificate_sha256"] = "d" * 64
