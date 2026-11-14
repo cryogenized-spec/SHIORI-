@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import pathlib
+import shlex
 import sys
 import tempfile
 import unittest
@@ -22,10 +23,22 @@ CANDIDATE = {
     "signer_certificate_sha256": "c" * 64,
 }
 SERIAL = "emulator-5554"
+BOOT_ID = "11111111-2222-3333-4444-555555555555"
+TRIAL_MARKER = ".shiori-m2-8-trial-" + "e" * 32
 
 
 class UpgradeRehearsalTests(unittest.TestCase):
     def setUp(self):
+        for target, attr, value in (
+            (rehearsal, "emulator_boot_id", BOOT_ID),
+            (rehearsal, "verify_trial_marker", None),
+            (rehearsal.secrets, "token_hex", "e" * 32),
+        ):
+            fake = patch.object(target, attr)
+            mock = fake.start()
+            if value is not None:
+                mock.return_value = value
+            self.addCleanup(fake.stop)
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         root = pathlib.Path(self.folder.name)
@@ -46,6 +59,8 @@ class UpgradeRehearsalTests(unittest.TestCase):
         return {
             "format": rehearsal.FORMAT,
             "serial": SERIAL,
+            "emulator_boot_id": BOOT_ID,
+            "trial_marker": TRIAL_MARKER,
             "previous_apk_sha256": "f" * 64,
             "candidate_apk_sha256": "f" * 64,
             "previous_commit": PREVIOUS["git_commit"],
@@ -159,6 +174,60 @@ class UpgradeRehearsalTests(unittest.TestCase):
         with patch.object(rehearsal, "adb", return_value=line + line):
             with self.assertRaisesRegex(RuntimeError, "duplicated"):
                 rehearsal.private_metadata(SERIAL)
+
+
+    def test_android_pm_absent_status_one_does_not_hide_transport_errors(self):
+        with patch.object(rehearsal.subprocess, "run", return_value=SimpleNamespace(
+            returncode=1, stdout="", stderr=""
+        )) as runner:
+            self.assertIsNone(rehearsal.installed_version(SERIAL))
+            self.assertEqual(runner.call_args.args[0][-3:], ["pm", "path", rehearsal.APP_ID])
+        with patch.object(rehearsal.subprocess, "run", return_value=SimpleNamespace(
+            returncode=1, stdout="", stderr="device offline"
+        )):
+            with self.assertRaisesRegex(RuntimeError, "package-manager query failed"):
+                rehearsal.installed_version(SERIAL)
+
+    def test_remote_metadata_script_is_one_shell_argument(self):
+        calls = []
+        def capture(*args, **kwargs):
+            calls.append(args)
+            if args[3:5] == ("run-as", rehearsal.APP_ID) and "sha256sum" in args[-1]:
+                return "".join(name + "|absent|absent\n"
+                               for name in (*rehearsal.PROTECTED, rehearsal.RECOVERY))
+            return "absent\n"
+        with patch.object(rehearsal, "adb", side_effect=capture):
+            rehearsal.private_metadata(SERIAL)
+            rehearsal.webview_size(SERIAL)
+        self.assertEqual(len(calls), 2)
+        for args in calls:
+            parsed = shlex.split(" ".join(args[3:]))
+            self.assertEqual(parsed[:4], ["run-as", rehearsal.APP_ID, "sh", "-c"])
+            self.assertEqual(len(parsed), 5)
+            self.assertIn("if [", parsed[4])
+
+    def test_different_emulator_boot_with_same_serial_blocks_upgrade(self):
+        self.args.state_file.write_text(json.dumps(self.state()))
+        with patch.object(rehearsal, "sha256_file", return_value="f" * 64), patch.object(
+            rehearsal, "require_fresh_emulator"
+        ), patch.object(rehearsal, "emulator_boot_id",
+            return_value="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        ), patch.object(rehearsal, "adb") as adb:
+            with self.assertRaisesRegex(RuntimeError, "replaced or restarted"):
+                rehearsal.upgrade(self.args, PREVIOUS, CANDIDATE)
+            adb.assert_not_called()
+
+    def test_missing_private_trial_marker_blocks_upgrade_before_mutation(self):
+        self.args.state_file.write_text(json.dumps(self.state()))
+        with patch.object(rehearsal, "sha256_file", return_value="f" * 64), patch.object(
+            rehearsal, "require_fresh_emulator"
+        ), patch.object(rehearsal, "installed_version", return_value=5
+        ), patch.object(rehearsal, "verify_trial_marker",
+            side_effect=RuntimeError("Staged emulator trial marker is missing")
+        ), patch.object(rehearsal, "adb") as adb:
+            with self.assertRaisesRegex(RuntimeError, "trial marker is missing"):
+                rehearsal.upgrade(self.args, PREVIOUS, CANDIDATE)
+            adb.assert_not_called()
 
     def test_cli_requires_explicit_disposable_emulator_opt_in(self):
         with self.assertRaises(SystemExit) as ctx:
