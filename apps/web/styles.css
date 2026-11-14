@@ -105,3 +105,36 @@
     padding-bottom:max(8px,env(safe-area-inset-bottom,0px));
   }
 }
+
+/* M2 opt-in native Rust working-copy panel. No effect on the regular task UI. */
+.native-working-panel {margin-top:18px}
+.native-working-panel p {line-height:1.55}
+.native-working-create {display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin:14px 0}
+.native-working-create label {width:100%;font-size:12px;color:var(--muted)}
+.native-working-create input,.native-working-row input{
+  min-width:0;flex:1 1 160px;background:var(--panel2);color:var(--text);
+  border:1px solid var(--line);border-radius:8px;padding:12px;font:inherit;
+}
+.native-working-create button,.native-working-row button{
+  border-radius:8px;border:1px solid var(--line);padding:10px 12px;
+  min-height:44px;background:var(--panel2);color:var(--text);cursor:pointer;
+}
+.native-working-create button:disabled,.native-working-row button:disabled{opacity:.55;cursor:not-allowed}
+.native-working-create :focus-visible,.native-working-row :focus-visible{
+  outline:2px solid var(--plum);outline-offset:2px
+}
+.native-working-error {border:1px solid #b66f83;padding:12px;border-radius:8px;color:var(--text)}
+.native-working-items {display:grid;gap:10px;margin-top:14px}
+.native-working-row {
+  padding:12px;border:1px solid var(--line);border-radius:10px;
+  min-width:0;overflow-wrap:anywhere;background:var(--surface)
+}
+.native-working-row strong{font-size:14px}
+.native-working-row p {font-size:11px;color:var(--muted);margin:5px 0 10px}
+.native-working-row label {display:block;font-size:11px;color:var(--muted);margin:8px 0}
+.native-working-row .settings-actions{display:flex;flex-wrap:wrap;gap:6px}
+@media(max-width:760px){
+  .native-working-create {align-items:stretch}
+  .native-working-create button{min-height:44px}
+  .native-working-row .settings-actions button{flex:1 1 112px}
+}
