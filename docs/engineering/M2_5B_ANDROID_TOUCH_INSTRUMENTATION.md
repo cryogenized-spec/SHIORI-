@@ -58,3 +58,27 @@ An integration run of M2.5b revealed a second Android 15 edge case even after bo
 The bundled Android web app now requests `shiori-ui://dismiss-ime` when either task modal is dismissed. MainActivity handles this **app-internal, main-frame-only** command by calling Android's `InputMethodManager.hideSoftInputFromWindow`; it does not expose a JavaScript interface or add Android permissions. This is in addition to blurring the HTML input and restoring focus to the opening control. Non-Android browser sessions do not send the command.
 
 The instrumentation requires the real keyboard to become invisible after Cancel **before** tapping New Task for the Back-navigation scenario. This gate still requires both actual pointer-event tests to pass, including task persistence after Android Activity recreation. Passing general quality checks without the emulator job is insufficient.
+
+## 14 November — native modal autofocus and two-pass repeatability
+
+A later two-round emulator suite exposed intermittent lost touchscreen taps:
+on the second instrumented pass an X-button touch could coincide with the
+automatic Android IME transition, while another run failed to reopen New Task
+after cancelling. The root issue was not established by DOM `elementFromPoint`
+alone: JavaScript can report a clickable target while Android is still
+reconfiguring the keyboard/window.
+
+For real Android host sessions (`android-local` with
+`shioriNativeBridgeEnabled===true`), creating or editing a task **no longer
+automatically focuses the input on dialog opening**. This avoids bringing up
+the keyboard before the user intentionally taps the text box. Desktop and
+browser-only prototype flows retain autofocus. Users can still tap the task
+title to begin typing; native Cancel/Back continue to request Android IME
+dismissal.
+
+The Android instrumentation now waits for the trusted native bridge before
+testing modal interactions, checks that opening a task does not automatically
+summon the keyboard, verifies keyboard dismissal after Cancel and reruns the
+full two-test pointer suite twice without clearing app data. These checks
+are **not equivalent to physical-handset acceptance**. Keep this branch
+blocked until the current exact-head Android emulator workflow passes.
