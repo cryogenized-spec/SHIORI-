@@ -14,6 +14,7 @@ The report does NOT certify real-device acceptance or data correctness.
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -138,8 +139,10 @@ def webview_size(serial):
 
 
 def save_new_json(path, value):
-    # Refuse to replace existing reports/baselines; no task data is written.
-    with path.open("x", encoding="utf-8") as stream:
+    # Refuse overwrites and restrict even hash-only metadata to this user.
+    # os.open with O_EXCL avoids racing another test run or overwriting output.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(value, stream, indent=2, sort_keys=True)
         stream.write("\n")
 
