@@ -44,11 +44,20 @@ class WebViewTouchAcceptanceTest {
         // INVISIBLE for its first native-vault inspection/onPageFinished. A
         // pointer sent in that gap is accepted by UiAutomation but cannot
         // open the task modal. Wait for the real window, not just DOM nodes.
-        await("bundled offline WebView rendered and foreground-ready") {
+        await("bundled offline WebView attached, visible and laid out") {
             var visible = false
             scenario.onActivity { activity ->
-                visible = webView.isShown && webView.hasWindowFocus() &&
-                    !activity.isFinishing && webView.width > 0 && webView.height > 0
+                val shown = webView.isShown
+                val attached = webView.windowToken != null
+                val focused = webView.hasWindowFocus()
+                visible = shown && attached && !activity.isFinishing &&
+                    webView.width > 0 && webView.height > 0
+                // ActivityScenario can transiently take window focus while
+                // the WebView remains fully visible. Focus alone is not proof
+                // that Android will reject a real UiAutomation pointer.
+                lastTouchDiagnostic = "startup: shown=$shown, attached=$attached, " +
+                    "focused=$focused, webView=${webView.width}x${webView.height}, " +
+                    "activityFinishing=${activity.isFinishing}"
             }
             visible && javascript(
                 "document.readyState === 'complete' && " +
