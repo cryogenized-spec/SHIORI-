@@ -24,3 +24,29 @@ The tests execute on a disposable Android emulator using the legacy offline WebV
 The production app does not acquire Internet permission, a JavaScript interface, any instrumented-test dependency, or a new data migration. PRs remain draft, and no production release can be approved on emulator evidence alone.
 
 Android 15's UID-targeted `Instrumentation.sendPointerSync` rejected WebView screen taps with `Targeted input event injection ... not directed at a window owned by uid`. The instrumentation test now uses `UiAutomation.injectInputEvent`, with an explicit successful-injection assertion for both DOWN and UP, so this input-permission issue cannot be confused with a passing UI test. This does not grant the app itself any input-injection capability; it is confined to the separate test APK.
+
+
+## Android 15 IME obstruction, 14 November 2026
+
+At commit `f597fc3`, both instrumented tests still failed after successful
+native keyboard entry: tapping Cancel and Create left the modal open. The
+diagnostic reported a full-height `1080x2340` WebView while
+`rootWindowInsets.isVisible(ime)` was true. The action target's CSS center
+was at screen y≈1801, consistent with being covered by the Android keyboard.
+The DOM's `elementFromPoint` returned the button, because that query does not
+account for OS-level keyboard windows.
+
+To address the application bug rather than bypass the check, the Activity
+now hosts its WebView in an inset-aware `FrameLayout`. On Android 11+ it
+applies system-bar/display-cutout insets and the larger of the bottom system
+inset and IME inset to the container. It forwards a *zeroed, non-consumed*
+insets object to WebView, preventing duplicate insets and stale keyboard
+spacing when the keyboard hides. Android 10 and older retain the existing
+`adjustResize` behaviour. This follows Android's WebView inset guidance.
+The instrumentation now rejects coordinates under the reported keyboard
+top **before** injecting real pointer events.
+
+This patch is not proof of correction on its own: both genuine injected
+touch tests must pass in the same emulator job; a successful APK build,
+DOM hit test or JavaScript-only action is insufficient. Device-specific
+keyboard behaviour and physical-handset sign-off remain unverified.
