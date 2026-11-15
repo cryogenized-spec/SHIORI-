@@ -28,8 +28,11 @@ pub enum IntentError {
 }
 
 fn valid_id(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 128 &&
-        value.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
 }
 
 pub fn normalize_phrase(raw: &str) -> String {
@@ -49,8 +52,9 @@ pub struct IntentScope {
 
 impl IntentScope {
     pub fn validate(&self) -> Result<(), IntentError> {
-        if !valid_id(&self.workspace_id) ||
-            self.project_id.as_deref().is_some_and(|id| !valid_id(id)) {
+        if !valid_id(&self.workspace_id)
+            || self.project_id.as_deref().is_some_and(|id| !valid_id(id))
+        {
             return Err(IntentError::InvalidScope);
         }
         Ok(())
@@ -124,8 +128,8 @@ impl IntentRule {
         if self.scope != correction.scope || self.phrase != normalize_phrase(&correction.phrase) {
             return Err(IntentError::ScopeMismatch);
         }
-        if self.meaning != correction.meaning.trim() ||
-            self.procedure_id != correction.procedure_id {
+        if self.meaning != correction.meaning.trim() || self.procedure_id != correction.procedure_id
+        {
             self.verified_successes = 0;
         }
         self.meaning = correction.meaning.trim().to_owned();
@@ -137,9 +141,11 @@ impl IntentRule {
     }
 
     /// Only a *verified* successful use, confirmed by the host, may call this.
-    pub fn record_success(&mut self, expected_revision: u64, evidence_id: &str)
-        -> Result<(), IntentError>
-    {
+    pub fn record_success(
+        &mut self,
+        expected_revision: u64,
+        evidence_id: &str,
+    ) -> Result<(), IntentError> {
         if !valid_id(evidence_id) {
             return Err(IntentError::InvalidEvidence);
         }
@@ -166,7 +172,10 @@ pub enum ClarificationReason {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntentResolution {
-    Clarify { reason: ClarificationReason, suggested: Option<IntentRule> },
+    Clarify {
+        reason: ClarificationReason,
+        suggested: Option<IntentRule>,
+    },
     /// Interpretation is sufficiently evidenced; never authorises execution.
     Interpreted { rule: IntentRule },
 }
@@ -180,27 +189,36 @@ pub fn resolve_intent(
 ) -> IntentResolution {
     if active_scope.validate().is_err() {
         return IntentResolution::Clarify {
-            reason: ClarificationReason::Unrecognised, suggested: None,
+            reason: ClarificationReason::Unrecognised,
+            suggested: None,
         };
     }
     let phrase = normalize_phrase(expression);
-    let mut candidates: Vec<&IntentRule> = rules.iter()
-        .filter(|r| r.scope.workspace_id == active_scope.workspace_id
-            && r.phrase == phrase
-            && (r.scope.project_id.is_none() || r.scope.project_id == active_scope.project_id))
+    let mut candidates: Vec<&IntentRule> = rules
+        .iter()
+        .filter(|r| {
+            r.scope.workspace_id == active_scope.workspace_id
+                && r.phrase == phrase
+                && (r.scope.project_id.is_none() || r.scope.project_id == active_scope.project_id)
+        })
         .collect();
     if candidates.is_empty() {
         return IntentResolution::Clarify {
-            reason: ClarificationReason::Unrecognised, suggested: None,
+            reason: ClarificationReason::Unrecognised,
+            suggested: None,
         };
     }
-    if active_scope.project_id.is_some() &&
-        candidates.iter().any(|r| r.scope.project_id == active_scope.project_id) {
+    if active_scope.project_id.is_some()
+        && candidates
+            .iter()
+            .any(|r| r.scope.project_id == active_scope.project_id)
+    {
         candidates.retain(|r| r.scope.project_id == active_scope.project_id);
     }
     if candidates.len() != 1 {
         return IntentResolution::Clarify {
-            reason: ClarificationReason::CompetingMeanings, suggested: None,
+            reason: ClarificationReason::CompetingMeanings,
+            suggested: None,
         };
     }
     let rule = (*candidates[0]).clone();
@@ -233,7 +251,10 @@ mod tests {
 
     #[test]
     fn normalizes_case_whitespace_and_terminal_punctuation() {
-        assert_eq!(normalize_phrase("  MAKE   a note of THIS!!! "), "make a note of this");
+        assert_eq!(
+            normalize_phrase("  MAKE   a note of THIS!!! "),
+            "make a note of this"
+        );
     }
     #[test]
     fn corrected_meaning_is_suggested_until_verified() {
@@ -241,7 +262,10 @@ mod tests {
         let rule = IntentRule::from_correction(&c).unwrap();
         assert!(matches!(
             resolve_intent(&[rule], "make a note of this", &c.scope),
-            IntentResolution::Clarify { reason: ClarificationReason::NeedsVerification, .. }
+            IntentResolution::Clarify {
+                reason: ClarificationReason::NeedsVerification,
+                ..
+            }
         ));
     }
     #[test]
@@ -276,21 +300,27 @@ mod tests {
         let mut local_input = correction(Some("research"));
         local_input.procedure_id = "research.journal.append".into();
         let local = IntentRule::from_correction(&local_input).unwrap();
-        match resolve_intent(
-            &[global, local], "make a note of this", &local_input.scope,
-        ) {
-            IntentResolution::Clarify { suggested: Some(rule), .. } =>
-                assert_eq!(rule.procedure_id, "research.journal.append"),
+        match resolve_intent(&[global, local], "make a note of this", &local_input.scope) {
+            IntentResolution::Clarify {
+                suggested: Some(rule),
+                ..
+            } => assert_eq!(rule.procedure_id, "research.journal.append"),
             other => panic!("unexpected result: {other:?}"),
         }
     }
     #[test]
     fn no_cross_workspace_learning() {
         let r = IntentRule::from_correction(&correction(None)).unwrap();
-        let other = IntentScope { workspace_id: "client-b".into(), project_id: None };
+        let other = IntentScope {
+            workspace_id: "client-b".into(),
+            project_id: None,
+        };
         assert!(matches!(
             resolve_intent(&[r], "make a note of this", &other),
-            IntentResolution::Clarify { reason: ClarificationReason::Unrecognised, .. }
+            IntentResolution::Clarify {
+                reason: ClarificationReason::Unrecognised,
+                ..
+            }
         ));
     }
     #[test]
@@ -300,7 +330,10 @@ mod tests {
         let mut newer = c.clone();
         newer.evidence_id = "message:002".into();
         rule.apply_correction(&newer).unwrap();
-        assert_eq!(rule.record_success(1, "outcome:stale"), Err(IntentError::StaleOutcome));
+        assert_eq!(
+            rule.record_success(1, "outcome:stale"),
+            Err(IntentError::StaleOutcome)
+        );
     }
     #[test]
     fn invalid_procedure_and_evidence_are_rejected() {
