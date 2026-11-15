@@ -1,6 +1,6 @@
 # Shiori Cloudflare MCP — Phase A
 
-This module is the first **remotely deployed, single-owner MCP server** for Shiori. The Worker exposes a **nine-operation subset** of the [113 planned operations](../../docs/api/operations.v1.json). It is a security-gated cloud alpha, not a substitute for the Rust local task database.
+This module is the first **remotely deployed, single-owner MCP server** for Shiori. The Worker exposes a **nine-operation subset** of the [113 planned operations](../../docs/api/operations.v1.json). It is a security-gated cloud alpha, not a substitute for the Rust local task database. GitHub Actions verified live `/health` (200) and unauthenticated `/mcp` rejection (401), using Cloudflare's recommended descriptive User-Agent; external *authenticated* tool calls remain to be validated.
 
 ## Current limitations
 
