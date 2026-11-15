@@ -83,6 +83,28 @@ jobs:
           protected=read(mcp+"/health")
           assert protected["service"]=="shiori-mcp-oauth",protected
           assert protected["local_rust_sync"] is False,protected
+          # Regression: Firefox may send Origin: null for HTML form POST.
+          # The nonce below is intentionally invalid: it must NEVER
+          # authorize anything or require the real approval code.
+          from urllib.parse import urlencode
+          def check_form(headers, expected):
+              req=Request(
+                  issuer+"/authorize",
+                  method="POST",
+                  data=urlencode({"nonce":"invalid","approve":"yes","code":"unused"}).encode(),
+                  headers={**ua,"Content-Type":"application/x-www-form-urlencoded",**headers}
+              )
+              try:
+                  urlopen(req,timeout=25)
+                  raise AssertionError("Invalid consent form unexpectedly accepted")
+              except HTTPError as e:
+                  assert e.code==403, e.code
+                  text=e.read(1500).decode("utf-8","replace")
+                  assert expected in text, (expected,text[:160])
+          check_form({"Origin":"null","Sec-Fetch-Site":"same-origin"},"The approval page expired.")
+          check_form({"Origin":"https://evil.example","Sec-Fetch-Site":"cross-site"},"Invalid form origin.")
+          check_form({"Origin":"null","Sec-Fetch-Site":"cross-site"},"Invalid form origin.")
+          print("PASS: live Firefox null-Origin form reaches nonce validation; cross-site requests remain rejected.")
           print("PASS: OAuth issuer metadata, PKCE S256, resource audience, unauthenticated denial, owner-configured authorize handler and resource health.")
           PY
       - name: Publish reviewed deployment bundles in source branch

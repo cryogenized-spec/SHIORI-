@@ -5076,6 +5076,29 @@ var OAuthHelpersImpl = class {
 
 // auth-server.js
 import { WorkerEntrypoint as WorkerEntrypoint2 } from "cloudflare:workers";
+
+// form-origin.js
+function isTrustedConsentRequest(request, issuer) {
+  const expected = new URL(issuer).origin;
+  const origin = request.headers.get("origin");
+  const site = request.headers.get("sec-fetch-site");
+  const referrer = request.headers.get("referer");
+  if (site && site !== "same-origin") return false;
+  if (origin && origin !== "null" && origin !== expected) return false;
+  if (referrer) {
+    try {
+      if (new URL(referrer).origin !== expected) return false;
+    } catch {
+      return false;
+    }
+  }
+  if (origin === expected) return true;
+  if (site === "same-origin") return true;
+  if (referrer) return true;
+  return false;
+}
+
+// auth-server.js
 var ISSUER = "https://shiori-auth.cryogenized.workers.dev";
 var RESOURCE = "https://shiori-mcp-oauth.cryogenized.workers.dev/mcp";
 var SCOPES = ["mcp:read", "mcp:write"];
@@ -5089,7 +5112,7 @@ var oauthServer = new OAuthAuthorizationServer({
 var securityHeaders = {
   "cache-control": "no-store",
   "x-content-type-options": "nosniff",
-  "referrer-policy": "no-referrer",
+  "referrer-policy": "strict-origin",
   "content-security-policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; style-src 'unsafe-inline'"
 };
 var escaped = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -5134,7 +5157,7 @@ async function getAuthorize(request, env) {
   return html(template, 200, "__Host-shiori_oauth=" + key + "; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300");
 }
 async function postAuthorize(request, env) {
-  if (request.headers.get("origin") !== ISSUER) return errorPage("Invalid form origin.", 403);
+  if (!isTrustedConsentRequest(request, ISSUER)) return errorPage("Invalid form origin.", 403);
   if (!env.OAUTH_KV || !env.OWNER_APPROVAL_SECRET) return errorPage("Owner approval is not configured.", 503);
   const data = await request.text();
   if (data.length > 1200) return errorPage("Form too large.", 413);
