@@ -23,15 +23,14 @@ const oauthResource=new OAuthResourceServer({
   async fetch(request,env,ctx){
    if(ctx.props?.userId!=="shiori-owner")return new Response("Forbidden",{status:403});
    const u=new URL(request.url),isMcp=u.pathname==="/mcp";
-   if(!isMcp&&!u.pathname.startsWith("/api/v1/ops/"))return new Response("Not found",{status:404});
+   // This resource's token audience is specifically /mcp. The existing
+   // separate bearer-alpha API retains dedicated JSON/HTTP routes.
+   if(!isMcp)return new Response("Not found",{status:404});
    let needed=["mcp:read"];
    if(isMcp && request.method==="POST"){
     let rpc;
     try{rpc=await request.clone().json();}catch{return new Response("Invalid JSON",{status:400});}
     if(rpc?.method==="tools/call" && isWrite(rpc?.params?.name))needed=["mcp:read","mcp:write"];
-   } else if(u.pathname.startsWith("/api/v1/ops/")){
-    const operation=u.pathname.slice("/api/v1/ops/".length);
-    if(!readOnly.has("shiori_"+operation.replaceAll(".","_")))needed=["mcp:read","mcp:write"];
    }
    if(!needed.every(s=>ctx.auth.scope.includes(s)))return insufficientScope(ctx.auth,needed);
    if(!env.DB)return new Response("Shiori backend unconfigured",{status:503});
@@ -44,6 +43,7 @@ const oauthResource=new OAuthResourceServer({
    const h=new Headers(request.headers);
    h.set("authorization","Bearer "+internalKey);
    h.delete("cookie");
+   h.delete("origin"); // OAuth bearer authorization is not cookie-based CSRF.
    return legacy.fetch(new Request(request,{headers:h}),internalEnv);
   }
  }
