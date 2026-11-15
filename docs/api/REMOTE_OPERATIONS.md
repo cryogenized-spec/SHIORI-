@@ -1,8 +1,8 @@
 # SHIORI Remote Operations — v1 contract plan
 
-**Status: 113-operation design; 9 Cloudflare-only alpha operations deployed, 104 planned. Last reviewed 2026-11-15. See [machine-readable registry](operations.v1.json) and [ADR 0004](../adr/0004-remote-operation-registry-and-mcp.md).
+**Status: 118-operation design; 9 Cloudflare-only alpha operations deployed, 109 planned. Last reviewed 2026-11-15. See [machine-readable registry](operations.v1.json) and [ADR 0004](../adr/0004-remote-operation-registry-and-mcp.md).
 
-This document freezes the **shape of the integration**, not the eventual release of all 113 operations. The registry is deliberately wide enough to cover the full ISW vision; a small Phase A subset has been uploaded as a token-protected Cloudflare Worker with an **isolated D1 dataset**, not the Rust application service. `availability: cloudflare_alpha` identifies those nine implemented Worker operations; `availability: planned` means no handler is deployed. OAuth, local sync and third-party MCP client connection are not complete. The local Python development bridge is not a production API.
+This document freezes the **shape of the integration**, not the eventual release of all 118 operations. The registry is deliberately wide enough to cover the full ISW vision; a small Phase A subset has been uploaded as a token-protected Cloudflare Worker with an **isolated D1 dataset**, not the Rust application service. `availability: cloudflare_alpha` identifies those nine implemented Worker operations; `availability: planned` means no handler is deployed. OAuth, local sync and third-party MCP client connection are not complete. The local Python development bridge is not a production API.
 
 ## One operation, two remote faces
 
