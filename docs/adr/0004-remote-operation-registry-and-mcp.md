@@ -1,6 +1,6 @@
 # ADR 0004 — One operation registry for local UI, remote JSON API and SHIORI MCP
 
-**Status:** Architecture baseline recorded 2026-11-15. A **token-protected Cloudflare-only MCP alpha** (nine operations, separate D1 dataset) has been uploaded; independent authenticated public-network testing, OAuth and the shared Rust application-service backend remain outstanding.
+**Status:** Architecture baseline recorded 2026-11-15. A **token-protected Cloudflare-only MCP alpha** (nine operations, separate D1 dataset) has been uploaded; independent live unauthenticated-denial testing passed; authenticated public tool-call testing, OAuth and the shared Rust application-service backend remain outstanding.
 
 Related: [Roadmap](../../ROADMAP.md), [ADR 0002](0002-application-ports-and-provider-boundaries.md), [ADR 0003](0003-optional-ai-companion-and-credentials.md), [Versioned operation registry](../api/operations.v1.json), [API contracts and phased scope](../api/REMOTE_OPERATIONS.md).
 
