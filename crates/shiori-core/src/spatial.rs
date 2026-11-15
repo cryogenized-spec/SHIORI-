@@ -41,15 +41,27 @@ mod tests {
     use super::*;
     #[test]
     fn rejects_nonfinite_and_out_of_bounds() {
-        assert_eq!(validate_coordinates(f64::NAN, 0.0), Err(SpatialError::InvalidCoordinate));
-        assert_eq!(validate_coordinates(1e12, 0.0), Err(SpatialError::InvalidCoordinate));
-        assert_eq!(validate_coordinates(0.0, f64::INFINITY), Err(SpatialError::InvalidCoordinate));
+        assert_eq!(
+            validate_coordinates(f64::NAN, 0.0),
+            Err(SpatialError::InvalidCoordinate)
+        );
+        assert_eq!(
+            validate_coordinates(1e12, 0.0),
+            Err(SpatialError::InvalidCoordinate)
+        );
+        assert_eq!(
+            validate_coordinates(0.0, f64::INFINITY),
+            Err(SpatialError::InvalidCoordinate)
+        );
         assert!(validate_coordinates(-1e6, 1e6).is_ok());
     }
     #[test]
     fn view_revision_independent_and_nonnegative() {
         assert!(validate_view_revision(0).is_ok());
         assert!(validate_view_revision(2).is_ok());
-        assert_eq!(validate_view_revision(-1), Err(SpatialError::InvalidRevision));
+        assert_eq!(
+            validate_view_revision(-1),
+            Err(SpatialError::InvalidRevision)
+        );
     }
 }
