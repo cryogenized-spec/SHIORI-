@@ -32,7 +32,7 @@ cargo run -p shiori-cli -- attention --on 2026-11-12
 cargo run -p shiori-cli -- plan 2026-11-12 --start 08:00 --end 17:00 --break-start 13:00 --break-end 14:00 --utc-offset-minutes 120 --default-minutes 30
 ```
 
-By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support. Existing pre-versioning and v1 SQLite files are upgraded transactionally to schema version 3 while retaining task records and tombstones; unknown future schema versions are refused rather than overwritten. Full multi-version migrations and safe live backup are still future work.
+By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support. Existing pre-versioning, v1 and v2 SQLite files are upgraded transactionally to canonical schema version 3 while retaining task records and tombstones; unknown future schema versions are refused rather than overwritten. Full multi-version migrations and safe live backup are still future work.
 
 The web design concept runs standalone in Firefox by opening `apps/web/index.html`, or via a local static server (demo tasks only):
 
@@ -57,7 +57,7 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 
 The existing desktop task board retains its own navigation. The **Spatial canvas** link opens `isw.html`; when the local Rust bridge is running on loopback, the canvas reads real SQLite task records and verified prerequisite links. The **Live Rust** control refreshes it. The old board remains available through **← Board**.
 
-**Implemented against Rust:** task import/read, real stored dependency edges, and visual card positions in a separate SQLite schema-v4 table with optimistic view revision checks. Creating a **Task** on the live canvas calls the existing local Rust task service and saves its view position. Moving a card **never alters task status, version or prerequisites**. Layout starts locked; users must explicitly unlock and enter Move mode.
+**Implemented against Rust:** task import/read, real stored dependency edges, and visual card positions in a separate, versioned SQLite sidecar (`tasks.isw.sqlite3`, view schema v1) with optimistic view revision checks. The canonical task database remains at schema v3 and is unchanged by the ISW extension. Creating a **Task** on the live canvas calls the existing local Rust task service and saves its view position. Moving a card **never alters task status, version or prerequisites**. Layout starts locked; users must explicitly unlock and enter Move mode.
 
 **Still illustrative in the HTML:** non-task artefacts and arbitrary links, comments/activity/automations, external GitHub import, EAI-generated responses, chat messages and model/API interactions. The optional AI dock is a visual-only preview; there is no backend key storage, user login, authenticated model connection, or MCP service in this slice. Drawing a link in fixture mode must not be treated as a real task dependency.
 
