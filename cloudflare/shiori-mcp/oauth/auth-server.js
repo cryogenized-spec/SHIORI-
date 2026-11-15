@@ -1,6 +1,7 @@
 import {OAuthAuthorizationServer,AuthorizationError} from "@cloudflare/workers-oauth-provider";
 import {WorkerEntrypoint} from "cloudflare:workers";
 import {isTrustedConsentRequest} from "./form-origin.js";
+import {normalizeApprovalInput} from "./approval-input.js";
 
 /** Isolated single-owner OAuth issuer. Never shares Google Master secrets. */
 const ISSUER="https://shiori-auth.cryogenized.workers.dev";
@@ -74,7 +75,7 @@ async function postAuthorize(request,env){
   if(!raw)return errorPage("Approval expired.",403);
   const pending=JSON.parse(raw);
   if(Date.now()-pending.at>300000)return errorPage("Approval expired.",403);
-  if(!await secureEqual(fields.get("code")||"",env.OWNER_APPROVAL_SECRET))return errorPage("Invalid approval code.",403);
+  if(!await secureEqual(normalizeApprovalInput(fields.get("code")),normalizeApprovalInput(env.OWNER_APPROVAL_SECRET)))return errorPage("Invalid approval code. Use the private Shiori OAuth owner code saved on your laptop, not the older MCP access token. Restart the connection to retry.",403);
   if(fields.get("approve")!=="yes")return errorPage("Consent not granted.",403);
   await env.OAUTH_KV.delete("shiori:pending:"+key);
   const api=oauthServer.getOAuthApi(env);
