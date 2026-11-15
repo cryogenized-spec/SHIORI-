@@ -116,6 +116,14 @@ def main():
                 mobile.wait_for_function("() => document.getElementById('crumbLabel')?.textContent === 'LIVE RUST / SQLITE'",timeout=20000)
                 mobile.screenshot(path=str(out/"isw-rust-mobile.png"),full_page=True)
                 assert not errors,errors
+                assert desktop.locator("#lockTool").get_attribute("aria-pressed")=="true", "ISW must start locked"
+                desktop.evaluate("""async () => await window.__iswLive.createTask({
+                    title:'ISW test-created local task',role:'Sample',status:'active',x:400,y:460
+                })""")
+                desktop.wait_for_function("() => window.__iswDebug.getNodes().length === 11",timeout=10000)
+                created_scene=get(base+"/api/isw/scene")
+                assert len(created_scene["tasks"])==11
+                assert len(created_scene["positions"])==2
                 browser.close()
             (out/"evidence.json").write_text(json.dumps({
                 "source":"Rust SQLite temporary fixture","tasks":10,"verified_dependencies":10,
