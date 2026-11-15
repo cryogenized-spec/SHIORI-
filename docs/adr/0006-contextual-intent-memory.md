@@ -1,9 +1,11 @@
 # ADR 0006 — Contextual intent memory and adaptive clarification
 
 **Status:** Proposed experimental SH-MEM-002 slice. The pure Rust resolver, optional
-SQLite sidecar and offline CLI are implemented on the linked PR branch. Agent
-observation, semantic expansion, native UI, automatic procedure execution,
-cloud synchronisation and MCP exposure are **not** implemented.
+SQLite sidecar, offline CLI and localhost development UI/bridge are implemented
+on the linked PR branch. Agent observation, semantic expansion, Android-native
+memory UI, automatic procedure execution, cloud synchronisation and MCP
+exposure are **not** implemented. Five typed MCP operations are catalogued as
+**planned** only.
 
 ## Problem
 
@@ -46,8 +48,11 @@ Use a provider-neutral **Contextual Intent Memory** (CIM) in SHIORI:
   No migration of canonical task schema v3.
 - `shiori-cli`: `intent-correct`, `intent-resolve`, `intent-success`.
   This is a **manual test surface**, not an authenticated multi-user agent API.
+- Local-only web view and loopback routes for explicit user-reviewed correction,
+  rule inspection, read-only resolution and revision-guarded forgetting. No
+  browser-side shadow memory, direct SQL or provider execution.
 - Tests: normalization, scope isolation, correction invalidation, verified
-  successes, deterministic clarification, replay and persistence/reopen.
+  successes, deterministic clarification, replay, revocation, and persistence/reopen.
 
 The sidecar is deliberately independent of ordinary offline task operations.
 No separate server, LLM subscription, embeddings or vector DB is needed.
