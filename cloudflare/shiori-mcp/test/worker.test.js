@@ -65,16 +65,16 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",arguments:{workspace_id:"personal"}}));
-  assert.equal(caps.data.result.structuredContent.local_rust_sync,false);
+  assert.equal(caps.data.result.structuredContent.capabilities.local_rust_sync,false);
 });
 
 test("task create, list, get, retry and status mutations",async()=>{
   const e=env();
-  const newTask=await call(e,"/api/v1/ops/tasks.create",request("create-0001",{title:"Prepare derrick inspection",body:"Sample"}));
+  const newTask=await call(e,"/api/v1/ops/tasks.create",request("create-0001",{title:"Prepare derrick inspection",text:"Sample"}));
   assert.equal(newTask.status,200,JSON.stringify(newTask.data));
   assert.equal(newTask.data.data.revision,1);
   const id=newTask.data.data.resource_id;
-  const replay=await call(e,"/api/v1/ops/tasks.create",request("create-0001",{title:"Prepare derrick inspection",body:"Sample"}));
+  const replay=await call(e,"/api/v1/ops/tasks.create",request("create-0001",{title:"Prepare derrick inspection",text:"Sample"}));
   assert.equal(replay.data.data.resource_id,id);
   const list=await call(e,"/mcp",rpc("tools/call",{name:"shiori_tasks_list",arguments:{workspace_id:"personal"}}));
   assert.equal(list.data.result.structuredContent.items.length,1);
