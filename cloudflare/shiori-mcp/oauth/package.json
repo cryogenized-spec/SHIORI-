@@ -1,0 +1,16 @@
+{
+  "name": "@shiori/oauth-pairing",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0-alpha",
+  "scripts": {
+    "build": "esbuild auth-server.js --bundle --format=esm --platform=browser --target=es2022 --external:cloudflare:workers --outfile=dist/shiori-auth.js && esbuild resource-server.js --bundle --format=esm --platform=browser --target=es2022 --external:cloudflare:workers --outfile=dist/shiori-resource.js",
+    "check": "node --check auth-server.js && node --check resource-server.js && npm run build"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

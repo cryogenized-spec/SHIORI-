@@ -1,0 +1,22 @@
+{
+  "name": "shiori-mcp-oauth",
+  "main": "resource-server.js",
+  "compatibility_date": "2026-11-15",
+  "workers_dev": true,
+  "services": [
+    {
+      "binding": "AUTH_SERVER",
+      "service": "shiori-auth"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shiori-mcp-alpha",
+      "database_id": "0a31b17b-becc-40df-9804-1b7ae9101263"
+    }
+  ],
+  "vars": {
+    "WORKSPACE_ID": "personal"
+  }
+}

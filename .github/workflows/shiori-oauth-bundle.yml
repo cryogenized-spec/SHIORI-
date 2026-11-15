@@ -1,0 +1,91 @@
+name: Shiori OAuth Provider Bundle
+on:
+  pull_request:
+    paths:
+      - 'cloudflare/shiori-mcp/oauth/**'
+      - '.github/workflows/shiori-oauth-bundle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  oauth-bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: true
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install exact pinned OAuth provider and bundler
+        working-directory: cloudflare/shiori-mcp/oauth
+        run: npm install --no-audit --no-fund
+      - name: Check and bundle both Workers
+        working-directory: cloudflare/shiori-mcp/oauth
+        run: npm run check
+      - name: Verify no embedded owner secrets and no unapproved auto-grants
+        working-directory: cloudflare/shiori-mcp/oauth
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const auth=fs.readFileSync('auth-server.js','utf8');
+          const server=fs.readFileSync('resource-server.js','utf8');
+          if(!auth.includes('OWNER_APPROVAL_SECRET') || !auth.includes('approve') || !auth.includes('parseAuthRequest') || !auth.includes('completeAuthorization')) throw Error('Missing owner consent validation');
+          if(!server.includes('insufficientScope') || !server.includes('mcp:write')) throw Error('Missing API scope enforcement');
+          for(const path of ['dist/shiori-auth.js','dist/shiori-resource.js']){
+            const b=fs.statSync(path);
+            if(b.size<10000 || b.size>1500000)throw Error('Unexpected bundle size: '+path+' '+b.size);
+          }
+          console.log('OAuth bundle and minimum security-gate checks passed');
+          NODE
+      - name: Run read-only Rust/cloud sync comparison unit tests
+        run: python3 -m unittest discover -s cloudflare/shiori-mcp/scripts -p 'test_sync_preview.py' -v
+      - name: Probe deployed OAuth discovery and pre-consent protection
+        if: github.repository == 'cryogenized-spec/SHIORI-'
+        run: |
+          python3 - <<'PY'
+          import json
+          from urllib.request import urlopen,Request
+          from urllib.error import HTTPError
+          ua={"User-Agent":"ShioriOAuthCI/0.1 (+https://github.com/cryogenized-spec/SHIORI-)"}
+          issuer="https://shiori-auth.cryogenized.workers.dev"
+          mcp="https://shiori-mcp-oauth.cryogenized.workers.dev"
+          def read(path):
+              with urlopen(Request(path,headers=ua),timeout=25) as result:
+                  assert result.status==200,result.status
+                  return json.load(result)
+          auth=read(issuer+"/.well-known/oauth-authorization-server")
+          assert auth["issuer"]==issuer,auth
+          assert "S256" in auth["code_challenge_methods_supported"],auth
+          resource=read(mcp+"/.well-known/oauth-protected-resource/mcp")
+          assert resource["resource"]==mcp+"/mcp",resource
+          assert issuer in resource["authorization_servers"],resource
+          try:
+              urlopen(Request(mcp+"/mcp",method="POST",data=b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',headers={**ua,"Content-Type":"application/json"}),timeout=25)
+              raise AssertionError("Unprotected OAuth MCP endpoint")
+          except HTTPError as e:
+              assert e.code==401,e.code
+              assert "resource_metadata" in e.headers.get("WWW-Authenticate",""),e.headers
+          print("PASS: OAuth issuer metadata, PKCE S256, resource audience and unauthorized denial.")
+          PY
+      - name: Publish reviewed deployment bundles in source branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f cloudflare/shiori-mcp/oauth/dist/shiori-auth.js cloudflare/shiori-mcp/oauth/dist/shiori-resource.js cloudflare/shiori-mcp/oauth/package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "build(oauth): refresh pinned provider bundles"
+            git push origin HEAD:refs/heads/${{ github.event.pull_request.head.ref }}
+          fi
+      - name: Save deployable OAuth and resource bundles
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-oauth-bundles
+          path: cloudflare/shiori-mcp/oauth/dist/
+          retention-days: 7
+          if-no-files-found: error

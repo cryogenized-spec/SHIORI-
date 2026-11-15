@@ -1,0 +1,15 @@
+{
+  "name": "shiori-auth",
+  "main": "auth-server.js",
+  "compatibility_date": "2026-11-15",
+  "compatibility_flags": [
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "7a6be13c9b8745b09888061eb125b093"
+    }
+  ]
+}
