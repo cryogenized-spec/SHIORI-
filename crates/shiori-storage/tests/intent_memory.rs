@@ -10,9 +10,12 @@ fn scope(workspace_id: &str, project_id: Option<&str>) -> IntentScope {
     }
 }
 
-fn correction(source: &str, workspace: &str, project: Option<&str>, procedure: &str)
-    -> IntentCorrection
-{
+fn correction(
+    source: &str,
+    workspace: &str,
+    project: Option<&str>,
+    procedure: &str,
+) -> IntentCorrection {
     IntentCorrection {
         scope: scope(workspace, project),
         phrase: "make a note of this".into(),
@@ -43,7 +46,10 @@ fn corrections_are_durable_across_reopens_and_replays() {
         assert_eq!(r.procedure_id, "journal.append");
         assert!(matches!(
             store.resolve("MAKE A NOTE OF THIS!", &c.scope).unwrap(),
-            IntentResolution::Clarify { reason: ClarificationReason::NeedsVerification, .. }
+            IntentResolution::Clarify {
+                reason: ClarificationReason::NeedsVerification,
+                ..
+            }
         ));
     }
 }
@@ -95,14 +101,24 @@ fn scope_specificity_and_workspace_isolation() {
     store.record_correction(&project).unwrap();
     let other = scope("other", Some("research"));
     assert!(store.list(&other).unwrap().is_empty());
-    match store.resolve("make a note of this", &project.scope).unwrap() {
-        IntentResolution::Clarify { suggested: Some(rule), .. } =>
-            assert_eq!(rule.procedure_id, "research.record"),
+    match store
+        .resolve("make a note of this", &project.scope)
+        .unwrap()
+    {
+        IntentResolution::Clarify {
+            suggested: Some(rule),
+            ..
+        } => assert_eq!(rule.procedure_id, "research.record"),
         got => panic!("unexpected: {got:?}"),
     }
-    match store.resolve("make a note of this", &scope("personal", Some("another"))).unwrap() {
-        IntentResolution::Clarify { suggested: Some(rule), .. } =>
-            assert_eq!(rule.procedure_id, "journal.append"),
+    match store
+        .resolve("make a note of this", &scope("personal", Some("another")))
+        .unwrap()
+    {
+        IntentResolution::Clarify {
+            suggested: Some(rule),
+            ..
+        } => assert_eq!(rule.procedure_id, "journal.append"),
         got => panic!("unexpected: {got:?}"),
     }
 }
