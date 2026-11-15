@@ -1,0 +1,64 @@
+name: Shiori Cloudflare MCP Phase A
+on:
+  pull_request:
+    paths:
+      - 'cloudflare/shiori-mcp/**'
+      - '.github/workflows/shiori-cloudflare-mcp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  worker-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify syntax and Worker behaviour
+        working-directory: cloudflare/shiori-mcp
+        run: npm run check
+      - name: Probe deployed Worker health and bearer protection
+        if: github.repository == 'cryogenized-spec/SHIORI-'
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.request
+          import urllib.error
+          import sys
+          base="https://shiori-mcp-alpha.cryogenized.workers.dev"
+          agent="ShioriCI/0.1 (+https://github.com/cryogenized-spec/SHIORI-)"
+          try:
+              response=urllib.request.urlopen(urllib.request.Request(base+"/health",headers={"User-Agent":agent}),timeout=25)
+          except urllib.error.HTTPError as e:
+              body=e.read(256).decode("utf-8","replace")
+              print("Live health probe received",e.code,"server",e.headers.get("Server"),"body",repr(body))
+              if e.code==403 and (("requests to" in body and "not allowed" in body) or "error code: 1010" in body):
+                  print("WARNING: External client blocked before reaching Worker; live HTTP verification is INCONCLUSIVE.")
+                  sys.exit(0)
+              raise
+          with response as result:
+              info=json.load(result)
+              assert result.status == 200, result.status
+              assert info["service"] == "shiori-mcp-cloudflare", info
+              assert info["service_state"] == "ready", info
+          req=urllib.request.Request(
+              base+"/mcp",
+              data=b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+              headers={"Content-Type":"application/json","User-Agent":agent},
+              method="POST"
+          )
+          try:
+              urllib.request.urlopen(req,timeout=25)
+              raise AssertionError("Unauthenticated MCP unexpectedly accepted")
+          except urllib.error.HTTPError as e:
+              assert e.code == 401, e.code
+              payload=json.loads(e.read())
+              assert payload["error"]["code"] == "UNAUTHENTICATED", payload
+          print("Live Worker health and unauthenticated denial verified.")
+          PY

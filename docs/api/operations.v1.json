@@ -30,8 +30,8 @@
     {
       "id": "system.capabilities.read",
       "phase": "A",
-      "description": "Read deployed capabilities and scopes",
-      "availability": "planned",
+      "description": "Read deployed capabilities and scopes [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "system:read",
@@ -97,7 +97,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "system.operations.list",
@@ -185,8 +188,8 @@
     {
       "id": "tasks.list",
       "phase": "A",
-      "description": "List scoped tasks",
-      "availability": "planned",
+      "description": "List scoped tasks [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "tasks:read",
@@ -208,18 +211,14 @@
             "minLength": 1,
             "maxLength": 128
           },
-          "filters": {
-            "type": "object",
-            "maxProperties": 32
-          },
           "cursor": {
             "type": "string",
-            "maxLength": 4096
+            "maxLength": 64
           },
           "limit": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 500
+            "maximum": 100
           }
         }
       },
@@ -267,13 +266,16 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.get",
       "phase": "A",
-      "description": "Read task",
-      "availability": "planned",
+      "description": "Read task [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "tasks:read",
@@ -299,7 +301,7 @@
           "task_id": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 160
           }
         }
       },
@@ -342,13 +344,16 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.create",
       "phase": "A",
-      "description": "Create native task",
-      "availability": "planned",
+      "description": "Create native task [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "write",
       "approval": "contextual",
       "scope": "tasks:write",
@@ -375,11 +380,11 @@
           "title": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 160
           },
           "text": {
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 32768
           },
           "idempotency_key": {
             "type": "string",
@@ -432,7 +437,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.update",
@@ -537,8 +545,8 @@
     {
       "id": "tasks.status.set",
       "phase": "A",
-      "description": "Change task status",
-      "availability": "planned",
+      "description": "Change task status [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "write",
       "approval": "contextual",
       "scope": "tasks:write",
@@ -567,12 +575,14 @@
           "task_id": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 160
           },
           "status": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
+            "enum": [
+              "todo",
+              "in_progress",
+              "done"
+            ]
           },
           "expected_revision": {
             "type": "integer",
@@ -629,7 +639,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.delete",
@@ -816,8 +829,8 @@
     {
       "id": "tasks.dependencies.list",
       "phase": "A",
-      "description": "Read canonical prerequisites",
-      "availability": "planned",
+      "description": "Read canonical prerequisites [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "tasks:read",
@@ -843,7 +856,7 @@
           "task_id": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 160
           }
         }
       },
@@ -891,13 +904,16 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "spatial.scene.read",
       "phase": "A",
-      "description": "Read visible spatial scene",
-      "availability": "planned",
+      "description": "Read visible spatial scene [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "spatial:read",
@@ -919,32 +935,14 @@
             "minLength": 1,
             "maxLength": 128
           },
-          "viewport": {
-            "type": "object",
-            "required": [
-              "x",
-              "y",
-              "zoom"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "x": {
-                "type": "number"
-              },
-              "y": {
-                "type": "number"
-              },
-              "zoom": {
-                "type": "number",
-                "exclusiveMinimum": 0,
-                "maximum": 64
-              }
-            }
-          },
           "limit": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 500
+            "maximum": 100
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 64
           }
         }
       },
@@ -976,6 +974,12 @@
               },
               "revision": {
                 "type": "integer"
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           },
@@ -986,7 +990,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "spatial.node.position.read",
@@ -1066,8 +1073,8 @@
     {
       "id": "spatial.node.position.set",
       "phase": "A",
-      "description": "Save visual position",
-      "availability": "planned",
+      "description": "Save visual position [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "view_write",
       "approval": "none",
       "scope": "spatial:write",
@@ -1097,7 +1104,7 @@
           "node_id": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 160
           },
           "x": {
             "type": "number",
@@ -1175,7 +1182,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "spatial.viewport.read",
@@ -1621,8 +1631,8 @@
     {
       "id": "spatial.edge.style.set",
       "phase": "A",
-      "description": "Choose circuit curved straight links",
-      "availability": "planned",
+      "description": "Choose circuit curved straight links [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
+      "availability": "cloudflare_alpha",
       "effect": "view_write",
       "approval": "none",
       "scope": "spatial:write",
@@ -1699,6 +1709,14 @@
               },
               "audit_id": {
                 "type": "string"
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "circuit",
+                  "curved",
+                  "straight"
+                ]
               }
             }
           },
@@ -1709,7 +1727,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "inbox.list",

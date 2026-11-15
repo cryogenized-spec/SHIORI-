@@ -1,6 +1,6 @@
 # ADR 0004 — One operation registry for local UI, remote JSON API and SHIORI MCP
 
-**Status:** Proposed architecture, recorded 2026-11-15; **no remotely reachable SHIORI MCP or authenticated API has been implemented**.
+**Status:** Architecture baseline recorded 2026-11-15. A **token-protected Cloudflare-only MCP alpha** (nine operations, separate D1 dataset) has been uploaded; independent live unauthenticated-denial testing passed; authenticated public tool-call testing, OAuth and the shared Rust application-service backend remain outstanding.
 
 Related: [Roadmap](../../ROADMAP.md), [ADR 0002](0002-application-ports-and-provider-boundaries.md), [ADR 0003](0003-optional-ai-companion-and-credentials.md), [Versioned operation registry](../api/operations.v1.json), [API contracts and phased scope](../api/REMOTE_OPERATIONS.md).
 
@@ -46,6 +46,8 @@ Offline Shiori must remain functional. For agent requests against a remote copy,
 - Stable IDs, MCP tool names and JSON schemas do not silently change. Prefer additive fields and capability discovery; use `/api/v2` and a new MCP tool name for breaking changes.
 - Machine-generated MCP tool definitions and HTTP router bindings should be derived from the same registry/application descriptors, with test snapshots that fail on drift.
 - Avoid one generic `run_command`, `execute_json`, or `modify_graph` tool exposed to agents. A typed **internal** dispatcher is acceptable; public contracts remain independently named and limited.
+
+**Interim alpha exception:** the Worker prototype under `cloudflare/shiori-mcp/` temporarily implements a small subset against isolated Cloudflare D1. It must not be represented as the canonical Rust task store or a finished cross-device sync architecture. The application-service design in this ADR remains the target, and the temporary adapter's duplicated validation must be reconciled before production release.
 
 ## Implementation sequence
 
