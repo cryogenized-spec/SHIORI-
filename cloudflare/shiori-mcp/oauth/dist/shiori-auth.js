@@ -5103,6 +5103,41 @@ function normalizeApprovalInput(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// grant-flow.js
+var GrantStageError = class extends Error {
+  constructor(stage, underlying) {
+    super("OAuth grant could not complete");
+    this.name = "GrantStageError";
+    this.stage = stage;
+    this.underlyingType = underlying?.name || "unknown";
+  }
+};
+async function completeOwnerGrant(api, storedRequestUrl, allowedScopes) {
+  let stage = "restore_request";
+  try {
+    const original = await api.parseAuthRequest(new Request(storedRequestUrl));
+    stage = "lookup_client";
+    const client = await api.lookupClient(original.clientId);
+    if (!client) throw new Error("OAuth client no longer exists");
+    stage = "create_grant";
+    const result = await api.completeAuthorization({
+      request: original,
+      userId: "shiori-owner",
+      metadata: { clientName: client.clientName },
+      scope: original.scope.filter((x) => allowedScopes.includes(x)),
+      props: { userId: "shiori-owner", displayName: "Shiori owner" }
+    });
+    stage = "validate_redirect";
+    if (typeof result?.redirectTo !== "string" || !result.redirectTo) {
+      throw new Error("Provider did not return a redirect");
+    }
+    new URL(result.redirectTo);
+    return { redirectTo: result.redirectTo };
+  } catch (e) {
+    throw new GrantStageError(stage, e);
+  }
+}
+
 // auth-server.js
 var ISSUER = "https://shiori-auth.cryogenized.workers.dev";
 var RESOURCE = "https://shiori-mcp-oauth.cryogenized.workers.dev/mcp";
@@ -5174,19 +5209,20 @@ async function postAuthorize(request, env) {
   if (Date.now() - pending.at > 3e5) return errorPage("Approval expired.", 403);
   if (!await secureEqual(normalizeApprovalInput(fields.get("code")), normalizeApprovalInput(env.OWNER_APPROVAL_SECRET))) return errorPage("Invalid approval code. Use the private Shiori OAuth owner code saved on your laptop, not the older MCP access token. Restart the connection to retry.", 403);
   if (fields.get("approve") !== "yes") return errorPage("Consent not granted.", 403);
+  let result;
+  try {
+    result = await completeOwnerGrant(oauthServer.getOAuthApi(env), pending.url, SCOPES);
+  } catch (e) {
+    const stage = e instanceof GrantStageError ? e.stage : "unknown";
+    const type = e instanceof GrantStageError ? e.underlyingType : "unknown";
+    console.error("Shiori OAuth grant failure", stage, type);
+    return errorPage(
+      "Authorization could not finish (stage: " + stage + "). This is a Shiori server error, not an invalid approval code.",
+      500
+    );
+  }
+  const response = Response.redirect(result.redirectTo, 302);
   await env.OAUTH_KV.delete("shiori:pending:" + key);
-  const api = oauthServer.getOAuthApi(env);
-  const original = await api.parseAuthRequest(new Request(pending.url));
-  const client = await api.lookupClient(original.clientId);
-  if (!client) return errorPage("OAuth client no longer exists.", 403);
-  const { redirectTo } = await api.completeAuthorization({
-    request: original,
-    userId: "shiori-owner",
-    metadata: { clientName: client.clientName },
-    scope: original.scope.filter((x) => SCOPES.includes(x)),
-    props: { userId: "shiori-owner", displayName: "Shiori owner" }
-  });
-  const response = Response.redirect(redirectTo, 302);
   response.headers.set("set-cookie", "__Host-shiori_oauth=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0");
   response.headers.set("cache-control", "no-store");
   return response;
@@ -5196,11 +5232,11 @@ var ShioriOAuthAuthorization = class extends WorkerEntrypoint2 {
     const url = new URL(request.url);
     try {
       if (url.pathname === "/authorize") {
-        if (request.method === "GET") return getAuthorize(request, this.env);
-        if (request.method === "POST") return postAuthorize(request, this.env);
+        if (request.method === "GET") return await getAuthorize(request, this.env);
+        if (request.method === "POST") return await postAuthorize(request, this.env);
         return errorPage("Unsupported method.", 405);
       }
-      return oauthServer.fetch(request, this.env, this.ctx);
+      return await oauthServer.fetch(request, this.env, this.ctx);
     } catch (e) {
       console.error("Shiori OAuth error:", e?.name || "unknown");
       return errorPage("Authorization service unavailable.", 500);
