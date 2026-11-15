@@ -1,33 +1,75 @@
-//! SQLite adapter for view-only ISW coordinates and canonical task links.
-//! The authoritative task state remains in the existing tasks/dependencies tables.
+//! Isolated SQLite view store for ISW coordinates and read-only task edges.
+//! This sidecar must never change the canonical task database schema/version.
 use crate::{SqliteStore, StorageError};
-use rusqlite::{OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use shiori_core::spatial::{
     SpatialError, SpatialPosition, validate_coordinates, validate_view_revision,
 };
+use std::path::Path;
 
-impl SqliteStore {
-    /// Source -> dependent task, derived from real task prerequisites.
-    pub fn spatial_dependency_edges(&self) -> Result<Vec<(String, String)>, StorageError> {
-        let mut stmt = self.db.prepare(
-            "SELECT dep.depends_on_id, dep.task_id
-             FROM task_dependencies dep
-             JOIN tasks prerequisite ON prerequisite.id = dep.depends_on_id
-             JOIN tasks dependent ON dependent.id = dep.task_id
-             WHERE prerequisite.deleted_at IS NULL AND dependent.deleted_at IS NULL
-             ORDER BY dep.depends_on_id, dep.task_id",
-        )?;
-        let values = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        Ok(values.collect::<rusqlite::Result<Vec<_>>>()?)
+const VIEW_SCHEMA_VERSION: i64 = 1;
+
+pub struct SpatialViewStore {
+    db: Connection,
+}
+
+impl SpatialViewStore {
+    /// Open a dedicated layout database, for example tasks.isw.sqlite3.
+    /// This is not the canonical tasks.sqlite3 and must not be treated as one.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
+        Self::initialize(Connection::open(path)?)
     }
 
-    /// View positions for active tasks only. There is no task mutation.
-    pub fn spatial_positions(&self) -> Result<Vec<SpatialPosition>, StorageError> {
-        let mut stmt = self.db.prepare(
-            "SELECT p.task_id,p.x,p.y,p.revision FROM isw_positions p
-             JOIN tasks t ON t.id=p.task_id WHERE t.deleted_at IS NULL
-             ORDER BY p.task_id",
-        )?;
+    pub fn in_memory() -> Result<Self, StorageError> {
+        Self::initialize(Connection::open_in_memory()?)
+    }
+
+    fn initialize(mut db: Connection) -> Result<Self, StorageError> {
+        db.execute_batch("PRAGMA busy_timeout = 4000;")?;
+        let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version != 0 && version != VIEW_SCHEMA_VERSION {
+            return Err(StorageError::UnsupportedSpatialSchemaVersion {
+                found: version,
+                supported: VIEW_SCHEMA_VERSION,
+            });
+        }
+        if version == 0 {
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let existing: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='isw_positions'",
+                [],
+                |row| row.get(0),
+            )?;
+            if existing != 0 {
+                return Err(StorageError::InvalidSpatialSchema);
+            }
+            tx.execute_batch(
+                "CREATE TABLE isw_positions (
+                   task_id TEXT PRIMARY KEY,
+                   x REAL NOT NULL CHECK(x BETWEEN -1000000 AND 1000000),
+                   y REAL NOT NULL CHECK(y BETWEEN -1000000 AND 1000000),
+                   revision INTEGER NOT NULL CHECK(revision > 0)
+                 );",
+            )?;
+            tx.pragma_update(None, "user_version", VIEW_SCHEMA_VERSION)?;
+            tx.commit()?;
+        } else {
+            let columns: Vec<String> = {
+                let mut stmt = db.prepare("PRAGMA table_info(isw_positions)")?;
+                let values = stmt.query_map([], |row| row.get(1))?;
+                values.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            if columns != ["task_id", "x", "y", "revision"] {
+                return Err(StorageError::InvalidSpatialSchema);
+            }
+        }
+        Ok(Self { db })
+    }
+
+    pub fn positions(&self) -> Result<Vec<SpatialPosition>, StorageError> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT task_id,x,y,revision FROM isw_positions ORDER BY task_id")?;
         let values = stmt.query_map([], |row| {
             Ok(SpatialPosition {
                 task_id: row.get(0)?,
@@ -39,12 +81,12 @@ impl SqliteStore {
         Ok(values.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Optimistic revision on the spatial view, never a task revision.
-    /// A new position requires expected_revision=0; retries with same
-    /// coordinates are idempotent only when the expected revision matches
-    /// the current record.
-    pub fn set_spatial_position(
+    /// Check the canonical record's existence and active status, then update
+    /// ONLY the sidecar view database. Its own revision is independent of
+    /// task versions and dependency graph edits.
+    pub fn set_position(
         &mut self,
+        tasks: &SqliteStore,
         task_id: &str,
         x: f64,
         y: f64,
@@ -52,17 +94,10 @@ impl SqliteStore {
     ) -> Result<SpatialPosition, StorageError> {
         validate_coordinates(x, y)?;
         validate_view_revision(expected_revision)?;
+        tasks.get(task_id)?;
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let active: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE id=?1 AND deleted_at IS NULL",
-            params![task_id],
-            |row| row.get(0),
-        )?;
-        if active == 0 {
-            return Err(StorageError::NotFound);
-        }
         let old: Option<(f64, f64, i64)> = tx
             .query_row(
                 "SELECT x,y,revision FROM isw_positions WHERE task_id=?1",
@@ -70,12 +105,12 @@ impl SqliteStore {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
-        let current = old.as_ref().map_or(0, |x| x.2);
+        let current = old.as_ref().map_or(0, |v| v.2);
         if expected_revision != current {
             return Err(StorageError::RevisionConflict);
         }
-        if let Some((ox, oy, _)) = old {
-            if ox != x || oy != y {
+        if let Some((old_x, old_y, _)) = old {
+            if old_x != x || old_y != y {
                 tx.execute(
                     "UPDATE isw_positions SET x=?2,y=?3,revision=revision+1 WHERE task_id=?1",
                     params![task_id, x, y],
@@ -104,6 +139,22 @@ impl SqliteStore {
     }
 }
 
+impl SqliteStore {
+    /// Verified source -> dependent IDs from the canonical task prerequisites.
+    pub fn spatial_dependency_edges(&self) -> Result<Vec<(String, String)>, StorageError> {
+        let mut stmt = self.db.prepare(
+            "SELECT dep.depends_on_id, dep.task_id
+             FROM task_dependencies dep
+             JOIN tasks prerequisite ON prerequisite.id = dep.depends_on_id
+             JOIN tasks dependent ON dependent.id = dep.task_id
+             WHERE prerequisite.deleted_at IS NULL AND dependent.deleted_at IS NULL
+             ORDER BY dep.depends_on_id, dep.task_id",
+        )?;
+        let values = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(values.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
 impl From<SpatialError> for StorageError {
     fn from(value: SpatialError) -> Self {
         Self::Spatial(value)
@@ -114,52 +165,73 @@ impl From<SpatialError> for StorageError {
 mod tests {
     use super::*;
     use shiori_core::{Priority, Task};
+
     #[test]
-    fn coordinates_do_not_change_task_and_are_versioned() {
-        let mut store = SqliteStore::in_memory().unwrap();
+    fn sidecar_positions_are_versioned_and_do_not_modify_task_revisions() {
+        let tasks = SqliteStore::in_memory().unwrap();
+        let mut view = SpatialViewStore::in_memory().unwrap();
         let task = Task::new("Visual position", "Workshop", Priority::Low, None).unwrap();
-        store.insert(&task).unwrap();
-        let a = store.set_spatial_position(&task.id, 100., 200., 0).unwrap();
+        tasks.insert(&task).unwrap();
+        let a = view.set_position(&tasks, &task.id, 100., 200., 0).unwrap();
         assert_eq!(a.revision, 1);
-        let b = store.set_spatial_position(&task.id, 100., 200., 1).unwrap();
+        let b = view.set_position(&tasks, &task.id, 100., 200., 1).unwrap();
         assert_eq!(b.revision, 1);
-        let c = store.set_spatial_position(&task.id, 125., 200., 1).unwrap();
+        let c = view.set_position(&tasks, &task.id, 125., 200., 1).unwrap();
         assert_eq!(c.revision, 2);
         assert!(matches!(
-            store.set_spatial_position(&task.id, 300., 300., 1),
+            view.set_position(&tasks, &task.id, 300., 300., 1),
             Err(StorageError::RevisionConflict)
         ));
-        assert_eq!(store.get(&task.id).unwrap().version, task.version);
-        assert_eq!(store.spatial_positions().unwrap().len(), 1);
+        assert_eq!(tasks.get(&task.id).unwrap().version, task.version);
+        assert_eq!(view.positions().unwrap().len(), 1);
     }
+
     #[test]
-    fn denies_unowned_positions_or_invalid_geometry() {
-        let mut store = SqliteStore::in_memory().unwrap();
+    fn view_does_not_store_invalid_or_unknown_task_coordinates() {
+        let tasks = SqliteStore::in_memory().unwrap();
+        let mut view = SpatialViewStore::in_memory().unwrap();
         assert!(matches!(
-            store.set_spatial_position("missing", 1., 2., 0),
+            view.set_position(&tasks, "missing", 1., 2., 0),
             Err(StorageError::NotFound)
         ));
         let task = Task::new("Task", "Workshop", Priority::Medium, None).unwrap();
-        store.insert(&task).unwrap();
+        tasks.insert(&task).unwrap();
         assert!(matches!(
-            store.set_spatial_position(&task.id, f64::NAN, 2., 0),
+            view.set_position(&tasks, &task.id, f64::NAN, 2., 0),
             Err(StorageError::Spatial(_))
         ));
-        assert!(store.spatial_positions().unwrap().is_empty());
+        assert!(view.positions().unwrap().is_empty());
     }
+
     #[test]
-    fn exposes_task_dependencies_without_inventing_links() {
-        let mut store = SqliteStore::in_memory().unwrap();
+    fn canonical_dependency_edges_are_distinct_from_view_state() {
+        let mut tasks = SqliteStore::in_memory().unwrap();
         let a = Task::new("A", "Ops", Priority::Low, None).unwrap();
         let b = Task::new("B", "Ops", Priority::Low, None).unwrap();
-        store.insert(&a).unwrap();
-        store.insert(&b).unwrap();
-        store
+        tasks.insert(&a).unwrap();
+        tasks.insert(&b).unwrap();
+        tasks
             .set_dependencies(&b.id, std::slice::from_ref(&a.id))
             .unwrap();
         assert_eq!(
-            store.spatial_dependency_edges().unwrap(),
+            tasks.spatial_dependency_edges().unwrap(),
             vec![(a.id, b.id)]
         );
+    }
+
+    #[test]
+    fn rejects_unknown_sidecar_schema_versions() {
+        let view = SpatialViewStore::in_memory().unwrap();
+        view.db.pragma_update(None, "user_version", 22_i64).unwrap();
+        drop(view);
+        // View schema validation is intentionally independent of canonical DB.
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("positions.sqlite3");
+        let db = Connection::open(&path).unwrap();
+        db.pragma_update(None, "user_version", 22_i64).unwrap();
+        assert!(matches!(
+            SpatialViewStore::open(&path),
+            Err(StorageError::UnsupportedSpatialSchemaVersion { found: 22, .. })
+        ));
     }
 }
