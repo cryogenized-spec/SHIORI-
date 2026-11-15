@@ -53,6 +53,20 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 
 **M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the standalone browser mode still uses demo data, while the optional development bridge exposes local SQLite assignments (not authenticated multi-user permissions); there is no authenticated production API; task durations and prerequisite links are stored in SQLite and used by the CLI planner, while an optional development-only localhost bridge allows the web prototype to view and mutate that same task database. There is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
 
+## Infinite Spatial Workspace — Rust-backed alpha
+
+The existing desktop task board retains its own navigation. The **Spatial canvas** link opens `isw.html`; when the local Rust bridge is running on loopback, the canvas reads real SQLite task records and verified prerequisite links. The **Live Rust** control refreshes it. The old board remains available through **← Board**.
+
+**Implemented against Rust:** task import/read, real stored dependency edges, and visual card positions in a separate SQLite schema-v4 table with optimistic view revision checks. Creating a **Task** on the live canvas calls the existing local Rust task service and saves its view position. Moving a card **never alters task status, version or prerequisites**. Layout starts locked; users must explicitly unlock and enter Move mode.
+
+**Still illustrative in the HTML:** non-task artefacts and arbitrary links, comments/activity/automations, external GitHub import, EAI-generated responses, chat messages and model/API interactions. The optional AI dock is a visual-only preview; there is no backend key storage, user login, authenticated model connection, or MCP service in this slice. Drawing a link in fixture mode must not be treated as a real task dependency.
+
+Canvas controls retained from v0.5: circuit/curved/straight connectors, pan/zoom, pinch protection, map-marker semantic zoom, minimap, full artefact sheet and preview EAI stage. Android-native ISW integration remains separate future work.
+
+CI workflow **SHIORI Rust-backed ISW snapshot** compiles the Rust CLI, seeds a temporary fictional offshore task graph, checks the local bridge, and uploads desktop/mobile screenshots. It never uses real task data.
+
+**Security:** the local bridge is a development adapter bound to 127.0.0.1; do not expose it to a public hostname, LAN or tunnel.
+
 ## Layout
 
 - `crates/shiori-core`: standalone task domain rules
