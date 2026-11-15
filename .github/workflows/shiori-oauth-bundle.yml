@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   oauth-bundle:
@@ -16,7 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          persist-credentials: false
+          persist-credentials: true
+          ref: ${{ github.event.pull_request.head.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -41,6 +42,16 @@ jobs:
           }
           console.log('OAuth bundle and minimum security-gate checks passed');
           NODE
+      - name: Publish reviewed deployment bundles in source branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f cloudflare/shiori-mcp/oauth/dist/shiori-auth.js cloudflare/shiori-mcp/oauth/dist/shiori-resource.js
+          if ! git diff --cached --quiet; then
+            git commit -m "build(oauth): refresh pinned provider bundles"
+            git push origin HEAD:refs/heads/${{ github.event.pull_request.head.ref }}
+          fi
       - name: Save deployable OAuth and resource bundles
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
