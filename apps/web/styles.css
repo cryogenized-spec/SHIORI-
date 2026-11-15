@@ -213,3 +213,32 @@
 .native-tag-editor p{font-size:11px;line-height:1.5;color:var(--muted)}
 .native-tag-editor button{min-height:44px;justify-self:start}
 .native-tag-editor :focus-visible{outline:2px solid var(--plum);outline-offset:2px}
+
+
+/* SH-MEM-002: visible, local-only contextual language memory. */
+.intent-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+.intent-form{display:grid;gap:10px;margin-top:17px}
+.intent-form label{font-size:11px;color:var(--muted);font-weight:650}
+.intent-form input,.intent-form textarea,.intent-form select{width:100%;min-width:0;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:11px;font:inherit;font-size:12px}
+.intent-form textarea{resize:vertical;line-height:1.5}
+.intent-form input:focus-visible,.intent-form textarea:focus-visible,.intent-form select:focus-visible,.intent-rule button:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
+.intent-form button{justify-self:start;margin-top:4px}
+.intent-preview{margin-top:16px;padding:13px;border:1px solid var(--line);background:var(--surface2);border-radius:9px}
+.intent-preview strong{font-size:12px}
+.intent-preview p{margin:7px 0}
+.intent-preview small{color:var(--muted);font-size:10px;line-height:1.6}
+.intent-list-head{display:flex;justify-content:space-between;align-items:center;margin:20px 0 9px;gap:12px}
+.intent-list-head h3{font-size:15px}
+.intent-list-head span{font-size:11px;color:var(--muted)}
+.intent-rule{border:1px solid var(--line2);background:var(--panel);padding:15px;border-radius:11px;margin-bottom:9px}
+.intent-rule-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.intent-rule-header strong{display:block;font-size:13px;line-height:1.5}
+.intent-rule-header span:not(.intent-state){display:block;margin-top:4px;font-size:10px;color:var(--muted)}
+.intent-state{font-size:9px;white-space:nowrap;color:var(--muted);border:1px solid var(--line);padding:5px 8px;border-radius:7px}
+.intent-state.is-established{color:var(--text);border-color:var(--plum)}
+.intent-rule p{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:12px;line-height:1.6;margin:13px 0}
+.intent-rule-foot{display:flex;align-items:center;justify-content:space-between;gap:9px;font-size:10px;color:var(--muted);flex-wrap:wrap}
+.intent-rule-foot div{display:flex;gap:7px}
+.intent-rule-foot button{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:7px;padding:7px 9px;font-size:10px;cursor:pointer}
+.intent-notice,.intent-empty{padding:16px;border:1px solid var(--line2);border-radius:10px;color:var(--muted);font-size:12px;line-height:1.5}
+@media(max-width:760px){.intent-grid{grid-template-columns:1fr}.intent-rule-header{flex-wrap:wrap}.intent-rule-foot{align-items:flex-start}}

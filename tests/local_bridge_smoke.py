@@ -45,6 +45,55 @@ def exercise(cli):
             status, js = request("GET", "/app.js")
             assert status == 200 and b"bootstrapBridge" in js
 
+            # Contextual intent memory must use the same local Rust bridge,
+            # remain separately scoped and never trigger a provider workflow.
+            assert request("GET", "/api/intents") == (
+                200, {"rules": [], "source": "local-rust"}
+            )
+            training = {
+                "phrase": "Make a note of this",
+                "project": "Field Research",
+                "meaning": "Append a timestamped third-person entry to the active journal",
+                "expected_revision": 0,
+            }
+            status, learned = request("POST", "/api/intents", training)
+            assert status == 200 and learned["executed"] is False, learned
+            assert learned["revision"] == 1
+            rules = request("GET", "/api/intents")[1]["rules"]
+            assert len(rules) == 1
+            assert rules[0]["project_id"] == "Field Research"
+            assert rules[0]["procedure_id"] == "intent.unbound"
+            assert rules[0]["meaning"] == training["meaning"]
+            status, meaning = request("POST", "/api/intents/resolve", {
+                "phrase": "MAKE A NOTE OF THIS!",
+                "project": "Field Research",
+            })
+            assert status == 200 and meaning["executed"] is False
+            assert meaning["result"]["reason"] == "needs_verification"
+            assert meaning["result"]["meaning"] == training["meaning"]
+            status, unknown = request("POST", "/api/intents/resolve", {
+                "phrase": "make a note of this",
+                "project": "Another Project",
+            })
+            assert status == 200 and unknown["result"]["reason"] == "unrecognised"
+            assert request("POST", "/api/intents", training)[0] == 409
+            changed = dict(training, expected_revision=1, meaning="Record to a different journal")
+            status, updated_rule = request("POST", "/api/intents", changed)
+            assert status == 200 and updated_rule["revision"] == 2
+            assert request("POST", "/api/intents/revoke", {
+                "rule_id": learned["rule_id"], "expected_revision": 1,
+            })[0] == 409
+            status, forgotten = request("POST", "/api/intents/revoke", {
+                "rule_id": learned["rule_id"], "expected_revision": 2,
+            })
+            assert status == 200 and forgotten["revoked"] is True
+            assert request("GET", "/api/intents")[1]["rules"] == []
+            assert request("POST", "/api/intents", {
+                **training, "procedure_id": "arbitrary.javascript",
+            })[0] == 400
+            assert request("POST", "/api/intents", training,
+                           Origin="http://outside.invalid")[0] == 403
+
             creation_status, created = request("POST", "/api/tasks", {
                 "title": "Build the local bridge",
                 "project": "SHIORI", "priority": "high",

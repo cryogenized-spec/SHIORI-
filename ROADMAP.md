@@ -33,6 +33,30 @@ The following are the first requirements confirmed from real use of task manager
 | SH-007 | **Expressive Agent Interface (EAI)** | Schema-driven interactive explanations and manipulable 2D/polygonal scenes, with optional layered/3D views, provenance, AI-proposed scene changes and MCP Apps transport. Examples include an explorable locust lifecycle and a task-blocker explanation. Text-only fallback required. | P1 |
 | SH-008 | **Optional in-app AI Companion** | Edge-docking resizable panel; draggable border-snapping launcher and dismiss/reopen; persistent conversations; provider-aware OpenAI models, reasoning/output preferences and presets; universal settings for BYOK secret setup via user-owned backend. Independent of external SHIORI MCP, no embedded mandatory AI. | P1 |
 
+## SH-MEM-002 — Contextual intent memory (experimental slice, 2026-11-15)
+
+**Goal:** learn what a user's expressions mean in their current work context,
+especially after corrective feedback, without tying interpretation to an AI
+model or requiring paid memory infrastructure.
+
+The PR adds a pure Rust contextual-intent resolver, durable optional
+SQLite intent sidecar, CLI, and a development-only Language & intent view
+that uses SHIORI's existing localhost bridge. Users can manually teach,
+inspect, test and revoke contextual meanings. A phrase remains
+provisional until two verified successful uses; project-specific meanings
+override workspace meanings; corrections invalidate evidence for older
+meanings. Interpretation is not authorization.
+
+**Not implemented:** autonomous identification of corrections in chat,
+workflow execution, semantic aliases, Android-native UI, user memory settings,
+authenticated shared application service, or live MCP tools. These require
+the feature gates in [ADR 0006](docs/adr/0006-contextual-intent-memory.md)
+and must not be advertised as deployed.
+
+Elara's observation/consolidation code and provider-neutral contracts are
+reference material for a future native recollection subsystem. Hindsight
+remains an **optional future provider**, not a hosting or payment requirement.
+
 ## Design memo — 2026-11-14: SHIORI inbox, MCP and ClickUp interoperation
 
 **Decision and intent (confirmed by user):** SHIORI owns a first-class universal inbox independent of any third-party provider. ChatGPT connects to SHIORI's own MCP and can inspect, triage, prepare conversions, link records and request scheduling through SHIORI domain/application services. This is **not** a replacement, duplicate or proxy for ClickUp Serviteur; Serviteur remains a separate AI-to-ClickUp integration.
@@ -256,7 +280,7 @@ tests/              # integration, contract, performance and migration tests
 3. **Task model:** single-user-first with team-ready permissions vs. a full multi-user model from day one.
 4. **Synchronization:** operation-log vs. other change-tracking approaches; conflict-resolution contract; local storage and server DB adapters.
 5. **Scheduling:** precise policy for ranking, task splitting, manually pinned time blocks, recurring schedules, travel/break constraints, and overflow.
-6. **MCP tool set:** adopt the ADR 0004 and versioned 113-operation draft catalogue as a **planning inventory**, not a deployed all-at-once server; validate auth scopes, confirmation, write audit trails and UI resource versions before marking entries available.
+6. **MCP tool set:** adopt the ADR 0004 and versioned 118-operation draft catalogue as a **planning inventory**, not a deployed all-at-once server; validate auth scopes, confirmation, write audit trails and UI resource versions before marking entries available.
 7. **OCR:** engine choices, offline-language support, image retention, confidence indicators, and user verification.
 8. **CalDAV:** required VTODO fields, compatibility matrix, recurrence behaviour, mapping losses, and treatment of newer extensions.
 9. **Release scope:** whether M6 OCR and CalDAV are firm v1.0 blockers or early post-v1 additions, based on measured effort.

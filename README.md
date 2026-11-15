@@ -53,6 +53,31 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 
 **M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the standalone browser mode still uses demo data, while the optional development bridge exposes local SQLite assignments (not authenticated multi-user permissions); there is no authenticated production API; task durations and prerequisite links are stored in SQLite and used by the CLI planner, while an optional development-only localhost bridge allows the web prototype to view and mutate that same task database. There is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
 
+## Experimental contextual-intent memory (SH-MEM-002)
+
+A local-only, model-independent prototype records explicit corrections such as
+"make a note of this" meaning "append to the active research journal," then
+requires verified successful uses before skipping repeated clarification.
+It does **not** automatically observe conversations or execute procedures. In the localhost Rust bridge, the **Language & intent** sidebar view can manually teach, inspect, test and revoke expressions. Android and static-demo views do not create a separate memory store.
+
+```bash
+cargo run -p shiori-cli -- intent-correct "make a note of this" \
+  --meaning "Append a timestamped entry in the active journal" \
+  --procedure journal.append --workspace personal --project research \
+  --evidence message.001
+cargo run -p shiori-cli -- intent-resolve "make a note of this" \
+  --workspace personal --project research
+# Use the returned rule ID and revision after a host-verified successful action:
+cargo run -p shiori-cli -- intent-success RULE_ID \
+  --if-revision 1 --evidence outcome.001
+```
+
+Intent rules live in a separate versioned `tasks.intent.sqlite3` sidecar
+alongside the local task database. No API subscription or external server is
+necessary. The central operation registry contains five **planned** contextual-intent MCP contracts; they are **not deployed tools**.
+See [ADR 0006](docs/adr/0006-contextual-intent-memory.md) for the trust and
+confirmation boundaries and [SH-MEM-002](ROADMAP.md#sh-mem-002--contextual-intent-memory-experimental-slice-2026-11-15).
+
 ## OAuth pairing and read-only sync preview
 
 Two additional user-owned Cloudflare Workers have been deployed: `shiori-auth` (OAuth issuer, separate KV) and `shiori-mcp-oauth` (OAuth-protected MCP resource using a service binding). Independent live tests passed OAuth discovery, PKCE S256 metadata, audience metadata and unauthenticated HTTP 401 denial. **Owner authorization remains disabled until the approval secret is installed on `shiori-auth`**; a successful ChatGPT OAuth login and authorized MCP tool call have not yet been demonstrated. The existing `shiori-mcp-alpha` bearer service stays available.

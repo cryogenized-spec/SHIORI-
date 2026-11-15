@@ -14,6 +14,7 @@ from datetime import date, datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "apps" / "web"
@@ -23,6 +24,14 @@ FIELDS = ("id", "title", "notes", "project", "priority", "status",
           "due_on", "created_at", "updated_at", "estimate_minutes",
           "version", "assignee_id")
 ATTENTION_FIELDS = FIELDS + ("blocked",)
+INTENT_FIELDS = (
+    "id", "workspace_id", "project_id", "phrase", "meaning", "procedure_id",
+    "correction_count", "verified_successes", "revision", "last_evidence_id",
+)
+INTENT_RESOLVE_FIELDS = (
+    "decision", "reason", "rule_id", "meaning", "procedure_id",
+    "project_id", "revision", "verified_successes",
+)
 UUID = re.compile(r"^[a-fA-F0-9-]{36}$")
 MAX_BODY = 8192
 MAX_EXPORT = 16 * 1024 * 1024
@@ -165,7 +174,9 @@ def make_server(port, cli, database):
                 args, capture_output=True, timeout=15, check=False
             )
             if result.returncode:
-                if b"RevisionConflict" in result.stderr or b"task was changed by another writer" in result.stderr:
+                if (b"RevisionConflict" in result.stderr
+                        or b"task was changed by another writer" in result.stderr
+                        or b"intent rule revision conflict" in result.stderr):
                     raise RevisionConflict("task was changed; reload before saving")
                 raise ValueError("Rust task command was rejected")
             if len(result.stdout) > MAX_EXPORT:
@@ -185,6 +196,20 @@ def make_server(port, cli, database):
                 except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
                     self.log_error("Rust read failed: %s", type(exc).__name__)
                     self.response(503, {"error": "local Rust storage unavailable"})
+            elif path == "/api/intents":
+                try:
+                    rules = decode_isw_framed(
+                        self.run_cli("bridge-intents"),
+                        b"SHIORI-INTENTS-1\n", INTENT_FIELDS
+                    )
+                    for rule in rules:
+                        for field in ("correction_count", "verified_successes", "revision"):
+                            rule[field] = int(rule[field])
+                        rule["project_id"] = rule["project_id"] or None
+                    self.response(200, {"rules": rules, "source": "local-rust"})
+                except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                    self.log_error("Intent query failed: %s", type(exc).__name__)
+                    self.response(503, {"error": "local intent memory unavailable"})
             elif path == "/api/isw/scene":
                 try:
                     tasks = decode_snapshot(self.run_cli("bridge-dump"))
@@ -247,6 +272,83 @@ def make_server(port, cli, database):
                 if not isinstance(data, dict):
                     raise ValueError("JSON object expected")
                 path = urlsplit(self.path).path
+                if path == "/api/intents/resolve":
+                    if set(data) != {"phrase", "project"}:
+                        raise ValueError("intent resolution accepts phrase and project")
+                    phrase, project = data["phrase"], data["project"]
+                    if not isinstance(phrase, str) or not 2 <= len(phrase.strip()) <= 160:
+                        raise ValueError("invalid expression")
+                    if project is not None and (
+                        not isinstance(project, str) or not 0 < len(project.strip()) <= 128
+                        or any(ord(char) < 32 for char in project)
+                    ):
+                        raise ValueError("invalid project")
+                    cmd = ["bridge-intent-resolve", phrase]
+                    if project is not None:
+                        cmd.extend(["--project", project])
+                    found = decode_isw_framed(
+                        self.run_cli(*cmd),
+                        b"SHIORI-INTENT-RESOLVE-1\n", INTENT_RESOLVE_FIELDS
+                    )
+                    if len(found) != 1:
+                        raise ValueError("invalid Rust intent response")
+                    item = found[0]
+                    for field in ("revision", "verified_successes"):
+                        item[field] = int(item[field]) if item[field] else None
+                    item["project_id"] = item["project_id"] or None
+                    self.response(200, {"result": item, "executed": False})
+                    return
+                if path == "/api/intents":
+                    if set(data) != {"phrase", "meaning", "project", "expected_revision"}:
+                        raise ValueError("only reviewed intent fields are accepted")
+                    phrase, meaning, project = data["phrase"], data["meaning"], data["project"]
+                    version = data["expected_revision"]
+                    if not isinstance(phrase, str) or not 2 <= len(phrase.strip()) <= 160:
+                        raise ValueError("invalid expression")
+                    if not isinstance(meaning, str) or not 0 < len(meaning.strip()) <= 2000:
+                        raise ValueError("invalid intended meaning")
+                    if project is not None and (
+                        not isinstance(project, str) or not 0 < len(project.strip()) <= 128
+                        or any(ord(char) < 32 for char in project)
+                    ):
+                        raise ValueError("invalid project")
+                    if type(version) is not int or not 0 <= version <= 2**63 - 1:
+                        raise ValueError("invalid expected intent revision")
+                    # Development-only, explicit human-reviewed correction.
+                    # No arbitrary procedure binding or AI execution authority.
+                    command = [
+                        "intent-correct", phrase, "--meaning", meaning,
+                        "--procedure", "intent.unbound", "--workspace", "personal",
+                        "--evidence", "local-form." + uuid4().hex,
+                        "--if-revision", str(version),
+                    ]
+                    if project is not None:
+                        command.extend(["--project", project])
+                    output = self.run_cli(*command).decode("utf-8")
+                    acknowledgement = re.search(
+                        r"Recorded interpretation ([a-f0-9-]{36}) \[revision ([0-9]+)\]",
+                        output
+                    )
+                    if not acknowledgement:
+                        raise ValueError("unexpected Rust intent acknowledgement")
+                    self.response(200, {
+                        "rule_id": acknowledgement.group(1),
+                        "revision": int(acknowledgement.group(2)),
+                        "executed": False,
+                    })
+                    return
+                if path == "/api/intents/revoke":
+                    if set(data) != {"rule_id", "expected_revision"}:
+                        raise ValueError("revocation requires rule and revision")
+                    if not isinstance(data["rule_id"], str) or not UUID.fullmatch(data["rule_id"]):
+                        raise ValueError("invalid intent ID")
+                    revision = valid_version(data["expected_revision"])
+                    self.run_cli(
+                        "intent-revoke", data["rule_id"],
+                        "--if-revision", str(revision)
+                    )
+                    self.response(200, {"revoked": True, "executed": False})
+                    return
                 if path == "/api/isw/position":
                     if set(data) != {"task_id", "x", "y", "expected_revision"}:
                         raise ValueError("only spatial position fields are accepted")

@@ -1,6 +1,6 @@
 # Shiori Cloudflare MCP — Phase A
 
-This module is the first **remotely deployed, single-owner MCP server** for Shiori. The Worker exposes a **nine-operation subset** of the [113 planned operations](../../docs/api/operations.v1.json). It is a security-gated cloud alpha, not a substitute for the Rust local task database. GitHub Actions verified live `/health` (200) and unauthenticated `/mcp` rejection (401), using Cloudflare's recommended descriptive User-Agent; external *authenticated* tool calls remain to be validated.
+This module is the first **remotely deployed, single-owner MCP server** for Shiori. The Worker exposes a **nine-operation subset** of the [118 registered operations](../../docs/api/operations.v1.json). It is a security-gated cloud alpha, not a substitute for the Rust local task database. GitHub Actions verified live `/health` (200) and unauthenticated `/mcp` rejection (401), using Cloudflare's recommended descriptive User-Agent; external *authenticated* tool calls remain to be validated.
 
 ## Current limitations
 
@@ -70,4 +70,4 @@ Tests use a disposable in-memory SQLite database and do not touch Cloudflare or 
 
 1. Implement standards-compliant OAuth/PKCE pairing for ChatGPT and similar remote clients; use explicit user identity and revocable sessions.
 2. Introduce a Rust application-service facade over canonical local tasks and a well-defined authenticated sync protocol. Prove field mapping, conflicts, tombstones, revisions and offline queue replay.
-3. Add live EAI/MCP Apps UI resources and typed graph/inbox operations only as Rust-backed services become available. Use the 113-operation registry as a planning inventory, not a dynamic arbitrary-execution endpoint.
+3. Add live EAI/MCP Apps UI resources and typed graph/inbox operations only as Rust-backed services become available. Use the 118-operation registry as a planning inventory, not a dynamic arbitrary-execution endpoint.

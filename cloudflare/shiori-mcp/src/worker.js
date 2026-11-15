@@ -5,7 +5,7 @@
  * the canonical local Rust/SQLite database. No ClickUp/Gmail/LLM access.
  *
  * This Worker intentionally registers ONLY implemented operations.
- * The 113-operation registry remains a design document, not a live API.
+ * The 118-operation registry remains a design document, not a live API.
  */
 const SERVER="shiori-mcp-cloudflare", VERSION="0.1.0-alpha";
 const PROTOCOL="2025-06-18", MAX_BODY=32768, MAX_LIMIT=100;
@@ -98,7 +98,7 @@ async function writeOnce(env,w,id,key,result,statement){
 async function run(id,arg,env){
  const def=BY_ID.get(id);if(!def)E(404,"UNSUPPORTED_CAPABILITY","Operation not deployed");
  const a=validate(def,arg,env),db=env.DB,w=a.workspace_id;
- if(id==="system.capabilities.read")return {capabilities:{server:SERVER,version:VERSION,workspace_id:w,backend:"isolated-cloudflare-d1",local_rust_sync:false,oauth:false,authentication:"single-user-bearer",planned_total:113},operations:OPERATIONS.map(o=>o.id)};
+ if(id==="system.capabilities.read")return {capabilities:{server:SERVER,version:VERSION,workspace_id:w,backend:"isolated-cloudflare-d1",local_rust_sync:false,oauth:false,authentication:"single-user-bearer",planned_total:118},operations:OPERATIONS.map(o=>o.id)};
  if(id==="tasks.list"){
   const {offset,limit}=listParams(a);
   const rows=await db.prepare("SELECT * FROM remote_tasks WHERE workspace_id=? AND deleted_at IS NULL ORDER BY created_at DESC,id LIMIT ? OFFSET ?").bind(w,limit,offset).all();

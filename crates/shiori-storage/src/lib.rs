@@ -11,6 +11,9 @@ use thiserror::Error;
 mod spatial;
 pub use spatial::SpatialViewStore;
 
+pub mod intent;
+pub use intent::{IntentStore, IntentStoreError};
+
 const SCHEMA_VERSION: i64 = 3;
 
 const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at, estimate_minutes, assignee_id FROM tasks";

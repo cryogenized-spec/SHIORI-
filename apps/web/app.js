@@ -35,6 +35,7 @@
     timeline:['Timeline','See what comes next.','A lightweight view of your upcoming commitments.','PLANNING','Next seven days'],
     reports:['Reports','Progress without pressure.','Useful signals, with no productivity theatre.','INSIGHTS','Workspace report'],
     automations:['Automations','Make routine work lighter.','Automation belongs to the user, not a subscription tier.','WORKFLOWS','Automation centre'],
+    language:['Language & intent','Remember what you mean.','Teach SHIORI the meaning of your shorthand without giving it authority to execute tools.','CONTINUITY','Language & intent'],
     settings:['Settings','Made to be yours.','Control the workspace, your information and appearance.','PREFERENCES','Workspace settings']
   };
   let tasks;
@@ -44,6 +45,41 @@
   const taskStoreKey=mode==='android-local'?'shiori-android-local-tasks':'shiori-demo-tasks';
   try {const saved = JSON.parse(localStorage.getItem(taskStoreKey) || 'null');tasks = Array.isArray(saved) ? saved : mode==='android-local'?[]:defaultTasks;} catch {tasks = mode==='android-local'?[]:defaultTasks;}
   let attentionSnapshot=[];let attentionFreshAt=null;
+  // Local Rust holds the only durable intent-memory store. No browser shadow copy.
+  let intentRules=[], intentNotice='', intentPreview=null, intentBusy=false;
+  function normalizeIntentPhrase(text) {
+    return String(text||'').trim().replace(/\s+/g,' ').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,'').toLowerCase();
+  }
+  async function fetchIntentRules() {
+    if(mode!=='live')return;
+    intentBusy=true;
+    try {
+      const response=await fetch('/api/intents',{cache:'no-store'});
+      if(!response.ok)throw new Error('Unable to read local intent memory');
+      const data=await response.json();
+      if(!Array.isArray(data.rules))throw new Error('Invalid intent memory response');
+      intentRules=data.rules;
+      intentNotice='';
+    }catch(error) {
+      intentNotice=error.message||'Unable to read local intent memory';
+    }finally {
+      intentBusy=false;
+      if(view==='language')render();
+    }
+  }
+  async function postIntent(path,payload) {
+    const response=await fetch(path,{
+      method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const result=await response.json();
+    if(!response.ok) {
+      if(response.status===409)await fetchIntentRules();
+      throw new Error(response.status===409?'Memory changed. Reloaded; please review and retry.':
+        (typeof result.error==='string'?result.error:'Local memory operation failed'));
+    }
+    return result;
+  }
   const fromStoredTask = (t) => ({
     id:t.id, title:t.title, description:t.notes||'', project:t.project,
     priority:t.priority, status:t.status==='in_progress'?'progress':t.status,
@@ -89,6 +125,7 @@
       $('#footerMode').textContent='LOCAL RUST / SQLITE · OFFLINE';
       $('#railMode').textContent='● LOCAL DATABASE';
       await reloadBridge();
+      if(view==='language')await fetchIntentRules();
     } catch {
       if(mode==='checking') mode='demo';
       else if(mode==='live') {
@@ -785,10 +822,61 @@
   function renderProjects(){const projects=mode==='demo'?Object.keys(projectDescriptions):[...new Set(tasks.map(t=>t.project))];return `<div class="project-grid">${projects.map(p=>{const all=tasks.filter(t=>t.project===p),done=all.filter(t=>t.status==='done').length,pct=all.length?Math.round(done/all.length*100):0;return `<article class="project-card" data-project="${escapeHTML(p)}"><div class="project-card-top"><span>${projectGlyphs[p]||'◇'}</span><span>${all.length} tasks ${icon('chevron')}</span></div><h3>${escapeHTML(p==='Core'?'Core platform':p==='Interface'?'Interface design':p)}</h3><p>${escapeHTML(projectDescriptions[p]||'Local project')}</p><div class="project-progress"><span>${done} of ${all.length} completed</span><strong>${pct}%</strong></div><div class="project-bar"><div style="width:${pct}%"></div></div></article>`}).join('')}</div>`;}
   function renderTimeline(){return `<div class="timeline">${Array.from({length:7},(_,i)=>{let d=new Date(`${newDate(i)}T12:00:00`);let matches=tasks.filter(t=>t.due===newDate(i));return `<section class="timeline-day"><header>${new Intl.DateTimeFormat('en-GB',{weekday:'short'}).format(d)}<b>${d.getDate()}</b></header>${matches.map(t=>`<div class="timeline-pill" data-detail="${escapeHTML(t.id)}">${escapeHTML(t.title)}</div>`).join('')}${!matches.length?'<div style="font-size:10px;color:var(--faint);margin-top:14px">Open space</div>':''}</section>`}).join('')}</div>`;}
   function renderReports(){const c=count(),pct=c.all?Math.round(c.done/c.all*100):0;const projects=mode==='demo'?Object.keys(projectDescriptions):[...new Set(tasks.map(t=>t.project))];return `<div class="report-grid"><article class="report-card"><div class="section-eyebrow">COMPLETION RATE</div><div class="report-big">${pct}%</div><p>${c.done} tasks complete across ${c.all} ${mode==='demo'?'demo':'local'} tasks.</p><div class="report-line"><span>Progress</span><div><span style="width:${pct}%"></span></div><b>${pct}%</b></div></article><article class="report-card"><div class="section-eyebrow">PORTFOLIO HEALTH</div><div class="report-big">${projects.length.toString().padStart(2,'0')}</div><p>Projects in progress. All enterprise report types should eventually be freely accessible.</p>${projects.map(p=>{let a=tasks.filter(t=>t.project===p);let n=Math.round(a.filter(t=>t.status==='done').length/(a.length||1)*100);return `<div class="report-line"><span>${escapeHTML(p)}</span><div><span style="width:${n}%"></span></div><b>${n}%</b></div>`}).join('')}</article></div>`;}
+  function languageProjectOptions() {
+    const projects=[...new Set(tasks.map(t=>t.project).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    return '<option value="">All projects (workspace-wide)</option>'+
+      projects.map(p=>'<option value="'+escapeHTML(p)+'">'+escapeHTML(p)+'</option>').join('');
+  }
+  function renderLanguage(){
+    if(mode!=='live')return '<article class="settings-card"><h3>Local memory is unavailable here</h3>'+
+      '<p>This feature needs the local Rust/SQLite workspace bridge. Demo and Android views do not keep a second, unsynchronised memory database. No cloud service is required.</p></article>';
+    const projects=languageProjectOptions();
+    const rules=intentRules.map(rule=>{
+      const project=rule.project_id?'Project: '+rule.project_id:'All projects';
+      const established=rule.verified_successes>=2;
+      return '<article class="intent-rule"><div class="intent-rule-header"><div><strong>'+escapeHTML(rule.phrase)+
+        '</strong><span>'+escapeHTML(project)+'</span></div><span class="intent-state '+(established?'is-established':'')+'">'+
+        (established?'Established':'Needs verification')+'</span></div>'+
+        '<p>'+escapeHTML(rule.meaning)+'</p><div class="intent-rule-foot"><span>'+
+        escapeHTML(String(rule.correction_count))+' correction(s) · '+
+        escapeHTML(String(rule.verified_successes))+' verified use(s) · revision '+
+        escapeHTML(String(rule.revision))+'</span><div>'+
+        '<button type="button" data-intent-edit="'+escapeHTML(rule.id)+'">Edit meaning</button>'+
+        '<button type="button" data-intent-revoke="'+escapeHTML(rule.id)+'">Forget</button></div></div></article>';
+    }).join('');
+    const preview=intentPreview
+      ?'<article class="intent-preview" role="status"><strong>'+
+        (intentPreview.decision==='interpreted'?'Recognised interpretation':'Clarification needed')+
+        '</strong><p>'+(intentPreview.meaning?escapeHTML(intentPreview.meaning):
+          'No established meaning was found in this context.')+'</p><small>'+
+        (intentPreview.decision==='interpreted'?'Matched prior verified uses.':
+          'Reason: '+escapeHTML(intentPreview.reason||'unrecognised'))+
+        ' No workflow was executed.</small></article>'
+      :'';
+    return '<div class="intent-grid"><article class="settings-card intent-intro">'+
+      '<h3>Teach a phrase</h3><p>Correct an overly literal interpretation. SHIORI will remember the meaning within this workspace; a project-specific correction takes precedence. This does not connect to Google Docs or grant permission to edit them.</p>'+
+      '<form id="intentTeachForm" class="intent-form">'+
+      '<label for="intentPhrase">When I say…</label><input id="intentPhrase" name="phrase" maxlength="160" required placeholder="Make a note of this">'+
+      '<label for="intentProject">In this context</label><select id="intentProject" name="project">'+projects+'</select>'+
+      '<label for="intentMeaning">I mean…</label><textarea id="intentMeaning" name="meaning" maxlength="2000" required rows="4" placeholder="Open the active journal, add a timestamped third-person entry, and propose links to related thoughts."></textarea>'+
+      '<button type="submit" class="primary-btn" '+(intentBusy?'disabled':'')+'>Remember this meaning</button>'+
+      '</form><p class="settings-hint">Rules are interpretations, not executable procedures. Only explicit, reviewed corrections are stored in this prototype.</p></article>'+
+      '<article class="settings-card intent-try"><h3>Try an interpretation</h3>'+
+      '<p>Test how Rust would interpret a phrase in the selected project, without performing any action.</p>'+
+      '<form id="intentTryForm" class="intent-form">'+
+      '<label for="intentTryPhrase">Expression</label><input id="intentTryPhrase" name="phrase" maxlength="160" required placeholder="Make a note of this">'+
+      '<label for="intentTryProject">Context</label><select id="intentTryProject" name="project">'+projects+'</select>'+
+      '<button type="submit" '+(intentBusy?'disabled':'')+'>Check meaning</button></form>'+preview+
+      '</article></div><div class="intent-list-head"><h3>Learned expressions</h3>'+
+      '<span>'+intentRules.length+' local rule(s)</span></div>'+
+      (intentNotice?'<p class="intent-notice" role="alert">'+escapeHTML(intentNotice)+'</p>':'')+
+      (intentBusy?'<p class="settings-hint">Loading local memory…</p>':'')+
+      (rules||'<p class="intent-empty">No learned expressions yet. Teach one above, or continue working without memory.</p>');
+  }
   function renderAutomations(){return `<div class="settings-list">${[['Recurring work','Automatic task generation from repeat rules.','Planned'],['Rules & triggers','When status, date or project changes, take a defined action.','Planned'],['Webhooks','Connect external services through auditable, permission-controlled events.','Planned'],['MCP actions','Let authorized AI assistants work with tasks through typed tools.','Planned']].map(([n,d,s])=>`<article class="automation-card"><div><h3>${n}</h3><p>${d}</p><span class="status-tag">${s.toUpperCase()} · NOT IMPLEMENTED</span></div><button data-preview-feature="${n}">Preview</button></article>`).join('')}</div>`;}
   function renderSettings(){return `<div class="settings-list"><article class="settings-card"><h3>Appearance</h3><p>Choose between ink-dark and parchment-light workspaces. The approved visual identity remains consistent in both.</p><div class="settings-actions"><button data-theme="dark">Ink dark</button><button data-theme="light">Parchment light</button></div></article><article class="settings-card"><h3>Your data</h3><p>${mode==='live'?'Tasks are stored in local SQLite and changed through the Rust CLI using a loopback-only development bridge. No cloud or account is required. Safe backups and production authentication are still planned.':mode==='android-local'?nativeCanary.selected?'Debug native canary: Rust SQLite supplies the normal task list. The original WebView tasks remain stored separately for explicit rollback. No account or network.':'Offline Android shell: tasks live only in the embedded WebView local storage on this device. No account, network or remote server is involved. Native SQLite/Rust integration and safe backups are still needed.':'Static demo tasks are stored only in this browser using localStorage. Nothing is sent to a server.'}</p>${mode==='android-local'?'<div class="settings-actions"><button type="button" id="exportAndroidBackup">Export JSON backup</button><button type="button" id="importAndroidBackup">Restore backup</button></div><p class="settings-hint">Experimental Rust SQLite safety copy: a separate, private on-device copy. The current task store remains WebView-based while we validate migration.</p><div class="settings-actions"><button type="button" id="saveNativeVault">Save native safety copy</button><button type="button" id="recoverNativeVault">Recover native safety copy</button></div><p class="settings-hint">Migration preview: stage a copy of your current tasks into SHIORI’s canonical Rust/SQLite format. Your current tasks remain in WebView storage; this does not enable native editing or sync.</p><div class="settings-actions"><button type="button" id="stageCanonicalShadow">Stage Rust migration preview</button><button type="button" id="auditCanonicalShadow">Audit staged Rust preview</button><button type="button" id="auditNativeMigrationParity">Verify migration field parity</button></div><p class="settings-hint">Debug-only native source pilot: requires verified field parity and a separate rollback snapshot. Returning to legacy tasks rechecks both the vault and migration source; mismatched records block the switch. Native-only edits are NOT merged into legacy tasks.</p><div class="settings-actions"><button type="button" id="activateNativeCanary">Enable Rust task source · debug only</button><button type="button" id="rollbackNativeCanary">Verify and return to Android tasks</button>'+(window.shioriNativeDebugCanaryAvailable===true?'<button type="button" id="resumeInterruptedNativeCanary">Verify and resume interrupted cutover</button>':'')+'</div><p class="settings-hint">Experimental native Rust task editor: creates a third, independent SQLite working copy. Tasks added or changed there do not appear in the normal Android list. Use it only to test the native engine.</p><div class="settings-actions"><button type="button" id="openNativeWorkingCopy">Open native Rust task workspace</button><button type="button" id="exportNativeWorkingCopy">Export native SQLite backup</button><button type="button" id="recoverNativeSQLite">Stage isolated SQLite recovery</button><button type="button" id="inspectNativeSQLiteRecovery">Inspect recovered preview</button></div>'+nativePreviewRender()+'':''}${mode==='demo'?'<div class="settings-actions"><button id="resetDemo">Reset demo tasks</button></div>':''}</article><article class="settings-card"><h3>Official SHIORI visual identity</h3><p>The ink-brush 栞 and modern Latin wordmark carry across launch, splash and publication assets.</p><img src="assets/shiori-logo.webp" alt="Approved SHIORI plum and black ink calligraphic logo" style="width:100%;max-width:460px;border-radius:10px;margin-top:14px" /></article><article class="settings-card"><h3>AI-optional by design</h3><p>No embedded model, no inference bills, and no required provider account. A permission-controlled MCP server is on the roadmap, not connected in this prototype.</p></article></div>`;}
   function renderUpcoming(){let upcoming=[...tasks].filter(t=>t.status!=='done' && t.due>=newDate()).sort((a,b)=>a.due.localeCompare(b.due)).slice(0,3);$('#upcoming').innerHTML=upcoming.map(t=>{const d=new Date(`${t.due}T12:00:00`);return `<div class="upcoming-item"><div class="upcoming-date"><div>${d.getDate()}<small>${new Intl.DateTimeFormat('en-GB',{month:'short'}).format(d).toUpperCase()}</small></div></div><div class="upcoming-main"><b>${escapeHTML(t.title)}</b><span>${escapeHTML(t.project)} · ${t.mins==null?'No estimate':t.mins+' min estimate'}</span></div></div>`}).join('');}
-  function setView(next){if(next!=='inbox')nativeReadOnly.active=false;view=next;query='';$('#searchInput').value='';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const v=views[view];$('#breadcrumbCurrent').textContent=v[0];$('#pageTitle').innerHTML=escapeHTML(v[1].replace(/\.$/,''))+'<span class="period">.</span>';$('#pageSubtitle').textContent=v[2];$('#sectionEyebrow').textContent=v[3];$('#sectionTitle').textContent=v[4];const regular=['today','attention','inbox','board'];$('#hero').style.display=view==='today'?'flex':'none';$('#stats').style.display=view==='today'||view==='reports'?'grid':'none';$('.quick-search').style.display=regular.includes(view)?'flex':'none';$('#filterButton').style.display=regular.includes(view)?'flex':'none';$('.sort-control').style.display=regular.includes(view)?'inline-flex':'none';$('#viewSwitch').style.display=regular.includes(view)?'flex':'none';$('#viewSwitch').innerHTML=view==='board'?`${icon('check-circle')} List`:`${icon('columns')} Board`;render();closeSidebar();window.scrollTo({top:0,behavior:'instant'});}
+  function setView(next){if(next!=='inbox')nativeReadOnly.active=false;view=next;query='';$('#searchInput').value='';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const v=views[view];$('#breadcrumbCurrent').textContent=v[0];$('#pageTitle').innerHTML=escapeHTML(v[1].replace(/\.$/,''))+'<span class="period">.</span>';$('#pageSubtitle').textContent=v[2];$('#sectionEyebrow').textContent=v[3];$('#sectionTitle').textContent=v[4];const regular=['today','attention','inbox','board'];$('#hero').style.display=view==='today'?'flex':'none';$('#stats').style.display=view==='today'||view==='reports'?'grid':'none';$('.quick-search').style.display=regular.includes(view)?'flex':'none';$('#filterButton').style.display=regular.includes(view)?'flex':'none';$('.sort-control').style.display=regular.includes(view)?'inline-flex':'none';$('#viewSwitch').style.display=regular.includes(view)?'flex':'none';$('#viewSwitch').innerHTML=view==='board'?`${icon('check-circle')} List`:`${icon('columns')} Board`;render();if(view==='language'&&mode==='live')fetchIntentRules();closeSidebar();window.scrollTo({top:0,behavior:'instant'});}
   function render(){
     // Read-only Rust preview never mixes native rows into legacy statistics.
     // The explicitly selected canary is instead the task source for all views.
@@ -814,7 +902,7 @@
       return;
     }
     if(nativeCanary.active&&view==='inbox')$('#sectionTitle').textContent='Rust tasks · debug canary';
-    if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=(nativeCanary.active&&view!=='settings'?
+    if(view==='today')$('#sectionTitle').textContent=calendarSelected?`Tasks for ${displayDate(calendarSelected)}`:views.today[4];let html;if(view==='projects')html=renderProjects();else if(view==='board')html=renderBoard();else if(view==='timeline')html=renderTimeline();else if(view==='reports')html=renderReports();else if(view==='automations')html=renderAutomations();else if(view==='language')html=renderLanguage();else if(view==='settings')html=renderSettings();else html=renderList();$('#mainData').innerHTML=(nativeCanary.active&&view!=='settings'?
       '<section class="native-canary-banner" role="status"><strong>Experimental Rust task source</strong>'+
       '<span>Debug-only · Legacy tasks preserved for rollback</span>'+
       '<button type="button" data-view="settings">Storage settings</button></section>':'')+html;
@@ -1013,6 +1101,27 @@
     if(e.target.closest('[data-remove-task]')){removeTask();return;}
     if(e.target.closest('[data-close-edit]')){closeEdit();return;}
     const project=e.target.closest('[data-project]');if(project){setView('inbox');$('#searchInput').value=project.dataset.project;query=project.dataset.project;render();return;}
+    const editIntent=e.target.closest('button[data-intent-edit]');
+    if(editIntent){
+      const item=intentRules.find(rule=>rule.id===editIntent.dataset.intentEdit);
+      if(item){
+        $('#intentPhrase').value=item.phrase;
+        $('#intentProject').value=item.project_id||'';
+        $('#intentMeaning').value=item.meaning;
+        $('#intentPhrase').focus();
+      }
+      return;
+    }
+    const revokeIntent=e.target.closest('button[data-intent-revoke]');
+    if(revokeIntent){
+      const item=intentRules.find(rule=>rule.id===revokeIntent.dataset.intentRevoke);
+      if(item&&mode==='live'&&window.confirm('Forget this learned interpretation and its evidence?')){
+        postIntent('/api/intents/revoke',{rule_id:item.id,expected_revision:item.revision})
+          .then(()=>fetchIntentRules()).then(()=>toast('Interpretation forgotten'))
+          .catch(error=>{intentNotice=error.message;render();});
+      }
+      return;
+    }
     // The HTML root also has data-theme; only theme buttons can change it.
     const theme=e.target.closest('button[data-theme]');if(theme){setTheme(theme.dataset.theme);return;}
     const close=e.target.closest('[data-close-modal]');if(close){closeModal();return;}
@@ -1177,6 +1286,32 @@
       return;
     }
     nativePreviewMutate({op:'create',title,project:'Native preview',priority:'medium'});
+  });
+
+  document.addEventListener('submit',async event=>{
+    if(event.target.id!=='intentTeachForm'&&event.target.id!=='intentTryForm')return;
+    event.preventDefault();
+    if(mode!=='live'||intentBusy)return;
+    const form=event.target, phrase=form.elements.phrase.value.trim();
+    const project=form.elements.project.value||null;
+    intentBusy=true;
+    try {
+      if(form.id==='intentTeachForm'){
+        const meaning=form.elements.meaning.value.trim();
+        if(!phrase||!meaning)throw new Error('Both an expression and its meaning are required');
+        const existing=intentRules.find(rule=>rule.project_id===project&&
+          normalizeIntentPhrase(rule.phrase)===normalizeIntentPhrase(phrase));
+        await postIntent('/api/intents',{
+          phrase,meaning,project,expected_revision:existing?existing.revision:0
+        });
+        await fetchIntentRules();
+        toast('Interpretation saved locally');
+      }else{
+        const result=await postIntent('/api/intents/resolve',{phrase,project});
+        intentPreview=result.result;
+      }
+    }catch(error){intentNotice=error.message||'Unable to update intent memory';}
+    finally{intentBusy=false;if(view==='language')render();}
   });
 
   $('#taskForm').addEventListener('submit',async e=>{

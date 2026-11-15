@@ -2,9 +2,12 @@
 //! that future desktop, Android, API and MCP adapters will call.
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
+use shiori_core::contextual_intent::{
+    ClarificationReason, IntentCorrection, IntentResolution, IntentScope,
+};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
-use shiori_storage::{SpatialViewStore, SqliteStore, TaskFilter};
+use shiori_storage::{IntentStore, SpatialViewStore, SqliteStore, TaskFilter};
 use std::{
     error::Error,
     io::{self, Write},
@@ -23,6 +26,57 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Record a user's explicit correction as an unverified contextual intent.
+    IntentCorrect {
+        phrase: String,
+        #[arg(long)]
+        meaning: String,
+        /// A registered procedure identifier, not an arbitrary command.
+        #[arg(long)]
+        procedure: String,
+        #[arg(long, default_value = "personal")]
+        workspace: String,
+        #[arg(long)]
+        project: Option<String>,
+        /// Stable ID of the original, independently verified user message.
+        #[arg(long)]
+        evidence: String,
+        /// 0 means new phrase only; positive values guard a revision-aware correction.
+        #[arg(long)]
+        if_revision: Option<i64>,
+    },
+    /// Resolve an expression; read-only and never executes a procedure.
+    IntentResolve {
+        phrase: String,
+        #[arg(long, default_value = "personal")]
+        workspace: String,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Local development-only, length-prefixed list of learned phrases.
+    #[command(hide = true)]
+    BridgeIntents,
+    /// Local development-only, length-prefixed, read-only intent resolution.
+    #[command(hide = true)]
+    BridgeIntentResolve {
+        phrase: String,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Revoke a learned interpretation and its source evidence.
+    IntentRevoke {
+        rule_id: String,
+        #[arg(long)]
+        if_revision: i64,
+    },
+    /// Record a verified successful procedure outcome to reduce future prompts.
+    IntentSuccess {
+        rule_id: String,
+        #[arg(long)]
+        if_revision: i64,
+        #[arg(long)]
+        evidence: String,
+    },
     /// Create a task
     Add {
         title: String,
@@ -259,8 +313,141 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::fs::create_dir_all(parent)?;
     }
     let spatial_path = path.with_extension("isw.sqlite3");
+    let intent_path = path.with_extension("intent.sqlite3");
     let mut store = SqliteStore::open(path)?;
     match args.command {
+        Command::IntentCorrect {
+            phrase,
+            meaning,
+            procedure,
+            workspace,
+            project,
+            evidence,
+            if_revision,
+        } => {
+            let mut memory = IntentStore::open(&intent_path)?;
+            let correction = IntentCorrection {
+                scope: IntentScope {
+                    workspace_id: workspace,
+                    project_id: project,
+                },
+                phrase,
+                meaning,
+                procedure_id: procedure,
+                evidence_id: evidence,
+            };
+            let rule = memory.record_correction_checked(&correction, if_revision)?;
+            println!(
+                "Recorded interpretation {} [revision {}]. Verification pending.",
+                rule.id, rule.revision
+            );
+        }
+        Command::IntentResolve {
+            phrase,
+            workspace,
+            project,
+        } => {
+            let memory = IntentStore::open(&intent_path)?;
+            let scope = IntentScope {
+                workspace_id: workspace,
+                project_id: project,
+            };
+            println!("{:#?}", memory.resolve(&phrase, &scope)?);
+        }
+        Command::BridgeIntents => {
+            let memory = IntentStore::open(&intent_path)?;
+            let rules = memory.list_workspace("personal")?;
+            let rows = rules
+                .into_iter()
+                .map(|rule| {
+                    vec![
+                        rule.id,
+                        rule.scope.workspace_id,
+                        rule.scope.project_id.unwrap_or_default(),
+                        rule.phrase,
+                        rule.meaning,
+                        rule.procedure_id,
+                        rule.correction_count.to_string(),
+                        rule.verified_successes.to_string(),
+                        rule.revision.to_string(),
+                        rule.last_evidence_id,
+                    ]
+                })
+                .collect::<Vec<_>>();
+            bridge_rows(b"SHIORI-INTENTS-1\n", &rows)?;
+        }
+        Command::BridgeIntentResolve { phrase, project } => {
+            let memory = IntentStore::open(&intent_path)?;
+            let scope = IntentScope {
+                workspace_id: "personal".into(),
+                project_id: project,
+            };
+            let row = match memory.resolve(&phrase, &scope)? {
+                IntentResolution::Interpreted { rule } => vec![
+                    "interpreted".into(),
+                    String::new(),
+                    rule.id,
+                    rule.meaning,
+                    rule.procedure_id,
+                    rule.scope.project_id.unwrap_or_default(),
+                    rule.revision.to_string(),
+                    rule.verified_successes.to_string(),
+                ],
+                IntentResolution::Clarify { reason, suggested } => {
+                    let reason = match reason {
+                        ClarificationReason::Unrecognised => "unrecognised",
+                        ClarificationReason::NeedsVerification => "needs_verification",
+                        ClarificationReason::CompetingMeanings => "competing_meanings",
+                    };
+                    if let Some(rule) = suggested {
+                        vec![
+                            "clarify".into(),
+                            reason.into(),
+                            rule.id,
+                            rule.meaning,
+                            rule.procedure_id,
+                            rule.scope.project_id.unwrap_or_default(),
+                            rule.revision.to_string(),
+                            rule.verified_successes.to_string(),
+                        ]
+                    } else {
+                        vec![
+                            "clarify".into(),
+                            reason.into(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                        ]
+                    }
+                }
+            };
+            bridge_rows(b"SHIORI-INTENT-RESOLVE-1\n", &[row])?;
+        }
+        Command::IntentRevoke {
+            rule_id,
+            if_revision,
+        } => {
+            let mut memory = IntentStore::open(&intent_path)?;
+            memory.revoke(&rule_id, if_revision)?;
+            println!("Revoked intent rule {}", rule_id);
+        }
+        Command::IntentSuccess {
+            rule_id,
+            if_revision,
+            evidence,
+        } => {
+            let mut memory = IntentStore::open(&intent_path)?;
+            let rule = memory.record_success(&rule_id, if_revision, &evidence)?;
+            println!(
+                "Verified outcomes: {} [revision {}]. Well established: {}",
+                rule.verified_successes,
+                rule.revision,
+                rule.well_established()
+            );
+        }
         Command::Add {
             title,
             project,
