@@ -296,30 +296,55 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut store = SqliteStore::open(path)?;
     match args.command {
         Command::IntentCorrect {
-            phrase, meaning, procedure, workspace, project, evidence,
+            phrase,
+            meaning,
+            procedure,
+            workspace,
+            project,
+            evidence,
         } => {
             let mut memory = IntentStore::open(&intent_path)?;
             let correction = IntentCorrection {
-                scope: IntentScope { workspace_id: workspace, project_id: project },
+                scope: IntentScope {
+                    workspace_id: workspace,
+                    project_id: project,
+                },
                 phrase,
                 meaning,
                 procedure_id: procedure,
                 evidence_id: evidence,
             };
             let rule = memory.record_correction(&correction)?;
-            println!("Recorded interpretation {} [revision {}]. Verification pending.",
-                rule.id, rule.revision);
+            println!(
+                "Recorded interpretation {} [revision {}]. Verification pending.",
+                rule.id, rule.revision
+            );
         }
-        Command::IntentResolve { phrase, workspace, project } => {
+        Command::IntentResolve {
+            phrase,
+            workspace,
+            project,
+        } => {
             let memory = IntentStore::open(&intent_path)?;
-            let scope = IntentScope { workspace_id: workspace, project_id: project };
+            let scope = IntentScope {
+                workspace_id: workspace,
+                project_id: project,
+            };
             println!("{:#?}", memory.resolve(&phrase, &scope)?);
         }
-        Command::IntentSuccess { rule_id, if_revision, evidence } => {
+        Command::IntentSuccess {
+            rule_id,
+            if_revision,
+            evidence,
+        } => {
             let mut memory = IntentStore::open(&intent_path)?;
             let rule = memory.record_success(&rule_id, if_revision, &evidence)?;
-            println!("Verified outcomes: {} [revision {}]. Well established: {}",
-                rule.verified_successes, rule.revision, rule.well_established());
+            println!(
+                "Verified outcomes: {} [revision {}]. Well established: {}",
+                rule.verified_successes,
+                rule.revision,
+                rule.well_established()
+            );
         }
         Command::Add {
             title,
