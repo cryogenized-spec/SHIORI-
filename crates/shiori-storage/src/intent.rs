@@ -228,7 +228,7 @@ impl IntentStore {
     pub fn record_success(
         &mut self,
         rule_id: &str,
-        expected_revision: u64,
+        expected_revision: i64,
         evidence_id: &str,
     ) -> Result<IntentRule, IntentStoreError> {
         let tx = self
