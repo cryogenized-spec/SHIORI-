@@ -194,11 +194,15 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** contract tests check unique tool/route names, schemas, scope/risk classifications and the separation between visual routing and true graph mutations. This milestone is **a design and test contract, not a deployed MCP server**. Phase A implements a small working subset before exposing the wider catalogue.
 
 ### M4 — Optional sync, accounts and portable hosting
+**2026-11-15 checkpoint:** A read-only Rust/Cloudflare reconciliation utility and [ADR 0005](docs/adr/0005-rust-cloudflare-sync.md) now define source identity, conflicts, tombstones and per-field revision safety. **This is not synchronization**: no canonical local tasks are uploaded and no write-back is permitted.
+
 **Deliver:** independent server, authentication and permission model, sync protocol, conflict resolution, tombstones, secure backup/restore, multiple-device testing, and Docker/local deployment. Additional cloud targets remain adapters, not prerequisites.
 
 **Exit:** offline edits converge safely after reconnect; conflicts and deletes are not lost; a documented export/restore migration succeeds between two independently operated environments.
 
 ### M5 — MCP interoperability and compact UI
+**2026-11-15 checkpoint:** The original bearer-protected nine-tool Cloudflare alpha remains operational. A separate OAuth 2.1 issuer and protected MCP resource have been deployed and passed independent discovery/PKCE/unauthorized-denial tests. The owner approval secret, complete authorization-code flow and authenticated ChatGPT MCP call are **still pending**, so this milestone is not yet complete. OAuth source uses the maintained Cloudflare OAuth provider and separate user-owned KV/storage; it does not touch Google Master MCP or ClickUp Serviteur.
+
 **SH-008 groundwork:** define model-provider capability contracts, account/secret setup boundary and a strictly optional local companion UI prototype. Its chat state must not become another task store or bypass application permissions.
 
 **Deliver:** a small implemented **Phase A** subset of independently named tools first (capabilities, tasks, Rust-backed scene read, positions and presentation settings) driven from the versioned operation registry; then staged tools for inbox capture/triage/conversion/archive, projects, assignments, filters, dependencies and schedules, plus bounded artefact-graph queries and optional EAI scene retrieval; scoped tokens/permissions; error contracts; optional lightweight versioned MCP Apps views.
