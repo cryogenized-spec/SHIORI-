@@ -107,6 +107,7 @@ def main():
                 desktop.wait_for_function("() => document.getElementById('crumbLabel')?.textContent === 'LIVE RUST / SQLITE'",timeout=20000)
                 desktop.wait_for_function("() => window.__iswDebug?.getNodes()?.length === 10",timeout=20000)
                 desktop.locator("#fitBottom").click()
+                desktop.evaluate("(id) => window.__iswDebug.select(id)",ids[3])
                 desktop.screenshot(path=str(out/"isw-rust-desktop.png"),full_page=True)
                 assert desktop.locator(".node").count()>0,"No visible rust-backed task nodes"
                 assert not errors,errors
