@@ -53,6 +53,10 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 
 **M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the standalone browser mode still uses demo data, while the optional development bridge exposes local SQLite assignments (not authenticated multi-user permissions); there is no authenticated production API; task durations and prerequisite links are stored in SQLite and used by the CLI planner, while an optional development-only localhost bridge allows the web prototype to view and mutate that same task database. There is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
 
+## Remote operations and SHIORI MCP status
+
+The Rust and SQLite foundations exist, but the **authenticated remote JSON API and SHIORI MCP server do not yet exist**. They are specified in [ADR 0004](docs/adr/0004-remote-operation-registry-and-mcp.md) and the [per-operation registry](docs/api/operations.v1.json). Every planned operation has a distinct JSON/HTTP path and named MCP tool definition. **Entries marked `planned` are not callable endpoints.** Build and test a small Phase A subset first; do not expose the existing Python development bridge to the public Internet.
+
 ## Infinite Spatial Workspace — Rust-backed alpha
 
 The existing desktop task board retains its own navigation. The **Spatial canvas** link opens `isw.html`; when the local Rust bridge is running on loopback, the canvas reads real SQLite task records and verified prerequisite links. The **Live Rust** control refreshes it. The old board remains available through **← Board**.
