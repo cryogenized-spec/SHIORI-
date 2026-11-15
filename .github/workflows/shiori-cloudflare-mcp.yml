@@ -23,3 +23,31 @@ jobs:
       - name: Verify syntax and Worker behaviour
         working-directory: cloudflare/shiori-mcp
         run: npm run check
+      - name: Probe deployed Worker health and bearer protection
+        if: github.repository == 'cryogenized-spec/SHIORI-'
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.request
+          import urllib.error
+          base="https://shiori-mcp-alpha.cryogenized.workers.dev"
+          with urllib.request.urlopen(base+"/health",timeout=25) as result:
+              info=json.load(result)
+              assert result.status == 200, result.status
+              assert info["service"] == "shiori-mcp-cloudflare", info
+              assert info["service_state"] == "ready", info
+          req=urllib.request.Request(
+              base+"/mcp",
+              data=b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+              headers={"Content-Type":"application/json"},
+              method="POST"
+          )
+          try:
+              urllib.request.urlopen(req,timeout=25)
+              raise AssertionError("Unauthenticated MCP unexpectedly accepted")
+          except urllib.error.HTTPError as e:
+              assert e.code == 401, e.code
+              payload=json.loads(e.read())
+              assert payload["error"]["code"] == "UNAUTHENTICATED", payload
+          print("Live Worker health and unauthenticated denial verified.")
+          PY
