@@ -136,6 +136,19 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 500
+          },
+          "operation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Optional exact dot-separated Shiori operation ID for a single full schema"
+          },
+          "availability": {
+            "enum": [
+              "cloudflare_alpha",
+              "planned"
+            ],
+            "description": "Filter by deployed or planned operation contracts"
           }
         }
       },
