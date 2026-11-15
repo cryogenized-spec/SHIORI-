@@ -35,6 +35,13 @@ fn valid_id(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
 }
 
+/// Project labels may contain spaces and Unicode; workspace IDs remain strict.
+fn valid_project_label(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value.chars().count() <= 128
+        && !value.chars().any(char::is_control)
+}
+
 pub fn normalize_phrase(raw: &str) -> String {
     raw.split_whitespace()
         .collect::<Vec<_>>()
@@ -53,7 +60,7 @@ pub struct IntentScope {
 impl IntentScope {
     pub fn validate(&self) -> Result<(), IntentError> {
         if !valid_id(&self.workspace_id)
-            || self.project_id.as_deref().is_some_and(|id| !valid_id(id))
+            || self.project_id.as_deref().is_some_and(|id| !valid_project_label(id))
         {
             return Err(IntentError::InvalidScope);
         }
