@@ -102,7 +102,7 @@ pub struct IntentRule {
     pub procedure_id: String,
     pub correction_count: u32,
     pub verified_successes: u32,
-    pub revision: u64,
+    pub revision: i64,
     pub last_evidence_id: String,
 }
 
@@ -143,7 +143,7 @@ impl IntentRule {
     /// Only a *verified* successful use, confirmed by the host, may call this.
     pub fn record_success(
         &mut self,
-        expected_revision: u64,
+        expected_revision: i64,
         evidence_id: &str,
     ) -> Result<(), IntentError> {
         if !valid_id(evidence_id) {
