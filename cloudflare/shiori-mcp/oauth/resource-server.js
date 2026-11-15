@@ -1,5 +1,6 @@
 import {OAuthResourceServer,insufficientScope} from "@cloudflare/workers-oauth-provider";
 import legacy from "../src/worker.js";
+import {INITIAL_CONSENT_SCOPES,requiredScopesForRpc,hasRequiredScopes,normalizeGrantedScopes} from "./scope-policy.js";
 
 /**
  * OAuth-protected facade. The original bearer-gated alpha Worker remains
@@ -7,17 +8,16 @@ import legacy from "../src/worker.js";
  */
 const ENDPOINT="https://shiori-mcp-oauth.cryogenized.workers.dev/mcp";
 const ISSUER="https://shiori-auth.cryogenized.workers.dev";
-const readOnly=new Set([
- "shiori_system_capabilities_read","shiori_tasks_list","shiori_tasks_get",
- "shiori_tasks_dependencies_list","shiori_spatial_scene_read"
-]);
-const isWrite=id=>!readOnly.has(id);
 const oauthResource=new OAuthResourceServer({
  resourceMetadata:{
   resource:ENDPOINT,authorization_servers:[ISSUER],
   resource_name:"Shiori MCP"
  },
- requiredScopes:["mcp:read"],
+ // This is the single-owner task-management plugin. Request both scopes
+ // on first connection so clients that cannot perform OAuth step-up can
+ // obtain an explicitly consented read/write grant. The handler continues
+ // to enforce read-only tokens safely for non-mutating calls.
+ requiredScopes:INITIAL_CONSENT_SCOPES,
  validateToken:env=>env.AUTH_SERVER.validateToken,
  handler:{
   async fetch(request,env,ctx){
@@ -26,20 +26,20 @@ const oauthResource=new OAuthResourceServer({
    // This resource's token audience is specifically /mcp. The existing
    // separate bearer-alpha API retains dedicated JSON/HTTP routes.
    if(!isMcp)return new Response("Not found",{status:404});
-   let needed=["mcp:read"];
-   if(isMcp && request.method==="POST"){
-    let rpc;
+   let rpc;
+   if(request.method==="POST"){
     try{rpc=await request.clone().json();}catch{return new Response("Invalid JSON",{status:400});}
-    if(rpc?.method==="tools/call" && isWrite(rpc?.params?.name))needed=["mcp:read","mcp:write"];
    }
-   if(!needed.every(s=>ctx.auth.scope.includes(s)))return insufficientScope(ctx.auth,needed);
+   // Exact mcp:write is mandatory for all mutations (unknown tools fail closed).
+   const needed=requiredScopesForRpc(rpc);
+   if(!hasRequiredScopes(ctx.auth?.scope,needed))return insufficientScope(ctx.auth,needed);
    if(!env.DB)return new Response("Shiori backend unconfigured",{status:503});
    // The old alpha handler has its own legacy credential check. After
    // OAuth validation, satisfy that *internal* check with a fresh random,
    // per-request value that is never accepted at the public MCP boundary.
    // No persistent legacy bearer secret is shared with the OAuth Worker.
    const internalKey=crypto.randomUUID()+crypto.randomUUID();
-   const internalEnv={...env,SHIO_AUTH_TOKEN:internalKey};
+   const internalEnv={...env,SHIO_AUTH_TOKEN:internalKey,SHIO_AUTH_MODE:"oauth",SHIO_OAUTH_SCOPES:normalizeGrantedScopes(ctx.auth.scope)};
    const h=new Headers(request.headers);
    h.set("authorization","Bearer "+internalKey);
    h.delete("cookie");

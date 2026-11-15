@@ -105,8 +105,8 @@
     {
       "id": "system.operations.list",
       "phase": "A",
-      "description": "Discover named commands",
-      "availability": "planned",
+      "description": "List the complete 113-operation schema registry with pagination; planned operations are explicitly non-executable",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "system:read",
@@ -136,6 +136,19 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 500
+          },
+          "operation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Optional exact dot-separated Shiori operation ID for a single full schema"
+          },
+          "availability": {
+            "enum": [
+              "cloudflare_alpha",
+              "planned"
+            ],
+            "description": "Filter by deployed or planned operation contracts"
           }
         }
       },
@@ -183,7 +196,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "bundled-static-schema-not-task-data",
+      "release_evidence": "Read-only contract tests; cloud deployment pending."
     },
     {
       "id": "tasks.list",
@@ -9947,7 +9963,7 @@
       }
     }
   ],
-  "notes": "All listed remote capabilities are PLANNED. Local Rust support does not establish remote availability.",
+  "notes": "Registry describes all 113 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",

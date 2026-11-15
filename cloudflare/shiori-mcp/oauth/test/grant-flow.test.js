@@ -47,3 +47,15 @@ test("invalid grant redirect is tagged",async()=>{
     completeAuthorization:async()=>({redirectTo:"not a valid url"})
   }),url,["mcp:read"]),e=>e instanceof GrantStageError && e.stage==="validate_redirect");
 });
+
+test("owner grant includes write only when requested and approved",async()=>{
+ let received;
+ const api=apiWith({completeAuthorization:async args=>{
+  received=args;
+  return {redirectTo:"https://example.com/callback?code=approved"};
+ }});
+ await completeOwnerGrant(api,url,["mcp:read","mcp:write"]);
+ assert.deepEqual(received.scope,["mcp:read","mcp:write"]);
+ // The provider is supplied only the intersection of request and supported
+ // scopes. Actual consent is checked before completeOwnerGrant is called.
+});

@@ -33,7 +33,7 @@ class TestRemoteOperationContract(unittest.TestCase):
             self.assertEqual(op["http"]["method"], "POST")
             self.assertEqual(op["http"]["path"], "/api/v1/ops/" + op["id"])
             self.assertEqual(op["mcp_tool"], "shiori_" + op["id"].replace(".", "_"))
-            alpha = {"system.capabilities.read", "tasks.list", "tasks.get",
+            alpha = {"system.capabilities.read", "system.operations.list", "tasks.list", "tasks.get",
                      "tasks.create", "tasks.status.set", "tasks.dependencies.list",
                      "spatial.scene.read", "spatial.node.position.set",
                      "spatial.edge.style.set"}
@@ -41,7 +41,9 @@ class TestRemoteOperationContract(unittest.TestCase):
                 op["availability"],
                 "cloudflare_alpha" if op["id"] in alpha else "planned"
             )
-            if op["id"] in alpha:
+            if op["id"] == "system.operations.list":
+                self.assertEqual(op["data_source"], "bundled-static-schema-not-task-data")
+            elif op["id"] in alpha:
                 self.assertEqual(
                     op["data_source"], "isolated_remote_d1_not_synced_with_local_rust"
                 )

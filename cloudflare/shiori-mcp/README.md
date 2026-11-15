@@ -66,6 +66,99 @@ npm test
 
 Tests use a disposable in-memory SQLite database and do not touch Cloudflare or real tasks.
 
+## Complete operation schema discovery
+
+Shiori has **113 operation contracts** in `docs/api/operations.v1.json`.
+The Cloudflare MCP makes **all 113 full contracts discoverable** without
+presenting unimplemented commands as runnable. The registry includes
+input and output JSON Schemas, operation ID, scope, effect, approval
+requirements, phase and actual availability.
+
+- `resources/list` advertises `shiori://operations/v1`.
+- `resources/read` on that URI returns the **entire source-aligned registry**.
+- `resources/templates/list` advertises `shiori://operations/v1/{operation_id}`;
+  `resources/read` on, for example, `shiori://operations/v1/tasks.delete`
+  returns the complete single-operation schema (clearly marked planned).
+- The implemented `shiori_system_operations_list` tool provides paginated
+  access with `workspace_id`, `cursor`, `limit`, and optional
+  `availability` or exact `operation_id` lookup. It returns full contracts,
+  not merely names.
+- `tools/list` deliberately advertises **only the 10 runnable operations**:
+  the original nine plus the read-only catalog tool. Unsupported operations
+  are never executed; they cannot be called merely because their schema
+  exists in the catalog.
+
+OAuth `mcp:read` is sufficient to inspect the catalog. All registry
+requests remain authenticated and workspace-scoped. Catalog discovery
+does not grant permissions, implement missing Rust/cloud sync, execute
+planned destructive operations or upgrade an existing OAuth token.
+
+For clients that support MCP resources, use `resources/read` for the entire
+contract or one named operation. For clients that expose only tools,
+use `shiori_system_operations_list`; its `operation_id` filter is the
+quickest way to inspect one schema. **Do not request unimplemented
+operations through `tools/call`.**
+
+The worker bundles a snapshot of the registry for standalone Cloudflare
+deployment. After editing the canonical JSON, run
+`python3 cloudflare/shiori-mcp/scripts/sync_operation_catalog.py`
+to refresh its embedded snapshot. Tests compare the deployed snapshot
+against the canonical registry and fail on drift.
+
+## OAuth MCP repair and write rollout (2026-11-15)
+
+The OAuth resource (`shiori-mcp-oauth`) forwards authenticated `/mcp`
+calls to the same operations as the legacy `shiori-mcp-alpha` Worker.
+**Owner scope discovery:** Shiori's single-owner resource now advertises
+`mcp:read mcp:write` as its initial requested scopes, because ChatGPT's
+first authorisation previously requested `mcp:read` only and write step-up
+was not completing. The owner consent screen must explicitly show both
+before the user approves. This changes initial authorisation for new
+connections; existing grants are **not** silently upgraded. A token
+containing `mcp:read` only remains valid for read tools, and writes still
+require `mcp:write`. This does not override ChatGPT's independent
+write-action approval policy or plan restrictions.
+
+`system.capabilities.read` now reports **the actual credential context**:
+`oauth: true`, `authentication: oauth2.1-pkce`, and the granted read/write
+scopes for OAuth; the separate legacy endpoint still reports bearer mode.
+Do not interpret a listed write tool as permission to invoke it. OAuth
+checks `mcp:write` on every mutation, and a read-only grant is denied.
+
+All four write operations use a SHA-256 fingerprint of the canonical
+operation ID and arguments (excluding only the idempotency key).
+Reusing the same `workspace_id / operation_id / idempotency_key` with a
+different request now returns HTTP 409 `IDEMPOTENCY_CONFLICT`.
+MCP tool failures include `isError: true` **and** structured
+`{ok:false,error:{code,message,http_status,retryable}}` content.
+Some MCP clients still choose their own error labels; callers should
+inspect `structuredContent.error.code`.
+
+**Deployment order is mandatory for an existing D1 database:**
+
+1. Back up the D1 database; do **not** clear `remote_tasks` or `idempotency`.
+2. Run `migrations/0001_idempotency_request_hash.sql` **once** against
+   the `shiori-mcp-alpha` D1 database. Fresh installations instead use
+   the updated `schema.sql`.
+3. Verify the new column exists. Existing rows have `request_hash=NULL`
+   and are deliberately **not replayable**; clients must submit a fresh
+   idempotency key for a new attempt, after reconciling any previous result.
+4. Deploy the revised `src/worker.js` to the legacy bearer Worker and
+   rebuild/deploy the OAuth `dist/shiori-resource.js` bundle from the same
+   commit. Avoid mixing old and new Worker versions during client writes.
+5. Run automated tests (`npm test` in `cloudflare/shiori-mcp`,
+   and `npm run check` in `cloudflare/shiori-mcp/oauth`), then verify
+   live `system.capabilities.read` with an owner OAuth session.
+6. Verify a **read-only grant** receives `insufficient_scope` on a
+   mutation. For an owner write grant, begin with a deliberately invalid
+   request to test the validation/error path without inserting task data.
+   Only after that should a user-approved disposable task be created
+   and its mutations exercised. There is still no task-deletion MCP tool.
+
+The absent Rust/SQLite ↔ D1 synchronization is **not fixed by this patch**.
+Keep local and remote data separate until a versioned, opt-in sync protocol
+with tombstones, source IDs, conflict resolution and rollback is implemented.
+
 ## Next engineering phases
 
 1. Implement standards-compliant OAuth/PKCE pairing for ChatGPT and similar remote clients; use explicit user identity and revocable sessions.
