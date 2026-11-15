@@ -19,6 +19,8 @@ pub enum IntentStoreError {
     Invalid(#[from] IntentError),
     #[error("rule not found")]
     NotFound,
+    #[error("intent rule revision conflict")]
+    RevisionConflict,
     #[error("evidence ID was reused with different content or operation")]
     EvidenceConflict,
     #[error("unsupported intent-memory schema version: {0}")]
@@ -117,6 +119,19 @@ impl IntentStore {
         Ok(found)
     }
 
+    /// Lists all project-specific and workspace rules within one scoped workspace.
+    pub fn list_workspace(&self, workspace_id: &str) -> Result<Vec<IntentRule>, IntentStoreError> {
+        IntentScope { workspace_id: workspace_id.to_owned(), project_id: None }.validate()?;
+        let query = format!(
+            "SELECT {RULE_FIELDS} FROM intent_rules WHERE workspace_id=?1 ORDER BY phrase, project_id"
+        );
+        let mut stmt = self.db.prepare(&query)?;
+        let rows = stmt
+            .query_map(params![workspace_id], row_to_rule)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     pub fn resolve(
         &self,
         expression: &str,
@@ -125,12 +140,37 @@ impl IntentStore {
         Ok(resolve_intent(&self.list(scope)?, expression, scope))
     }
 
+    /// Explicit revocation removes a single rule and its evidence only.
+    pub fn revoke(&mut self, rule_id: &str, expected_revision: i64)
+        -> Result<(), IntentStoreError>
+    {
+        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let rule = Self::get_in(&tx, rule_id)?.ok_or(IntentStoreError::NotFound)?;
+        if rule.revision != expected_revision {
+            return Err(IntentStoreError::RevisionConflict);
+        }
+        tx.execute("DELETE FROM intent_evidence WHERE rule_id=?1", params![rule_id])?;
+        tx.execute("DELETE FROM intent_rules WHERE id=?1", params![rule_id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// The caller has established that evidence_id refers to an actual user
     /// correction. The stored interpretation never confers execution authority.
     /// Same evidence = exact replay; changed payload = explicit conflict.
     pub fn record_correction(
         &mut self,
         correction: &IntentCorrection,
+    ) -> Result<IntentRule, IntentStoreError> {
+        self.record_correction_checked(correction, None)
+    }
+
+    /// Some(0) requires new; Some(revision > 0) is an optimistic update.
+    /// None is permitted only for existing local CLI/test compatibility.
+    pub fn record_correction_checked(
+        &mut self,
+        correction: &IntentCorrection,
+        expected_revision: Option<i64>,
     ) -> Result<IntentRule, IntentStoreError> {
         correction.validate()?;
         let phrase = shiori_core::contextual_intent::normalize_phrase(&correction.phrase);
@@ -174,6 +214,9 @@ impl IntentStore {
             )
             .optional()?;
         let rule = if let Some(mut rule) = existing {
+            if expected_revision.is_some_and(|expected| expected != rule.revision) {
+                return Err(IntentStoreError::RevisionConflict);
+            }
             rule.apply_correction(correction)?;
             tx.execute(
                 "UPDATE intent_rules SET meaning=?2, procedure_id=?3,
@@ -191,6 +234,9 @@ impl IntentStore {
             )?;
             rule
         } else {
+            if expected_revision.is_some_and(|expected| expected != 0) {
+                return Err(IntentStoreError::RevisionConflict);
+            }
             let rule = IntentRule::from_correction(correction)?;
             tx.execute(
                 "INSERT INTO intent_rules (
