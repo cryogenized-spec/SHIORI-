@@ -9737,6 +9737,193 @@
           }
         }
       }
+    },
+    {
+      "id": "tasks.dependencies.preview",
+      "phase": "B",
+      "description": "Preview prerequisite additions/removals with cycle checks",
+      "availability": "planned",
+      "effect": "read",
+      "approval": "none",
+      "scope": "tasks:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/tasks.dependencies.preview"
+      },
+      "mcp_tool": "shiori_tasks_dependencies_preview",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "task_id",
+          "changes",
+          "expected_revision"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "changes": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object"
+            }
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "tasks.dependencies.preview"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "proposal_id",
+              "diff",
+              "expires_at"
+            ],
+            "properties": {
+              "proposal_id": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "tasks.dependencies.apply",
+      "phase": "B",
+      "description": "Apply explicit reviewed prerequisite change",
+      "availability": "planned",
+      "effect": "write",
+      "approval": "reviewed_diff_required",
+      "scope": "tasks:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/tasks.dependencies.apply"
+      },
+      "mcp_tool": "shiori_tasks_dependencies_apply",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "proposal_id",
+          "expected_revision",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "proposal_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "tasks.dependencies.apply"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed"
+            ],
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "resource_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "audit_id": {
+                "type": "string"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   ],
   "notes": "All listed remote capabilities are PLANNED. Local Rust support does not establish remote availability.",
