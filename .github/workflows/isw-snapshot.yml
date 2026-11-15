@@ -1,0 +1,54 @@
+name: SHIORI Rust-backed ISW snapshot
+
+on:
+  pull_request:
+    paths:
+      - 'apps/web/isw*'
+      - 'apps/local_bridge.py'
+      - 'apps/shiori-cli/**'
+      - 'crates/shiori-core/**'
+      - 'crates/shiori-storage/**'
+      - 'tests/isw_rust_snapshot.py'
+      - '.github/workflows/isw-snapshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isw-integration:
+    name: Live Rust graph and screenshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - name: Check Rust and Python sources
+        run: |
+          cargo fmt --all -- --check
+          python3 -m py_compile tests/isw_rust_snapshot.py apps/local_bridge.py
+          node --check apps/web/isw-core.js
+          node --check apps/web/isw-companion.js
+          node --check apps/web/isw-live.js
+      - name: Compile real Rust CLI
+        run: cargo build --locked -p shiori-cli
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Install pinned browser automation
+        run: |
+          python -m pip install 'playwright==1.56.0'
+          python -m playwright install --with-deps chromium
+      - name: Seed disposable SQLite and capture two ISW screenshots
+        run: python3 tests/isw_rust_snapshot.py --cli target/debug/shiori-cli --output-dir isw-snapshot
+      - name: Publish Rust-backed screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-isw-rust-snapshots
+          path: isw-snapshot/
+          if-no-files-found: warn
+          retention-days: 30
