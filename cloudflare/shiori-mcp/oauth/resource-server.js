@@ -13,7 +13,11 @@ const oauthResource=new OAuthResourceServer({
   resource:ENDPOINT,authorization_servers:[ISSUER],
   resource_name:"Shiori MCP"
  },
- requiredScopes:["mcp:read"],
+ // This is the single-owner task-management plugin. Request both scopes
+ // on first connection so clients that cannot perform OAuth step-up can
+ // obtain an explicitly consented read/write grant. The handler continues
+ // to enforce read-only tokens safely for non-mutating calls.
+ requiredScopes:["mcp:read","mcp:write"],
  validateToken:env=>env.AUTH_SERVER.validateToken,
  handler:{
   async fetch(request,env,ctx){
