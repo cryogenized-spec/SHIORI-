@@ -75,8 +75,7 @@ impl SqliteStore {
     fn initialize(mut db: Connection) -> Result<Self, StorageError> {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 4000;")?;
         let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version != 0 && version != 1 && version != 2 && version != SCHEMA_VERSION
-        {
+        if version != 0 && version != 1 && version != 2 && version != SCHEMA_VERSION {
             return Err(StorageError::UnsupportedSchemaVersion {
                 found: version,
                 supported: SCHEMA_VERSION,
