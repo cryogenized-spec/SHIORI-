@@ -58,7 +58,7 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 A local-only, model-independent prototype records explicit corrections such as
 "make a note of this" meaning "append to the active research journal," then
 requires verified successful uses before skipping repeated clarification.
-It does **not** automatically observe conversations or execute procedures.
+It does **not** automatically observe conversations or execute procedures. In the localhost Rust bridge, the **Language & intent** sidebar view can manually teach, inspect, test and revoke expressions. Android and static-demo views do not create a separate memory store.
 
 ```bash
 cargo run -p shiori-cli -- intent-correct "make a note of this" \
@@ -74,7 +74,7 @@ cargo run -p shiori-cli -- intent-success RULE_ID \
 
 Intent rules live in a separate versioned `tasks.intent.sqlite3` sidecar
 alongside the local task database. No API subscription or external server is
-necessary. The operation names are future MCP contracts, **not deployed tools**.
+necessary. The central operation registry contains five **planned** contextual-intent MCP contracts; they are **not deployed tools**.
 See [ADR 0006](docs/adr/0006-contextual-intent-memory.md) for the trust and
 confirmation boundaries and [SH-MEM-002](ROADMAP.md#sh-mem-002--contextual-intent-memory-experimental-slice-2026-11-15).
 
