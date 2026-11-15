@@ -479,20 +479,30 @@ async function getTask(db, w, id) {
   if (!row) E(404, "NOT_FOUND", "Task not found in remote workspace");
   return row;
 }
-async function duplicate(db, w, id, key) {
-  const row = await db.prepare("SELECT result_json FROM idempotency WHERE workspace_id=? AND operation_id=? AND token=?").bind(w, id, key).first();
-  return row ? JSON.parse(row.result_json) : null;
+async function requestFingerprint(id, args) {
+  const canonical = Object.fromEntries(Object.entries(args).filter(([k]) => k !== "idempotency_key").sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  return Array.from(
+    await sha256(JSON.stringify({ operation: id, arguments: canonical })),
+    (x) => x.toString(16).padStart(2, "0")
+  ).join("");
 }
-function idemp(db, w, id, key, result) {
-  return db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,result_json,created_at) VALUES(?,?,?,?,?)").bind(w, id, key, JSON.stringify(result), (/* @__PURE__ */ new Date()).toISOString());
+async function duplicate(db, w, id, key, fingerprint) {
+  const row = await db.prepare("SELECT request_hash,result_json FROM idempotency WHERE workspace_id=? AND operation_id=? AND token=?").bind(w, id, key).first();
+  if (!row) return null;
+  if (!row.request_hash || row.request_hash !== fingerprint)
+    E(409, "IDEMPOTENCY_CONFLICT", "Idempotency key already used for another or legacy request; use a new key");
+  return JSON.parse(row.result_json);
 }
-async function writeOnce(env, w, id, key, result, statement) {
-  const saved = await duplicate(env.DB, w, id, key);
+function idemp(db, w, id, key, fingerprint, result) {
+  return db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,request_hash,result_json,created_at) VALUES(?,?,?,?,?,?)").bind(w, id, key, fingerprint, JSON.stringify(result), (/* @__PURE__ */ new Date()).toISOString());
+}
+async function writeOnce(env, w, id, key, fingerprint, result, statement) {
+  const saved = await duplicate(env.DB, w, id, key, fingerprint);
   if (saved) return saved;
   try {
-    await env.DB.batch([statement, idemp(env.DB, w, id, key, result)]);
+    await env.DB.batch([statement, idemp(env.DB, w, id, key, fingerprint, result)]);
   } catch (err) {
-    const after = await duplicate(env.DB, w, id, key);
+    const after = await duplicate(env.DB, w, id, key, fingerprint);
     if (after) return after;
     throw err;
   }
@@ -502,7 +512,11 @@ async function run(id, arg, env) {
   const def = BY_ID.get(id);
   if (!def) E(404, "UNSUPPORTED_CAPABILITY", "Operation not deployed");
   const a = validate(def, arg, env), db = env.DB, w = a.workspace_id;
-  if (id === "system.capabilities.read") return { capabilities: { server: SERVER, version: VERSION, workspace_id: w, backend: "isolated-cloudflare-d1", local_rust_sync: false, oauth: false, authentication: "single-user-bearer", planned_total: 113 }, operations: OPERATIONS.map((o) => o.id) };
+  if (id === "system.capabilities.read") {
+    const oauth = env.SHIO_AUTH_MODE === "oauth";
+    const scopes = oauth && Array.isArray(env.SHIO_OAUTH_SCOPES) ? env.SHIO_OAUTH_SCOPES : [];
+    return { capabilities: { server: SERVER, version: VERSION, workspace_id: w, backend: "isolated-cloudflare-d1", local_rust_sync: false, oauth, authentication: oauth ? "oauth2.1-pkce" : "single-user-bearer", granted_scopes: scopes, write_access: oauth ? scopes.includes("mcp:write") : true, planned_total: 113 }, operations: OPERATIONS.map((o) => o.id) };
+  }
   if (id === "tasks.list") {
     const { offset, limit } = listParams(a);
     const rows = await db.prepare("SELECT * FROM remote_tasks WHERE workspace_id=? AND deleted_at IS NULL ORDER BY created_at DESC,id LIMIT ? OFFSET ?").bind(w, limit, offset).all();
@@ -511,28 +525,37 @@ async function run(id, arg, env) {
   }
   if (id === "tasks.get") return { item: formatTask(await getTask(db, w, a.task_id)) };
   if (id === "tasks.create") {
-    let cached = await duplicate(db, w, id, a.idempotency_key);
+    const fingerprint = await requestFingerprint(id, a);
+    let cached = await duplicate(db, w, id, a.idempotency_key, fingerprint);
     if (cached) return cached;
     if (a.title.trim().length === 0 || a.title.length > 160) E(400, "VALIDATION_FAILED", "Title must contain 1\u2013160 characters");
     const taskId = crypto.randomUUID(), now = (/* @__PURE__ */ new Date()).toISOString();
     const task = { id: taskId, title: a.title.trim(), body: a.text || "", project: "Remote alpha", status: "todo", priority: "medium", version: 1, created_at: now, updated_at: now, origin: "cloudflare-d1-remote-alpha" };
     const result = { changed: true, resource_id: taskId, revision: 1 };
-    return writeOnce(env, w, id, a.idempotency_key, result, db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,notes,project,status,priority,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(taskId, w, task.title, task.body, task.project, task.status, task.priority, 1, now, now));
+    return writeOnce(env, w, id, a.idempotency_key, fingerprint, result, db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,notes,project,status,priority,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(taskId, w, task.title, task.body, task.project, task.status, task.priority, 1, now, now));
   }
   if (id === "tasks.status.set") {
-    const cached = await duplicate(db, w, id, a.idempotency_key);
+    const fingerprint = await requestFingerprint(id, a);
+    const cached = await duplicate(db, w, id, a.idempotency_key, fingerprint);
     if (cached) return cached;
     const current = await getTask(db, w, a.task_id);
     if (current.version !== a.expected_revision) E(409, "CONFLICT", "Task revision has changed");
     if (!allowedStatuses.has(a.status)) E(400, "VALIDATION_FAILED", "Invalid status");
     const result = { changed: true, resource_id: a.task_id, revision: a.expected_revision + 1 };
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    const updates = await db.batch([
-      db.prepare("UPDATE remote_tasks SET status=?,version=version+1,updated_at=? WHERE workspace_id=? AND id=? AND version=? AND deleted_at IS NULL").bind(a.status, now, w, a.task_id, a.expected_revision),
-      db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,result_json,created_at) SELECT ?,?,?,?,? WHERE changes()=1").bind(w, id, a.idempotency_key, JSON.stringify(result), now)
-    ]);
+    let updates;
+    try {
+      updates = await db.batch([
+        db.prepare("UPDATE remote_tasks SET status=?,version=version+1,updated_at=? WHERE workspace_id=? AND id=? AND version=? AND deleted_at IS NULL").bind(a.status, now, w, a.task_id, a.expected_revision),
+        db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,request_hash,result_json,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(w, id, a.idempotency_key, fingerprint, JSON.stringify(result), now)
+      ]);
+    } catch (err) {
+      const again = await duplicate(db, w, id, a.idempotency_key, fingerprint);
+      if (again) return again;
+      throw err;
+    }
     if (updates[0].meta.changes !== 1) {
-      const again = await duplicate(db, w, id, a.idempotency_key);
+      const again = await duplicate(db, w, id, a.idempotency_key, fingerprint);
       if (again) return again;
       E(409, "CONFLICT", "Task was modified concurrently");
     }
@@ -554,7 +577,8 @@ async function run(id, arg, env) {
     return { scene: { nodes, edges, connector_style: style?.value || "circuit", layout_revision: style?.revision || 0, origin: "cloudflare-d1-remote-alpha", synchronized_with_local_rust: false }, next_cursor: nodes.length === limit ? String(offset + limit) : null };
   }
   if (id === "spatial.node.position.set") {
-    const cached = await duplicate(db, w, id, a.idempotency_key);
+    const fingerprint = await requestFingerprint(id, a);
+    const cached = await duplicate(db, w, id, a.idempotency_key, fingerprint);
     if (cached) return cached;
     await getTask(db, w, a.node_id);
     const old = await db.prepare("SELECT revision FROM remote_positions WHERE workspace_id=? AND node_id=?").bind(w, a.node_id).first();
@@ -565,18 +589,19 @@ async function run(id, arg, env) {
     try {
       const out = await db.batch([
         update,
-        db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,result_json,created_at) SELECT ?,?,?,?,? WHERE changes()=1").bind(w, id, a.idempotency_key, JSON.stringify(result), (/* @__PURE__ */ new Date()).toISOString())
+        db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,request_hash,result_json,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(w, id, a.idempotency_key, fingerprint, JSON.stringify(result), (/* @__PURE__ */ new Date()).toISOString())
       ]);
       if (out[0].meta.changes !== 1) E(409, "CONFLICT", "Visual position changed concurrently");
     } catch (err) {
-      const again = await duplicate(db, w, id, a.idempotency_key);
+      const again = await duplicate(db, w, id, a.idempotency_key, fingerprint);
       if (again) return again;
       throw err;
     }
     return result;
   }
   if (id === "spatial.edge.style.set") {
-    const cached = await duplicate(db, w, id, a.idempotency_key);
+    const fingerprint = await requestFingerprint(id, a);
+    const cached = await duplicate(db, w, id, a.idempotency_key, fingerprint);
     if (cached) return cached;
     if (!allowedStyles.has(a.style)) E(400, "VALIDATION_FAILED", "Invalid connector style");
     const current = await db.prepare("SELECT revision FROM remote_settings WHERE workspace_id=? AND key='connector_style'").bind(w).first();
@@ -584,10 +609,10 @@ async function run(id, arg, env) {
     const result = { changed: true, resource_id: "connector_style", revision: a.expected_revision + 1, style: a.style };
     const update = current ? db.prepare("UPDATE remote_settings SET value=?,revision=revision+1 WHERE workspace_id=? AND key='connector_style' AND revision=?").bind(a.style, w, a.expected_revision) : db.prepare("INSERT INTO remote_settings(workspace_id,key,value,revision) VALUES(?,'connector_style',?,1)").bind(w, a.style);
     try {
-      const out = await db.batch([update, db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,result_json,created_at) SELECT ?,?,?,?,? WHERE changes()=1").bind(w, id, a.idempotency_key, JSON.stringify(result), (/* @__PURE__ */ new Date()).toISOString())]);
+      const out = await db.batch([update, db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,request_hash,result_json,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1").bind(w, id, a.idempotency_key, fingerprint, JSON.stringify(result), (/* @__PURE__ */ new Date()).toISOString())]);
       if (out[0].meta.changes !== 1) E(409, "CONFLICT", "Connector style changed concurrently");
     } catch (err) {
-      const again = await duplicate(db, w, id, a.idempotency_key);
+      const again = await duplicate(db, w, id, a.idempotency_key, fingerprint);
       if (again) return again;
       throw err;
     }
@@ -612,8 +637,10 @@ async function mcp(body, env) {
         const data = await run(tool.id, body.params?.arguments || {}, env);
         return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data } };
       } catch (err) {
-        const msg = err instanceof ServiceError ? err.message : "Operation failed";
-        return { jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: JSON.stringify({ error: err.code || "INTERNAL_ERROR", message: msg }) }] } };
+        const known = err instanceof ServiceError;
+        const error = { code: known ? err.code : "INTERNAL_ERROR", message: known ? err.message : "Operation failed", http_status: known ? err.status : 500, retryable: known && (err.status === 429 || err.status >= 500) };
+        const payload = { ok: false, error };
+        return { jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload } };
       }
     }
     return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
@@ -646,17 +673,32 @@ var worker_default = { async fetch(request, env) {
   }
 } };
 
-// resource-server.js
-var ENDPOINT = "https://shiori-mcp-oauth.cryogenized.workers.dev/mcp";
-var ISSUER = "https://shiori-auth.cryogenized.workers.dev";
-var readOnly = /* @__PURE__ */ new Set([
+// scope-policy.js
+var READ_TOOLS = /* @__PURE__ */ new Set([
   "shiori_system_capabilities_read",
   "shiori_tasks_list",
   "shiori_tasks_get",
   "shiori_tasks_dependencies_list",
   "shiori_spatial_scene_read"
 ]);
-var isWrite = (id) => !readOnly.has(id);
+function requiredScopesForRpc(rpc) {
+  if (rpc?.method === "tools/call" && !READ_TOOLS.has(rpc?.params?.name))
+    return ["mcp:read", "mcp:write"];
+  return ["mcp:read"];
+}
+function normalizeGrantedScopes(scope) {
+  if (Array.isArray(scope)) return scope.filter((s) => typeof s === "string");
+  if (typeof scope === "string") return scope.split(/\s+/).filter(Boolean);
+  return [];
+}
+function hasRequiredScopes(scope, needed) {
+  const grants = new Set(normalizeGrantedScopes(scope));
+  return needed.every((s) => grants.has(s));
+}
+
+// resource-server.js
+var ENDPOINT = "https://shiori-mcp-oauth.cryogenized.workers.dev/mcp";
+var ISSUER = "https://shiori-auth.cryogenized.workers.dev";
 var oauthResource = new OAuthResourceServer({
   resourceMetadata: {
     resource: ENDPOINT,
@@ -670,20 +712,19 @@ var oauthResource = new OAuthResourceServer({
       if (ctx.props?.userId !== "shiori-owner") return new Response("Forbidden", { status: 403 });
       const u = new URL(request.url), isMcp = u.pathname === "/mcp";
       if (!isMcp) return new Response("Not found", { status: 404 });
-      let needed = ["mcp:read"];
-      if (isMcp && request.method === "POST") {
-        let rpc;
+      let rpc;
+      if (request.method === "POST") {
         try {
           rpc = await request.clone().json();
         } catch {
           return new Response("Invalid JSON", { status: 400 });
         }
-        if (rpc?.method === "tools/call" && isWrite(rpc?.params?.name)) needed = ["mcp:read", "mcp:write"];
       }
-      if (!needed.every((s) => ctx.auth.scope.includes(s))) return insufficientScope(ctx.auth, needed);
+      const needed = requiredScopesForRpc(rpc);
+      if (!hasRequiredScopes(ctx.auth?.scope, needed)) return insufficientScope(ctx.auth, needed);
       if (!env.DB) return new Response("Shiori backend unconfigured", { status: 503 });
       const internalKey = crypto.randomUUID() + crypto.randomUUID();
-      const internalEnv = { ...env, SHIO_AUTH_TOKEN: internalKey };
+      const internalEnv = { ...env, SHIO_AUTH_TOKEN: internalKey, SHIO_AUTH_MODE: "oauth", SHIO_OAUTH_SCOPES: normalizeGrantedScopes(ctx.auth.scope) };
       const h = new Headers(request.headers);
       h.set("authorization", "Bearer " + internalKey);
       h.delete("cookie");
