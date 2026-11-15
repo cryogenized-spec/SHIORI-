@@ -6,6 +6,7 @@ The CLI owns all task mutations; this module never opens SQLite directly.
 """
 import argparse
 import json
+import math
 import re
 import struct
 import subprocess
@@ -93,6 +94,29 @@ def decode_snapshot(data, marker=MAGIC, columns=FIELDS):
     return rows
 
 
+def decode_isw_framed(payload, marker, fields):
+    """Parse the Rust binary framing without interpreting arbitrary text lines."""
+    if not payload.startswith(marker):
+        raise ValueError("invalid ISW Rust framing")
+    offset = len(marker)
+    rows = []
+    while offset < len(payload):
+        item = {}
+        for field in fields:
+            if offset + 4 > len(payload):
+                raise ValueError("truncated ISW frame")
+            length = struct.unpack_from(">I", payload, offset)[0]
+            offset += 4
+            if length > 65536 or offset + length > len(payload):
+                raise ValueError("invalid ISW field length")
+            item[field] = payload[offset:offset + length].decode("utf-8")
+            offset += length
+        rows.append(item)
+        if len(rows) > 5000:
+            raise ValueError("ISW snapshot exceeds local development budget")
+    return rows
+
+
 def make_server(port, cli, database):
     """Bind solely to loopback and serve static UI plus strictly scoped routes."""
     cli = Path(cli).expanduser().resolve()
@@ -161,6 +185,29 @@ def make_server(port, cli, database):
                 except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
                     self.log_error("Rust read failed: %s", type(exc).__name__)
                     self.response(503, {"error": "local Rust storage unavailable"})
+            elif path == "/api/isw/scene":
+                try:
+                    tasks = decode_snapshot(self.run_cli("bridge-dump"))
+                    edges = decode_isw_framed(
+                        self.run_cli("bridge-edges"), b"SHIORI-EDGES-1\n",
+                        ("from", "to"))
+                    positions = decode_isw_framed(
+                        self.run_cli("bridge-spatial"), b"SHIORI-SPATIAL-1\n",
+                        ("task_id", "x", "y", "revision"))
+                    for pos in positions:
+                        pos["x"] = float(pos["x"])
+                        pos["y"] = float(pos["y"])
+                        pos["revision"] = int(pos["revision"])
+                        if not math.isfinite(pos["x"]) or not math.isfinite(pos["y"]):
+                            raise ValueError("nonfinite visual coordinate")
+                    self.response(200, {
+                        "source": "rust-sqlite",
+                        "tasks": tasks, "edges": edges, "positions": positions,
+                        "read_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                    self.log_error("ISW snapshot failed: %s", type(exc).__name__)
+                    self.response(503, {"error": "Rust ISW storage unavailable"})
             elif path == "/api/attention":
                 try:
                     records = decode_snapshot(
@@ -200,6 +247,32 @@ def make_server(port, cli, database):
                 if not isinstance(data, dict):
                     raise ValueError("JSON object expected")
                 path = urlsplit(self.path).path
+                if path == "/api/isw/position":
+                    if set(data) != {"task_id", "x", "y", "expected_revision"}:
+                        raise ValueError("only spatial position fields are accepted")
+                    task_id = data.get("task_id")
+                    x = data.get("x")
+                    y = data.get("y")
+                    version = data.get("expected_revision")
+                    if not isinstance(task_id, str) or not UUID.fullmatch(task_id):
+                        raise ValueError("invalid task ID")
+                    if type(x) not in (int, float) or type(y) not in (int, float):
+                        raise ValueError("coordinates must be numbers")
+                    if not math.isfinite(x) or not math.isfinite(y) or max(abs(x), abs(y)) > 1000000:
+                        raise ValueError("coordinates outside safe range")
+                    if type(version) is not int or version < 0 or version > 2**63 - 1:
+                        raise ValueError("invalid expected spatial revision")
+                    result = self.run_cli(
+                        "spatial-set", task_id, str(x), str(y),
+                        "--if-revision", str(version)
+                    ).decode("utf-8").strip().split()
+                    if len(result) != 4 or result[0] != task_id:
+                        raise ValueError("malformed Rust position acknowledgement")
+                    self.response(200, {
+                        "position": {"task_id": task_id, "x": float(result[1]),
+                                     "y": float(result[2]), "revision": int(result[3])}
+                    })
+                    return
                 if path == "/api/tasks":
                     title = data.get("title")
                     project = data.get("project", "Inbox")
