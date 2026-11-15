@@ -10,7 +10,7 @@ use thiserror::Error;
 
 mod spatial;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 3;
 
 const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at, estimate_minutes, assignee_id FROM tasks";
 
@@ -70,7 +70,7 @@ impl SqliteStore {
     fn initialize(mut db: Connection) -> Result<Self, StorageError> {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 4000;")?;
         let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version != 0 && version != 1 && version != 2 && version != 3 && version != SCHEMA_VERSION
+        if version != 0 && version != 1 && version != 2 && version != SCHEMA_VERSION
         {
             return Err(StorageError::UnsupportedSchemaVersion {
                 found: version,
@@ -156,19 +156,6 @@ impl SqliteStore {
                 "ALTER TABLE tasks ADD COLUMN assignee_id TEXT;
                  CREATE INDEX idx_tasks_assignee_active
                  ON tasks(assignee_id, deleted_at, status, due_on);",
-            )?;
-            tx.pragma_update(None, "user_version", 3_i64)?;
-            tx.commit()?;
-        }
-        if version < 4 {
-            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            tx.execute_batch(
-                "CREATE TABLE isw_positions (
-                   task_id TEXT PRIMARY KEY REFERENCES tasks(id),
-                   x REAL NOT NULL CHECK(x BETWEEN -1000000 AND 1000000),
-                   y REAL NOT NULL CHECK(y BETWEEN -1000000 AND 1000000),
-                   revision INTEGER NOT NULL CHECK(revision > 0)
-                 );",
             )?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
