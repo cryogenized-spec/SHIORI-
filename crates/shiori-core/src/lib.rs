@@ -3,6 +3,7 @@
 
 pub mod inbox;
 pub mod scheduling;
+pub mod spatial;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
