@@ -64,3 +64,7 @@ The script reads your local Rust task snapshot and pages through the remote **re
 Set `OAUTH_KV` and the owner secret only on `shiori-auth`; set `AUTH_SERVER` service binding and `DB` on `shiori-mcp-oauth`. Never add the approval secret to source control or a Wrangler `vars` entry. Preserve the original `shiori-mcp-alpha` deployment while evaluating the OAuth migration.
 
 **Still missing before production:** a real end-to-end PKCE authorization from a permitted client, revocation test, token audience/scope negative tests on deployed Workers, account-based credential recovery/rotation, and a shared Rust/cloud reconciliation protocol. An OAuth script compiling does not prove that a client can finish login.
+
+## Browser compatibility: OAuth form Origin
+
+On 2026-11-15 a Firefox form submission produced `Invalid form origin.` because the original consent page set `Referrer-Policy: no-referrer`: privacy-sensitive HTML navigation POSTs may then send `Origin: null`. The consent page now uses `strict-origin`, which does not reveal the authorization URL/query string, and has an independent form-origin validator. It accepts a missing/opaque Origin **only with verified same-origin Fetch Metadata or Referrer**. Explicit foreign origins, cross-site/same-site submissions and malformed referrers are rejected. The server still verifies the short-lived hidden nonce, host-only HttpOnly SameSite cookie, KV pending request, user approval, and owner secret before issuing a grant. See `test/form-origin.test.js`.
