@@ -9,6 +9,7 @@ use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
 mod spatial;
+pub use spatial::SpatialViewStore;
 
 const SCHEMA_VERSION: i64 = 3;
 
@@ -24,6 +25,10 @@ pub enum StorageError {
     NotFound,
     #[error(transparent)]
     Spatial(shiori_core::spatial::SpatialError),
+    #[error("unsupported ISW view schema version {found} (supported: {supported})")]
+    UnsupportedSpatialSchemaVersion { found: i64, supported: i64 },
+    #[error("ISW view schema is malformed or unversioned")]
+    InvalidSpatialSchema,
     #[error("task was changed by another writer")]
     RevisionConflict,
     #[error("unsupported SQLite schema version {found} (latest supported: {supported})")]
