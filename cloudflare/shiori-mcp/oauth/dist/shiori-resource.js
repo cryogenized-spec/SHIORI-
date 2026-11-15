@@ -674,6 +674,7 @@ var worker_default = { async fetch(request, env) {
 } };
 
 // scope-policy.js
+var INITIAL_CONSENT_SCOPES = ["mcp:read", "mcp:write"];
 var READ_TOOLS = /* @__PURE__ */ new Set([
   "shiori_system_capabilities_read",
   "shiori_tasks_list",
@@ -709,7 +710,7 @@ var oauthResource = new OAuthResourceServer({
   // on first connection so clients that cannot perform OAuth step-up can
   // obtain an explicitly consented read/write grant. The handler continues
   // to enforce read-only tokens safely for non-mutating calls.
-  requiredScopes: ["mcp:read", "mcp:write"],
+  requiredScopes: INITIAL_CONSENT_SCOPES,
   validateToken: (env) => env.AUTH_SERVER.validateToken,
   handler: {
     async fetch(request, env, ctx) {
