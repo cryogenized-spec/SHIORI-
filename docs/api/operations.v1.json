@@ -1357,7 +1357,7 @@
     {
       "id": "spatial.selection.set",
       "phase": "A",
-      "description": "Select objects in view",
+      "description": "Select objects in view. Requires an explicitly attached live UI session; no headless camera changes.",
       "availability": "planned",
       "effect": "transient",
       "approval": "none",
@@ -1373,7 +1373,8 @@
         "additionalProperties": false,
         "required": [
           "workspace_id",
-          "ids"
+          "ids",
+          "ui_session_id"
         ],
         "properties": {
           "workspace_id": {
@@ -1388,6 +1389,11 @@
             "items": {
               "type": "string"
             }
+          },
+          "ui_session_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         }
       },
@@ -1440,7 +1446,7 @@
     {
       "id": "spatial.focus.set",
       "phase": "A",
-      "description": "Focus object in view",
+      "description": "Focus object in view. Requires an explicitly attached live UI session; no headless camera changes.",
       "availability": "planned",
       "effect": "transient",
       "approval": "none",
@@ -1456,7 +1462,8 @@
         "additionalProperties": false,
         "required": [
           "workspace_id",
-          "node_id"
+          "node_id",
+          "ui_session_id"
         ],
         "properties": {
           "workspace_id": {
@@ -1468,6 +1475,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "ui_session_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         }
       },
@@ -2144,7 +2156,7 @@
       "description": "Apply reviewed conversion",
       "availability": "planned",
       "effect": "write",
-      "approval": "contextual",
+      "approval": "reviewed_diff_required",
       "scope": "inbox:write",
       "http": {
         "method": "POST",
@@ -2855,7 +2867,7 @@
       "description": "Link existing attachment",
       "availability": "planned",
       "effect": "write",
-      "approval": "contextual",
+      "approval": "reviewed_diff_required",
       "scope": "artifacts:write",
       "http": {
         "method": "POST",
@@ -3032,7 +3044,7 @@
       "description": "Create semantic edge",
       "availability": "planned",
       "effect": "write",
-      "approval": "contextual",
+      "approval": "reviewed_diff_required",
       "scope": "graph:write",
       "http": {
         "method": "POST",
@@ -3143,7 +3155,7 @@
       "description": "Remove semantic edge",
       "availability": "planned",
       "effect": "write",
-      "approval": "contextual",
+      "approval": "reviewed_diff_required",
       "scope": "graph:write",
       "http": {
         "method": "POST",
@@ -3566,7 +3578,7 @@
       "description": "Apply approved graph diff",
       "availability": "planned",
       "effect": "write",
-      "approval": "contextual",
+      "approval": "reviewed_diff_required",
       "scope": "graph:write",
       "http": {
         "method": "POST",
@@ -5187,7 +5199,7 @@
       "description": "Save scene as artefact",
       "availability": "planned",
       "effect": "write",
-      "approval": "contextual",
+      "approval": "reviewed_diff_required",
       "scope": "eai:write",
       "http": {
         "method": "POST",
@@ -6525,7 +6537,7 @@
     {
       "id": "spatial.camera.fit",
       "phase": "A",
-      "description": "Fit current scene to viewport",
+      "description": "Fit current scene to viewport. Requires an explicitly attached live UI session; no headless camera changes.",
       "availability": "planned",
       "effect": "transient",
       "approval": "none",
@@ -6540,12 +6552,18 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "workspace_id"
+          "workspace_id",
+          "ui_session_id"
         ],
         "properties": {
           "workspace_id": {
             "type": "string",
             "minLength": 1,
+            "maxLength": 128
+          },
+          "ui_session_id": {
+            "type": "string",
+            "minLength": 8,
             "maxLength": 128
           }
         }
@@ -6599,7 +6617,7 @@
     {
       "id": "spatial.zoom.toggle",
       "phase": "A",
-      "description": "Toggle closeup and restore camera",
+      "description": "Toggle closeup and restore camera. Requires an explicitly attached live UI session; no headless camera changes.",
       "availability": "planned",
       "effect": "transient",
       "approval": "none",
@@ -6614,7 +6632,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "workspace_id"
+          "workspace_id",
+          "ui_session_id"
         ],
         "properties": {
           "workspace_id": {
@@ -6643,6 +6662,11 @@
                 "maximum": 64
               }
             }
+          },
+          "ui_session_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         }
       },
@@ -6695,7 +6719,7 @@
     {
       "id": "spatial.context_menu.open",
       "phase": "A",
-      "description": "Open manual creation menu at coordinates",
+      "description": "Open manual creation menu at coordinates. Requires an explicitly attached live UI session; no headless camera changes.",
       "availability": "planned",
       "effect": "transient",
       "approval": "none",
@@ -6712,7 +6736,8 @@
         "required": [
           "workspace_id",
           "x",
-          "y"
+          "y",
+          "ui_session_id"
         ],
         "properties": {
           "workspace_id": {
@@ -6729,6 +6754,11 @@
             "type": "number",
             "minimum": -1000000,
             "maximum": 1000000
+          },
+          "ui_session_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         }
       },
@@ -6942,7 +6972,7 @@
       "description": "Apply approved scene-only import",
       "availability": "planned",
       "effect": "view_write",
-      "approval": "none",
+      "approval": "reviewed_diff_required",
       "scope": "spatial:write",
       "http": {
         "method": "POST",
@@ -7802,7 +7832,7 @@
     {
       "id": "companion.dock.set",
       "phase": "C",
-      "description": "Manipulate visible assistant panel",
+      "description": "Manipulate visible assistant panel. Requires an explicitly attached live UI session; no headless camera changes.",
       "availability": "planned",
       "effect": "transient",
       "approval": "none",
@@ -7818,7 +7848,8 @@
         "additionalProperties": false,
         "required": [
           "workspace_id",
-          "profile"
+          "profile",
+          "ui_session_id"
         ],
         "properties": {
           "workspace_id": {
@@ -7829,6 +7860,11 @@
           "profile": {
             "type": "object",
             "maxProperties": 32
+          },
+          "ui_session_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         }
       },
@@ -8218,5 +8254,11 @@
       }
     }
   ],
-  "notes": "All listed remote capabilities are PLANNED. Local Rust support does not establish remote availability."
+  "notes": "All listed remote capabilities are PLANNED. Local Rust support does not establish remote availability.",
+  "security_notes": [
+    "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
+    "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",
+    "A preview/approval is required for real dependency and graph changes; edge display style is visual-only.",
+    "Provider API keys are never arguments to scene, task, companion, or MCP tools."
+  ]
 }
