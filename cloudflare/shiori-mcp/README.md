@@ -70,6 +70,16 @@ Tests use a disposable in-memory SQLite database and do not touch Cloudflare or 
 
 The OAuth resource (`shiori-mcp-oauth`) forwards authenticated `/mcp`
 calls to the same operations as the legacy `shiori-mcp-alpha` Worker.
+**Owner scope discovery:** Shiori's single-owner resource now advertises
+`mcp:read mcp:write` as its initial requested scopes, because ChatGPT's
+first authorisation previously requested `mcp:read` only and write step-up
+was not completing. The owner consent screen must explicitly show both
+before the user approves. This changes initial authorisation for new
+connections; existing grants are **not** silently upgraded. A token
+containing `mcp:read` only remains valid for read tools, and writes still
+require `mcp:write`. This does not override ChatGPT's independent
+write-action approval policy or plan restrictions.
+
 `system.capabilities.read` now reports **the actual credential context**:
 `oauth: true`, `authentication: oauth2.1-pkce`, and the granted read/write
 scopes for OAuth; the separate legacy endpoint still reports bearer mode.
