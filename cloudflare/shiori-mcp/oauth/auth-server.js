@@ -1,5 +1,6 @@
 import {OAuthAuthorizationServer,AuthorizationError} from "@cloudflare/workers-oauth-provider";
 import {WorkerEntrypoint} from "cloudflare:workers";
+import {isTrustedConsentRequest} from "./form-origin.js";
 
 /** Isolated single-owner OAuth issuer. Never shares Google Master secrets. */
 const ISSUER="https://shiori-auth.cryogenized.workers.dev";
@@ -10,7 +11,7 @@ const oauthServer=new OAuthAuthorizationServer({
   clientIdMetadataDocumentEnabled:true,clientRegistrationEndpoint:"/oauth/register"
 });
 const securityHeaders={"cache-control":"no-store","x-content-type-options":"nosniff",
-  "referrer-policy":"no-referrer","content-security-policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; style-src 'unsafe-inline'"};
+  "referrer-policy":"strict-origin","content-security-policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; style-src 'unsafe-inline'"};
 const escaped=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function html(s,status=200,cookie){
   const headers=new Headers({...securityHeaders,"content-type":"text/html;charset=utf-8"});
@@ -63,7 +64,7 @@ async function getAuthorize(request,env){
   return html(template,200,"__Host-shiori_oauth="+key+"; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300");
 }
 async function postAuthorize(request,env){
-  if(request.headers.get("origin")!==ISSUER)return errorPage("Invalid form origin.",403);
+  if(!isTrustedConsentRequest(request,ISSUER))return errorPage("Invalid form origin.",403);
   if(!env.OAUTH_KV||!env.OWNER_APPROVAL_SECRET)return errorPage("Owner approval is not configured.",503);
   const data=await request.text();
   if(data.length>1200)return errorPage("Form too large.",413);
