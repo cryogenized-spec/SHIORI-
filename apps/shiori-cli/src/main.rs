@@ -4,7 +4,7 @@ use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
-use shiori_storage::{SqliteStore, TaskFilter};
+use shiori_storage::{SpatialViewStore, SqliteStore, TaskFilter};
 use std::{
     error::Error,
     io::{self, Write},
@@ -258,6 +258,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let spatial_path = path.with_extension("isw.sqlite3");
     let mut store = SqliteStore::open(path)?;
     match args.command {
         Command::Add {
@@ -417,8 +418,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             bridge_attention(&store.assigned_attention("local")?)?;
         }
         Command::BridgeSpatial => {
-            let rows: Vec<Vec<String>> = store
-                .spatial_positions()?
+            let rows: Vec<Vec<String>> = SpatialViewStore::open(&spatial_path)?
+                .positions()?
                 .into_iter()
                 .map(|p| {
                     vec![
@@ -445,7 +446,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             y,
             if_revision,
         } => {
-            let p = store.set_spatial_position(&id, x, y, if_revision)?;
+            let mut view = SpatialViewStore::open(&spatial_path)?;
+            let p = view.set_position(&store, &id, x, y, if_revision)?;
             println!("{} {} {} {}", p.task_id, p.x, p.y, p.revision);
         }
         Command::Status { id, status } => {
