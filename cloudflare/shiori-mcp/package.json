@@ -1,0 +1,11 @@
+{
+  "name": "@shiori/cloudflare-mcp",
+  "version": "0.1.0-alpha",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/worker.js && node --test"
+  },
+  "engines": {"node": ">=22"}
+}
