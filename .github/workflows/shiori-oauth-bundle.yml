@@ -1,0 +1,50 @@
+name: Shiori OAuth Provider Bundle
+on:
+  pull_request:
+    paths:
+      - 'cloudflare/shiori-mcp/oauth/**'
+      - '.github/workflows/shiori-oauth-bundle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oauth-bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install exact pinned OAuth provider and bundler
+        working-directory: cloudflare/shiori-mcp/oauth
+        run: npm install --no-audit --no-fund
+      - name: Check and bundle both Workers
+        working-directory: cloudflare/shiori-mcp/oauth
+        run: npm run check
+      - name: Verify no embedded owner secrets and no unapproved auto-grants
+        working-directory: cloudflare/shiori-mcp/oauth
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const auth=fs.readFileSync('auth-server.js','utf8');
+          const server=fs.readFileSync('resource-server.js','utf8');
+          if(!auth.includes('OWNER_APPROVAL_SECRET') || !auth.includes('approve') || !auth.includes('parseAuthRequest') || !auth.includes('completeAuthorization')) throw Error('Missing owner consent validation');
+          if(!server.includes('insufficientScope') || !server.includes('mcp:write')) throw Error('Missing API scope enforcement');
+          for(const path of ['dist/shiori-auth.js','dist/shiori-resource.js']){
+            const b=fs.statSync(path);
+            if(b.size<10000 || b.size>1500000)throw Error('Unexpected bundle size: '+path+' '+b.size);
+          }
+          console.log('OAuth bundle and minimum security-gate checks passed');
+          NODE
+      - name: Save deployable OAuth and resource bundles
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: shiori-oauth-bundles
+          path: cloudflare/shiori-mcp/oauth/dist/
+          retention-days: 7
+          if-no-files-found: error
