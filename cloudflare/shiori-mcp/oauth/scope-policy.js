@@ -1,4 +1,7 @@
 // Keep OAuth resource authorization independent of the legacy Worker.
+// The owner wants read/write consent up front; all mutations still need
+// their own mcp:write check. No scope is silently added to a token.
+export const INITIAL_CONSENT_SCOPES=["mcp:read","mcp:write"];
 // Unknown tools fail closed: read-only grants cannot invoke them.
 const READ_TOOLS=new Set([
  "shiori_system_capabilities_read","shiori_tasks_list","shiori_tasks_get",
