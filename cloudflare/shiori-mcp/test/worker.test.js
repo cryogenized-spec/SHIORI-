@@ -118,3 +118,20 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
   const malformed=await worker.fetch(new Request("https://shiori-mcp-alpha.example.com/mcp",{method:"POST",headers:{authorization:"Bearer "+token},body:"{"}),e);
   assert.equal(malformed.status,400);
 });
+test("the 9 deployed MCP schemas match the central Shiori operation registry",async()=>{
+  const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
+  const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
+  assert.equal(available.length,9);
+  const result=await call(env(),"/mcp",rpc("tools/list",{}));
+  const tools=result.data.result.tools;
+  assert.equal(tools.length,available.length);
+  for(const entry of available){
+    const tool=tools.find(t=>t.name===entry.mcp_tool);
+    assert(tool,"Missing MCP tool "+entry.mcp_tool);
+    const expected=entry.inputSchema;
+    assert.deepEqual(tool.inputSchema.required,expected.required,entry.id);
+    assert.deepEqual(tool.inputSchema.properties,expected.properties,entry.id);
+    assert.equal(tool.inputSchema.additionalProperties,false);
+    assert.equal(entry.data_source,"isolated_remote_d1_not_synced_with_local_rust");
+  }
+});
