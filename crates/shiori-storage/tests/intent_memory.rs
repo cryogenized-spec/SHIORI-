@@ -147,3 +147,45 @@ fn refuse_unknown_future_sidecar_schema() {
         Err(IntentStoreError::UnsupportedSchema(99))
     ));
 }
+
+
+#[test]
+fn revision_guard_and_revoke_preserve_scope_boundaries() {
+    let mut store = IntentStore::in_memory().unwrap();
+    let c = correction("msg.100", "personal", Some("Field Research"), "intent.unbound");
+    let rule = store.record_correction_checked(&c, Some(0)).unwrap();
+    assert_eq!(rule.revision, 1);
+    assert!(matches!(
+        store.record_correction_checked(
+            &correction("msg.101", "personal", Some("Field Research"), "intent.unbound"),
+            Some(0),
+        ),
+        Err(IntentStoreError::RevisionConflict)
+    ));
+    let updated = store.record_correction_checked(
+        &correction("msg.102", "personal", Some("Field Research"), "intent.unbound"),
+        Some(1),
+    ).unwrap();
+    assert_eq!(updated.revision, 2);
+    assert_eq!(store.list_workspace("personal").unwrap().len(), 1);
+    assert!(store.list_workspace("another").unwrap().is_empty());
+    assert!(matches!(
+        store.revoke(&updated.id, 1),
+        Err(IntentStoreError::RevisionConflict)
+    ));
+    assert_eq!(store.list_workspace("personal").unwrap().len(), 1);
+    store.revoke(&updated.id, 2).unwrap();
+    assert!(store.list_workspace("personal").unwrap().is_empty());
+    assert!(store.get(&updated.id).unwrap().is_none());
+}
+
+#[test]
+fn revoked_evidence_can_be_replaced_without_resurrecting_old_rule() {
+    let mut store = IntentStore::in_memory().unwrap();
+    let c = correction("msg.200", "personal", Some("Research"), "intent.unbound");
+    let first = store.record_correction_checked(&c, Some(0)).unwrap();
+    store.revoke(&first.id, first.revision).unwrap();
+    let replacement = store.record_correction_checked(&c, Some(0)).unwrap();
+    assert_ne!(first.id, replacement.id);
+    assert_eq!(replacement.verified_successes, 0);
+}
