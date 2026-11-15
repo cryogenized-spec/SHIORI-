@@ -661,7 +661,6 @@ var oauthResource = new OAuthResourceServer({
   resourceMetadata: {
     resource: ENDPOINT,
     authorization_servers: [ISSUER],
-    scopes_supported: ["mcp:read"],
     resource_name: "Shiori MCP"
   },
   requiredScopes: ["mcp:read"],
