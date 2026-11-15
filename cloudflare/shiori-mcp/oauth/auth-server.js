@@ -59,7 +59,7 @@ async function getAuthorize(request,env){
     '<p>Permissions: <strong>'+escaped(scopes.join(", ")||"none")+'</strong></p>'+
     '<p>This Cloudflare database is not yet synchronized with your offline Rust tasks.</p>'+
     '<form method="post" action="/authorize"><input type="hidden" name="nonce" value="'+key+'">'+
-    '<label>Owner approval code<br><input type="password" name="code" autocomplete="off" minlength="24" maxlength="160" required></label>'+
+    '<label>Owner approval code<br><input type="password" name="code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" minlength="24" maxlength="160" required></label><p><small>Use your separate OAuth owner approval code, not your original MCP bearer token.</small></p>'+
     '<p><label><input type="checkbox" name="approve" value="yes" required> I approve this app and its requested permissions.</label></p>'+
     '<button type="submit">Authorize this app</button></form></main></html>';
   return html(template,200,"__Host-shiori_oauth="+key+"; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300");
