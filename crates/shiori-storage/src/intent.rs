@@ -111,38 +111,49 @@ impl IntentStore {
              ORDER BY phrase, project_id"
         );
         let mut stmt = self.db.prepare(&query)?;
-        let found = stmt.query_map(
-            params![scope.workspace_id, scope.project_id], row_to_rule,
-        )?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let found = stmt
+            .query_map(params![scope.workspace_id, scope.project_id], row_to_rule)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(found)
     }
 
-    pub fn resolve(&self, expression: &str, scope: &IntentScope)
-        -> Result<IntentResolution, IntentStoreError>
-    {
+    pub fn resolve(
+        &self,
+        expression: &str,
+        scope: &IntentScope,
+    ) -> Result<IntentResolution, IntentStoreError> {
         Ok(resolve_intent(&self.list(scope)?, expression, scope))
     }
 
     /// The caller has established that evidence_id refers to an actual user
     /// correction. The stored interpretation never confers execution authority.
     /// Same evidence = exact replay; changed payload = explicit conflict.
-    pub fn record_correction(&mut self, correction: &IntentCorrection)
-        -> Result<IntentRule, IntentStoreError>
-    {
+    pub fn record_correction(
+        &mut self,
+        correction: &IntentCorrection,
+    ) -> Result<IntentRule, IntentStoreError> {
         correction.validate()?;
         let phrase = shiori_core::contextual_intent::normalize_phrase(&correction.phrase);
         let meaning = correction.meaning.trim();
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous: Option<(String, String, String, String, String)> = tx.query_row(
-            "SELECT rule_id, event_kind, phrase, meaning, procedure_id
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous: Option<(String, String, String, String, String)> = tx
+            .query_row(
+                "SELECT rule_id, event_kind, phrase, meaning, procedure_id
              FROM intent_evidence WHERE evidence_id=?1",
-            params![correction.evidence_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        ).optional()?;
+                params![correction.evidence_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()?;
         if let Some((id, kind, old_phrase, old_meaning, old_procedure)) = previous {
             let existing = Self::get_in(&tx, &id)?.ok_or(IntentStoreError::NotFound)?;
-            if kind == "correction" && old_phrase == phrase && old_meaning == meaning
-                && old_procedure == correction.procedure_id && existing.scope == correction.scope {
+            if kind == "correction"
+                && old_phrase == phrase
+                && old_meaning == meaning
+                && old_procedure == correction.procedure_id
+                && existing.scope == correction.scope
+            {
                 return Ok(existing);
             }
             return Err(IntentStoreError::EvidenceConflict);
@@ -151,13 +162,17 @@ impl IntentStore {
             "SELECT {RULE_FIELDS} FROM intent_rules
              WHERE workspace_id=?1 AND COALESCE(project_id, '')=?2 AND phrase=?3"
         );
-        let existing = tx.query_row(
-            &query, params![
-                correction.scope.workspace_id,
-                correction.scope.project_id.as_deref().unwrap_or(""),
-                phrase,
-            ], row_to_rule,
-        ).optional()?;
+        let existing = tx
+            .query_row(
+                &query,
+                params![
+                    correction.scope.workspace_id,
+                    correction.scope.project_id.as_deref().unwrap_or(""),
+                    phrase,
+                ],
+                row_to_rule,
+            )
+            .optional()?;
         let rule = if let Some(mut rule) = existing {
             rule.apply_correction(correction)?;
             tx.execute(
@@ -165,8 +180,13 @@ impl IntentStore {
                  correction_count=?4, verified_successes=?5, revision=?6,
                  last_evidence_id=?7 WHERE id=?1",
                 params![
-                    rule.id, rule.meaning, rule.procedure_id, rule.correction_count,
-                    rule.verified_successes, rule.revision, rule.last_evidence_id,
+                    rule.id,
+                    rule.meaning,
+                    rule.procedure_id,
+                    rule.correction_count,
+                    rule.verified_successes,
+                    rule.revision,
+                    rule.last_evidence_id,
                 ],
             )?;
             rule
@@ -178,10 +198,16 @@ impl IntentStore {
                     correction_count, verified_successes, revision, last_evidence_id
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
-                    rule.id, rule.scope.workspace_id, rule.scope.project_id,
-                    rule.phrase, rule.meaning, rule.procedure_id,
-                    rule.correction_count, rule.verified_successes,
-                    rule.revision, rule.last_evidence_id,
+                    rule.id,
+                    rule.scope.workspace_id,
+                    rule.scope.project_id,
+                    rule.phrase,
+                    rule.meaning,
+                    rule.procedure_id,
+                    rule.correction_count,
+                    rule.verified_successes,
+                    rule.revision,
+                    rule.last_evidence_id,
                 ],
             )?;
             rule
@@ -200,13 +226,21 @@ impl IntentStore {
     /// Called only after independently verified, correctly authorised success.
     /// Retry of the same outcome is idempotent; stale revisions fail closed.
     pub fn record_success(
-        &mut self, rule_id: &str, expected_revision: u64, evidence_id: &str,
+        &mut self,
+        rule_id: &str,
+        expected_revision: u64,
+        evidence_id: &str,
     ) -> Result<IntentRule, IntentStoreError> {
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let old: Option<(String, String)> = tx.query_row(
-            "SELECT rule_id, event_kind FROM intent_evidence WHERE evidence_id=?1",
-            params![evidence_id], |r| Ok((r.get(0)?, r.get(1)?)),
-        ).optional()?;
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let old: Option<(String, String)> = tx
+            .query_row(
+                "SELECT rule_id, event_kind FROM intent_evidence WHERE evidence_id=?1",
+                params![evidence_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
         if let Some((previous_id, kind)) = old {
             if previous_id == rule_id && kind == "success" {
                 return Self::get_in(&tx, rule_id)?.ok_or(IntentStoreError::NotFound);
@@ -218,7 +252,12 @@ impl IntentStore {
         tx.execute(
             "UPDATE intent_rules SET verified_successes=?2, revision=?3,
              last_evidence_id=?4 WHERE id=?1",
-            params![rule.id, rule.verified_successes, rule.revision, rule.last_evidence_id],
+            params![
+                rule.id,
+                rule.verified_successes,
+                rule.revision,
+                rule.last_evidence_id
+            ],
         )?;
         tx.execute(
             "INSERT INTO intent_evidence (evidence_id, rule_id, event_kind, phrase, meaning, procedure_id)
