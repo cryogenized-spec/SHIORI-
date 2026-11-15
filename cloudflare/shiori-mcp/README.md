@@ -66,6 +66,50 @@ npm test
 
 Tests use a disposable in-memory SQLite database and do not touch Cloudflare or real tasks.
 
+## OAuth MCP repair and write rollout (2026-11-15)
+
+The OAuth resource (`shiori-mcp-oauth`) forwards authenticated `/mcp`
+calls to the same operations as the legacy `shiori-mcp-alpha` Worker.
+`system.capabilities.read` now reports **the actual credential context**:
+`oauth: true`, `authentication: oauth2.1-pkce`, and the granted read/write
+scopes for OAuth; the separate legacy endpoint still reports bearer mode.
+Do not interpret a listed write tool as permission to invoke it. OAuth
+checks `mcp:write` on every mutation, and a read-only grant is denied.
+
+All four write operations use a SHA-256 fingerprint of the canonical
+operation ID and arguments (excluding only the idempotency key).
+Reusing the same `workspace_id / operation_id / idempotency_key` with a
+different request now returns HTTP 409 `IDEMPOTENCY_CONFLICT`.
+MCP tool failures include `isError: true` **and** structured
+`{ok:false,error:{code,message,http_status,retryable}}` content.
+Some MCP clients still choose their own error labels; callers should
+inspect `structuredContent.error.code`.
+
+**Deployment order is mandatory for an existing D1 database:**
+
+1. Back up the D1 database; do **not** clear `remote_tasks` or `idempotency`.
+2. Run `migrations/0001_idempotency_request_hash.sql` **once** against
+   the `shiori-mcp-alpha` D1 database. Fresh installations instead use
+   the updated `schema.sql`.
+3. Verify the new column exists. Existing rows have `request_hash=NULL`
+   and are deliberately **not replayable**; clients must submit a fresh
+   idempotency key for a new attempt, after reconciling any previous result.
+4. Deploy the revised `src/worker.js` to the legacy bearer Worker and
+   rebuild/deploy the OAuth `dist/shiori-resource.js` bundle from the same
+   commit. Avoid mixing old and new Worker versions during client writes.
+5. Run automated tests (`npm test` in `cloudflare/shiori-mcp`,
+   and `npm run check` in `cloudflare/shiori-mcp/oauth`), then verify
+   live `system.capabilities.read` with an owner OAuth session.
+6. Verify a **read-only grant** receives `insufficient_scope` on a
+   mutation. For an owner write grant, begin with a deliberately invalid
+   request to test the validation/error path without inserting task data.
+   Only after that should a user-approved disposable task be created
+   and its mutations exercised. There is still no task-deletion MCP tool.
+
+The absent Rust/SQLite ↔ D1 synchronization is **not fixed by this patch**.
+Keep local and remote data separate until a versioned, opt-in sync protocol
+with tombstones, source IDs, conflict resolution and rollback is implemented.
+
 ## Next engineering phases
 
 1. Implement standards-compliant OAuth/PKCE pairing for ChatGPT and similar remote clients; use explicit user identity and revocable sessions.
