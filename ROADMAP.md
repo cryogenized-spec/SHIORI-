@@ -252,7 +252,7 @@ tests/              # integration, contract, performance and migration tests
 3. **Task model:** single-user-first with team-ready permissions vs. a full multi-user model from day one.
 4. **Synchronization:** operation-log vs. other change-tracking approaches; conflict-resolution contract; local storage and server DB adapters.
 5. **Scheduling:** precise policy for ranking, task splitting, manually pinned time blocks, recurring schedules, travel/break constraints, and overflow.
-6. **MCP tool set:** adopt the ADR 0004 and versioned 111-operation draft catalogue as a **planning inventory**, not a deployed all-at-once server; validate auth scopes, confirmation, write audit trails and UI resource versions before marking entries available.
+6. **MCP tool set:** adopt the ADR 0004 and versioned 113-operation draft catalogue as a **planning inventory**, not a deployed all-at-once server; validate auth scopes, confirmation, write audit trails and UI resource versions before marking entries available.
 7. **OCR:** engine choices, offline-language support, image retention, confidence indicators, and user verification.
 8. **CalDAV:** required VTODO fields, compatibility matrix, recurrence behaviour, mapping losses, and treatment of newer extensions.
 9. **Release scope:** whether M6 OCR and CalDAV are firm v1.0 blockers or early post-v1 additions, based on measured effort.
