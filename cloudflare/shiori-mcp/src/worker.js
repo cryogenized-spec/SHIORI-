@@ -98,11 +98,11 @@ async function writeOnce(env,w,id,key,result,statement){
 async function run(id,arg,env){
  const def=BY_ID.get(id);if(!def)E(404,"UNSUPPORTED_CAPABILITY","Operation not deployed");
  const a=validate(def,arg,env),db=env.DB,w=a.workspace_id;
- if(id==="system.capabilities.read")return {server:SERVER,version:VERSION,workspace_id:w,backend:"isolated-cloudflare-d1",local_rust_sync:false,oauth:false,authentication:"single-user-bearer",operations:OPERATIONS.map(o=>o.id),planned_total:113};
+ if(id==="system.capabilities.read")return {capabilities:{server:SERVER,version:VERSION,workspace_id:w,backend:"isolated-cloudflare-d1",local_rust_sync:false,oauth:false,authentication:"single-user-bearer",planned_total:113},operations:OPERATIONS.map(o=>o.id)};
  if(id==="tasks.list"){
   const {offset,limit}=listParams(a);
   const rows=await db.prepare("SELECT * FROM remote_tasks WHERE workspace_id=? AND deleted_at IS NULL ORDER BY created_at DESC,id LIMIT ? OFFSET ?").bind(w,limit,offset).all();
-  const items=rows.results.map(formatTask);return {items,next_cursor:items.length===limit?String(offset+limit):null,source:"isolated-cloudflare-d1"};
+  const items=rows.results.map(formatTask);return {items,next_cursor:items.length===limit?String(offset+limit):null};
  }
  if(id==="tasks.get")return {item:formatTask(await getTask(db,w,a.task_id))};
  if(id==="tasks.create"){
@@ -110,14 +110,14 @@ async function run(id,arg,env){
   if(a.title.trim().length===0||a.title.length>160)E(400,"VALIDATION_FAILED","Title must contain 1–160 characters");
   const taskId=crypto.randomUUID(),now=new Date().toISOString();
   const task={id:taskId,title:a.title.trim(),body:a.body||"",project:"Remote alpha",status:"todo",priority:"medium",version:1,created_at:now,updated_at:now,origin:"cloudflare-d1-remote-alpha"};
-  const result={changed:true,resource_id:taskId,revision:1,item:task};
+  const result={changed:true,resource_id:taskId,revision:1};
   return writeOnce(env,w,id,a.idempotency_key,result,db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,notes,project,status,priority,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(taskId,w,task.title,task.body,task.project,task.status,task.priority,1,now,now));
  }
  if(id==="tasks.status.set"){
   const cached=await duplicate(db,w,id,a.idempotency_key);if(cached)return cached;
   const current=await getTask(db,w,a.task_id);if(current.version!==a.expected_revision)E(409,"CONFLICT","Task revision has changed");
   if(!allowedStatuses.has(a.status))E(400,"VALIDATION_FAILED","Invalid status");
-  const result={changed:true,resource_id:a.task_id,revision:a.expected_revision+1,status:a.status};
+  const result={changed:true,resource_id:a.task_id,revision:a.expected_revision+1};
   const now=new Date().toISOString();
   const updates=await db.batch([
     db.prepare("UPDATE remote_tasks SET status=?,version=version+1,updated_at=? WHERE workspace_id=? AND id=? AND version=? AND deleted_at IS NULL").bind(a.status,now,w,a.task_id,a.expected_revision),
@@ -129,7 +129,7 @@ async function run(id,arg,env){
  if(id==="tasks.dependencies.list"){
   await getTask(db,w,a.task_id);
   const rows=await db.prepare("SELECT depends_on_id FROM remote_dependencies WHERE workspace_id=? AND task_id=? ORDER BY depends_on_id").bind(w,a.task_id).all();
-  return {items:rows.results.map(x=>({task_id:a.task_id,depends_on_id:x.depends_on_id})),source:"isolated-cloudflare-d1"};
+  return {items:rows.results.map(x=>({task_id:a.task_id,depends_on_id:x.depends_on_id}))};
  }
  if(id==="spatial.scene.read"){
   const {offset,limit}=listParams(a);
