@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS idempotency (
   workspace_id TEXT NOT NULL,
   operation_id TEXT NOT NULL,
   token TEXT NOT NULL,
+  request_hash TEXT NOT NULL CHECK(length(request_hash)=64),
   result_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY(workspace_id,operation_id,token)
