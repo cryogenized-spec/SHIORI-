@@ -9945,6 +9945,550 @@
           }
         }
       }
+    },
+    {
+      "id": "intent.resolve",
+      "phase": "C",
+      "description": "Resolve one expression against trusted, scoped, verified intent rules without performing actions",
+      "availability": "planned",
+      "effect": "read",
+      "approval": "none",
+      "scope": "intent:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/intent.resolve"
+      },
+      "mcp_tool": "shiori_intent_resolve",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "expression"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expression": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 160
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "intent.resolve"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decision",
+              "executed"
+            ],
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "clarify",
+                  "interpreted"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "unrecognised",
+                  "needs_verification",
+                  "competing_meanings"
+                ]
+              },
+              "rule_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "meaning": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "procedure_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "executed": {
+                "const": false
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 20
+          }
+        }
+      }
+    },
+    {
+      "id": "intent.rules.list",
+      "phase": "C",
+      "description": "List the authenticated actor's contextual meaning rules",
+      "availability": "planned",
+      "effect": "read",
+      "approval": "none",
+      "scope": "intent:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/intent.rules.list"
+      },
+      "mcp_tool": "shiori_intent_rules_list",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "intent.rules.list"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rules"
+            ],
+            "properties": {
+              "rules": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "rule_id",
+                    "expression",
+                    "meaning",
+                    "revision"
+                  ],
+                  "properties": {
+                    "rule_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "expression": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 160
+                    },
+                    "meaning": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "verified_successes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 20
+          }
+        }
+      }
+    },
+    {
+      "id": "intent.correction.record",
+      "phase": "C",
+      "description": "Record an explicitly reviewed correction grounded in originating user evidence",
+      "availability": "planned",
+      "effect": "write",
+      "approval": "explicit_user_action",
+      "scope": "intent:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/intent.correction.record"
+      },
+      "mcp_tool": "shiori_intent_correction_record",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "expression",
+          "meaning",
+          "evidence_ref",
+          "expected_revision",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expression": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 160
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "meaning": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "evidence_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "intent.correction.record"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rule_id",
+              "revision",
+              "executed"
+            ],
+            "properties": {
+              "rule_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "executed": {
+                "const": false
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 20
+          }
+        }
+      }
+    },
+    {
+      "id": "intent.outcome.record",
+      "phase": "C",
+      "description": "Verify an application-authenticated execution outcome for an existing intent rule",
+      "availability": "planned",
+      "effect": "write",
+      "approval": "explicit_user_action",
+      "scope": "intent:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/intent.outcome.record"
+      },
+      "mcp_tool": "shiori_intent_outcome_record",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "rule_id",
+          "receipt_id",
+          "expected_revision",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "rule_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "intent.outcome.record"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rule_id",
+              "revision",
+              "verified_successes"
+            ],
+            "properties": {
+              "rule_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "verified_successes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 20
+          }
+        }
+      }
+    },
+    {
+      "id": "intent.rules.revoke",
+      "phase": "C",
+      "description": "Forget a contextual meaning rule and its retained learning evidence",
+      "availability": "planned",
+      "effect": "destructive",
+      "approval": "explicit_user_action",
+      "scope": "intent:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/intent.rules.revoke"
+      },
+      "mcp_tool": "shiori_intent_rules_revoke",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "rule_id",
+          "expected_revision",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "rule_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "intent.rules.revoke"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "revoked"
+            ],
+            "properties": {
+              "revoked": {
+                "type": "boolean"
+              },
+              "rule_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 20
+          }
+        }
+      }
     }
   ],
   "notes": "All listed remote capabilities are PLANNED. Local Rust support does not establish remote availability.",
