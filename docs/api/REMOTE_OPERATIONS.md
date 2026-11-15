@@ -2,7 +2,7 @@
 
 **Status: planned, not deployed.** Last reviewed 2026-11-15. See [machine-readable registry](operations.v1.json) and [ADR 0004](../adr/0004-remote-operation-registry-and-mcp.md).
 
-This document freezes the **shape of the integration**, not the eventual release of all 111 operations. The registry is deliberately wide enough to cover the full ISW vision; only a small proven Phase A subset is needed to open a real MCP connection. `availability: planned` means there is currently **no supported remote route or MCP tool** for that entry. The local Python development bridge is not a production API.
+This document freezes the **shape of the integration**, not the eventual release of all 113 operations. The registry is deliberately wide enough to cover the full ISW vision; only a small proven Phase A subset is needed to open a real MCP connection. `availability: planned` means there is currently **no supported remote route or MCP tool** for that entry. The local Python development bridge is not a production API.
 
 ## One operation, two remote faces
 
