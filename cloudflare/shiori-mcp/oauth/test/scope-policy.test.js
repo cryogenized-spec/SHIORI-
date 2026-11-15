@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {requiredScopesForRpc,normalizeGrantedScopes,hasRequiredScopes} from "../scope-policy.js";
+import {INITIAL_CONSENT_SCOPES,requiredScopesForRpc,normalizeGrantedScopes,hasRequiredScopes} from "../scope-policy.js";
 
 test("read methods retain mcp:read only",()=>{
  for(const method of ["initialize","ping","tools/list"]){
@@ -29,4 +29,12 @@ test("OAuth scopes are compared exactly, not as substrings",()=>{
  assert.equal(hasRequiredScopes(["mcp:read","mcp:write-extra"],["mcp:write"]),false);
  assert.deepEqual(normalizeGrantedScopes(null),[]);
  assert.deepEqual(normalizeGrantedScopes("mcp:read    mcp:write"),["mcp:read","mcp:write"]);
+});
+
+test("initial owner login requests both scopes, while per-tool checks remain least privileged",()=>{
+ assert.deepEqual(INITIAL_CONSENT_SCOPES,["mcp:read","mcp:write"]);
+ assert.equal(hasRequiredScopes(["mcp:read"],requiredScopesForRpc({method:"tools/call",
+  params:{name:"shiori_tasks_list"}})),true);
+ assert.equal(hasRequiredScopes(["mcp:read"],requiredScopesForRpc({method:"tools/call",
+  params:{name:"shiori_tasks_create"}})),false);
 });
