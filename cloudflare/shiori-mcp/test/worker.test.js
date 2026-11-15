@@ -135,3 +135,99 @@ test("the 9 deployed MCP schemas match the central Shiori operation registry",as
     assert.equal(entry.data_source,"isolated_remote_d1_not_synced_with_local_rust");
   }
 });
+
+
+test("capabilities reflect the credential actually used by the resource",async()=>{
+  const e=env();
+  const params={workspace_id:"personal"};
+  const legacy=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",arguments:params}));
+  const meta=legacy.data.result.structuredContent.capabilities;
+  assert.equal(meta.oauth,false);
+  assert.equal(meta.authentication,"single-user-bearer");
+  assert.equal(meta.write_access,true);
+  e.SHIO_AUTH_MODE="oauth";
+  e.SHIO_OAUTH_SCOPES=["mcp:read"];
+  const read=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",arguments:params}));
+  assert.equal(read.data.result.structuredContent.capabilities.oauth,true);
+  assert.equal(read.data.result.structuredContent.capabilities.authentication,"oauth2.1-pkce");
+  assert.deepEqual(read.data.result.structuredContent.capabilities.granted_scopes,["mcp:read"]);
+  assert.equal(read.data.result.structuredContent.capabilities.write_access,false);
+  e.SHIO_OAUTH_SCOPES.push("mcp:write");
+  const write=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",arguments:params}));
+  assert.equal(write.data.result.structuredContent.capabilities.write_access,true);
+});
+
+test("MCP tool errors preserve NOT_FOUND and revision conflict details",async()=>{
+  const e=env();
+  const fail=await call(e,"/mcp",rpc("tools/call",{name:"shiori_tasks_get",
+    arguments:{workspace_id:"personal",task_id:"no-such-id"}}));
+  assert.equal(fail.status,200);
+  assert.equal(fail.data.result.isError,true);
+  const body=fail.data.result.structuredContent;
+  assert.deepEqual(body,{ok:false,error:{code:"NOT_FOUND",message:"Task not found in remote workspace",
+    http_status:404,retryable:false}});
+  assert.deepEqual(JSON.parse(fail.data.result.content[0].text),body);
+  const noTitle=await call(e,"/mcp",rpc("tools/call",{name:"shiori_tasks_create",
+    arguments:request("mcp-err-0001",{title:" "})}));
+  assert.equal(noTitle.data.result.structuredContent.error.code,"VALIDATION_FAILED");
+  assert.equal(noTitle.data.result.structuredContent.error.http_status,400);
+});
+
+test("idempotency cannot replay different create inputs or reordered JSON keys",async()=>{
+  const e=env();
+  const same="create-fingerprint-01";
+  const first=await call(e,"/api/v1/ops/tasks.create",request(same,{title:"Prepare schedule",text:"Version one"}));
+  assert.equal(first.status,200);
+  const reordered={idempotency_key:same,text:"Version one",title:"Prepare schedule",workspace_id:"personal"};
+  const replay=await call(e,"/api/v1/ops/tasks.create",reordered);
+  assert.equal(replay.data.data.resource_id,first.data.data.resource_id);
+  const changed=await call(e,"/api/v1/ops/tasks.create",request(same,{title:"Prepare schedule",text:"Version two"}));
+  assert.equal(changed.status,409);
+  assert.equal(changed.data.error.code,"IDEMPOTENCY_CONFLICT");
+  const list=await call(e,"/api/v1/ops/tasks.list",{workspace_id:"personal"});
+  assert.equal(list.data.data.items.length,1);
+});
+
+test("idempotency protects status, position and connector style writes",async()=>{
+  const e=env();
+  const first=await call(e,"/api/v1/ops/tasks.create",request("create-fingerprint-02",{title:"Trial record"}));
+  const id=first.data.data.resource_id;
+  const statusArgs=request("status-fingerprint-01",{task_id:id,status:"done",expected_revision:1});
+  assert.equal((await call(e,"/api/v1/ops/tasks.status.set",statusArgs)).status,200);
+  assert.equal((await call(e,"/api/v1/ops/tasks.status.set",statusArgs)).data.data.revision,2);
+  const badStatus=await call(e,"/api/v1/ops/tasks.status.set",{...statusArgs,status:"todo"});
+  assert.equal(badStatus.status,409);
+  assert.equal(badStatus.data.error.code,"IDEMPOTENCY_CONFLICT");
+  const posArgs=request("position-fingerprint-01",{node_id:id,x:45,y:70,expected_revision:0});
+  assert.equal((await call(e,"/api/v1/ops/spatial.node.position.set",posArgs)).status,200);
+  assert.equal((await call(e,"/api/v1/ops/spatial.node.position.set",posArgs)).data.data.position.revision,1);
+  const badPos=await call(e,"/api/v1/ops/spatial.node.position.set",{...posArgs,x:46});
+  assert.equal(badPos.data.error.code,"IDEMPOTENCY_CONFLICT");
+  const styleArgs=request("style-fingerprint-01",{style:"curved",expected_revision:0});
+  assert.equal((await call(e,"/api/v1/ops/spatial.edge.style.set",styleArgs)).status,200);
+  const badStyle=await call(e,"/api/v1/ops/spatial.edge.style.set",{...styleArgs,style:"straight"});
+  assert.equal(badStyle.data.error.code,"IDEMPOTENCY_CONFLICT");
+  const style=await call(e,"/api/v1/ops/spatial.scene.read",{workspace_id:"personal"});
+  assert.equal(style.data.data.scene.connector_style,"curved");
+  assert.equal(style.data.data.scene.nodes[0].x,45);
+  assert.equal((await call(e,"/api/v1/ops/tasks.get",{workspace_id:"personal",task_id:id})).data.data.item.status,"done");
+});
+
+test("migration preserves legacy keys, which fail closed on replay",async()=>{
+  const sql=fs.readFileSync(new URL("../schema.sql",import.meta.url),"utf8");
+  const oldSql=sql.replace("  request_hash TEXT NOT NULL CHECK(length(request_hash)=64),\\n","");
+  assert.notEqual(sql,oldSql);
+  const d=new DatabaseSync(":memory:");
+  d.exec(oldSql);
+  const legacyKey="create-old-key-01";
+  d.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,result_json,created_at) VALUES(?,?,?,?,?)")
+    .run("personal","tasks.create",legacyKey,JSON.stringify({changed:true,resource_id:"legacy",revision:1}),"2026-11-15");
+  d.exec(fs.readFileSync(new URL("../migrations/0001_idempotency_request_hash.sql",import.meta.url),"utf8"));
+  const col=d.prepare("SELECT request_hash FROM idempotency WHERE token=?").get(legacyKey);
+  assert.equal(col.request_hash,null);
+  const e=env();
+  e.DB.db=d;
+  const bad=await call(e,"/api/v1/ops/tasks.create",request(legacyKey,{title:"New record"}));
+  assert.equal(bad.status,409);
+  assert.equal(bad.data.error.code,"IDEMPOTENCY_CONFLICT");
+});
