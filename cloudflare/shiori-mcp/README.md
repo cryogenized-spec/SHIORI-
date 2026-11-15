@@ -66,6 +66,45 @@ npm test
 
 Tests use a disposable in-memory SQLite database and do not touch Cloudflare or real tasks.
 
+## Complete operation schema discovery
+
+Shiori has **113 operation contracts** in `docs/api/operations.v1.json`.
+The Cloudflare MCP makes **all 113 full contracts discoverable** without
+presenting unimplemented commands as runnable. The registry includes
+input and output JSON Schemas, operation ID, scope, effect, approval
+requirements, phase and actual availability.
+
+- `resources/list` advertises `shiori://operations/v1`.
+- `resources/read` on that URI returns the **entire source-aligned registry**.
+- `resources/templates/list` advertises `shiori://operations/v1/{operation_id}`;
+  `resources/read` on, for example, `shiori://operations/v1/tasks.delete`
+  returns the complete single-operation schema (clearly marked planned).
+- The implemented `shiori_system_operations_list` tool provides paginated
+  access with `workspace_id`, `cursor`, `limit`, and optional
+  `availability` or exact `operation_id` lookup. It returns full contracts,
+  not merely names.
+- `tools/list` deliberately advertises **only the 10 runnable operations**:
+  the original nine plus the read-only catalog tool. Unsupported operations
+  are never executed; they cannot be called merely because their schema
+  exists in the catalog.
+
+OAuth `mcp:read` is sufficient to inspect the catalog. All registry
+requests remain authenticated and workspace-scoped. Catalog discovery
+does not grant permissions, implement missing Rust/cloud sync, execute
+planned destructive operations or upgrade an existing OAuth token.
+
+For clients that support MCP resources, use `resources/read` for the entire
+contract or one named operation. For clients that expose only tools,
+use `shiori_system_operations_list`; its `operation_id` filter is the
+quickest way to inspect one schema. **Do not request unimplemented
+operations through `tools/call`.**
+
+The worker bundles a snapshot of the registry for standalone Cloudflare
+deployment. After editing the canonical JSON, run
+`python3 cloudflare/shiori-mcp/scripts/sync_operation_catalog.py`
+to refresh its embedded snapshot. Tests compare the deployed snapshot
+against the canonical registry and fail on drift.
+
 ## OAuth MCP repair and write rollout (2026-11-15)
 
 The OAuth resource (`shiori-mcp-oauth`) forwards authenticated `/mcp`
