@@ -31,6 +31,7 @@ The following are the first requirements confirmed from real use of task manager
 | SH-005 | **Universal capture inbox** | Independently capture and triage notes, ideas, images, OCR output and connected-source events as durable inbox items. Convert to a task, memo or follow-up only after an explicit action; support archive and source provenance. Expose inbox operations through the same application services used by SHIORI MCP and native clients. | P0 |
 | SH-006 | **Infinite Spatial Workspace** | Free-running, pannable, zoomable dotted-grid canvas; first-class artefacts and typed relations; semantic zoom into glyph/colour-coded clusters and blocker markers; deterministic, bounded contextual retrieval from an indexed permanent library. Store spatial layout separately from graph meaning. | P1 |
 | SH-007 | **Expressive Agent Interface (EAI)** | Schema-driven interactive explanations and manipulable 2D/polygonal scenes, with optional layered/3D views, provenance, AI-proposed scene changes and MCP Apps transport. Examples include an explorable locust lifecycle and a task-blocker explanation. Text-only fallback required. | P1 |
+| SH-008 | **Optional in-app AI Companion** | Edge-docking resizable panel; draggable border-snapping launcher and dismiss/reopen; persistent conversations; provider-aware OpenAI models, reasoning/output preferences and presets; universal settings for BYOK secret setup via user-owned backend. Independent of external SHIORI MCP, no embedded mandatory AI. | P1 |
 
 ## Design memo — 2026-11-14: SHIORI inbox, MCP and ClickUp interoperation
 
@@ -106,11 +107,17 @@ The following are the first requirements confirmed from real use of task manager
 
 **Scheduling:** deliver Part I local contracts and a UX proof as extensions of M1/M2 (without destabilising SH-005). Fold graph indexing/retrieval into M4/M5 readiness. Prototype Part II's renderer independently before MCP connectivity, then add MCP Apps transport in/after M5. Treat their production hardening as two explicitly gated M7 workstreams, not blockers for the current offline-alpha milestone; defer v1.0 inclusion decisions until performance, reliability and licensing are demonstrated.
 
+## Design memo — 2026-11-15: Optional in-app AI Companion (SH-008)
+
+**Confirmed UX direction:** A right-to-left expandable assistant dock by default, optionally snapping to left/top/bottom. The assistant collapses to a draggable icon that magnetically snaps to the nearest border, can be dragged into an animated trash target to dismiss it, and can always be reopened from the global header. Resizing, persistent threads, thread navigation, bottom composer and compact model settings tabs must not obscure ordinary canvas interaction. Model selection/reasoning/output tuning belongs near the composer, while provider credentials and account/device pairing belong only in **universal settings**. No mandatory provider connection is needed for normal task management.
+
+**Integration strategy:** The in-app companion and ChatGPT-through-SHIORI-MCP are two interchangeable front ends to *shared, authenticated SHIORI application commands*; they are not two different AI task engines. Store BYOK credentials on an independently owned Cloudflare Worker or equally secure provider backend; never embed provider keys in browser HTML, WebView, JavaScript/localStorage, logs, or scene JSON. Production chats need migration-tested durable storage. OpenAI model/parameter capabilities must be validated against a live catalogue; temperature is not universal and the minimum-token output slider is guidance rather than an API-enforced guarantee. Agent-driven graph changes always require reviewed diffs and authorization. This is a roadmap decision and **not a claim of an operational AI connection**. See [ADR 0003](docs/adr/0003-optional-ai-companion-and-credentials.md).
+
 ## 3. Feature catalogue for scope evaluation
 
 **Foundational (P0):** tasks, notes/descriptions, projects, subtasks, tags, statuses, priorities, assignments, distinct created/planned-start/actual-start/due/completion timestamps, searchable indexes, task history, recurrence, dependencies, blocker reasons, a distinct durable inbox with capture/triage/archive, quick capture, saved filters, reliable local notifications, data export/import, secure backups, accessibility, keyboard navigation, and user-configurable work schedules.
 
-**Advanced productivity (P1):** SH-006 spatial workspace, semantic zoom, typed artefact relations/backlinks and bounded context retrieval; SH-007 expressive scene engine and interactive explanations; Kanban, calendar, table, timeline and Gantt-like views; robust recurrence exceptions and templates; weekly planner; time estimates vs. actuals; transparent rescheduling suggestions; distraction-light focus mode; OCR capture; task provenance and source links; flexible widgets and shortcuts; dependency-aware prioritization.
+**Advanced productivity (P1):** SH-008 optional resizable assistant dock with user-owned BYOK setup and persistent threads; SH-006 spatial workspace, semantic zoom, typed artefact relations/backlinks and bounded context retrieval; SH-007 expressive scene engine and interactive explanations; Kanban, calendar, table, timeline and Gantt-like views; robust recurrence exceptions and templates; weekly planner; time estimates vs. actuals; transparent rescheduling suggestions; distraction-light focus mode; OCR capture; task provenance and source links; flexible widgets and shortcuts; dependency-aware prioritization.
 
 **Interoperability (P1):** read-only GitHub source-tree graph importer as an SH-006 adapter (advanced code analysis later), versioned scene contracts and JSON Canvas export/import where practical, documented REST API, explicit typed MCP tools, optional MCP Apps compact task views, CalDAV/VTODO interoperability adapter, webhook subscriptions, and portable deployment. External task-provider connectors (e.g. ClickUp, Google Tasks) come later and must preserve source IDs and conflicts rather than silently duplicate tasks.
 
@@ -186,6 +193,8 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** offline edits converge safely after reconnect; conflicts and deletes are not lost; a documented export/restore migration succeeds between two independently operated environments.
 
 ### M5 — MCP interoperability and compact UI
+**SH-008 groundwork:** define model-provider capability contracts, account/secret setup boundary and a strictly optional local companion UI prototype. Its chat state must not become another task store or bypass application permissions.
+
 **Deliver:** typed, separately named MCP tools for tasks, inbox capture/triage/conversion/archive, projects, assignments, filters, dependencies and schedules, plus bounded artefact-graph queries and optional EAI scene retrieval; scoped tokens/permissions; error contracts; optional lightweight versioned MCP Apps views.
 
 **Exit:** supported MCP clients can read/manage permitted tasks; destructive operations have appropriate safeguards; clients without UI support still work; no model API key required by SHIORI.
@@ -197,6 +206,8 @@ tests/              # integration, contract, performance and migration tests
 
 ### M7 — Advanced productivity and release hardening (two spatial/EAI tracks)
 **Workstream M7-A / SH-006:** complete the infinite workspace, typed artefact relations, backlink/navigation indexes, legend+glyph semantic zoom, attachment/actionable offshoots and deterministic contextual librarians. Measure large-fixture render latency, graph query cost and offline interaction. Keep view-state separate from domain edges.
+
+**Workstream M7-C / SH-008 (optional):** finish a durable authenticated assistant experience with edge docking, portable models/presets, secure user-owned BYOK proxy, audited change previews, and fully separate global credential settings. No requirement to switch apps for in-app conversations, but no live key or AI entitlement bundled into SHIORI. Production rollout is separately gated.
 
 **Workstream M7-B / SH-007:** complete a portable expressive scene validator/renderer, provenance-carrying polygonal lifecycle example, SHIORI repair-graph explanation, agent-to-scene operations and MCP Apps adapter with text fallback. Agent-suggested restructuring is preview/diff-first and cannot write canonical data without authorization and review.
 
@@ -242,7 +253,8 @@ tests/              # integration, contract, performance and migration tests
 10. **Governance:** project conduct, contribution process, sustainable maintenance, trademarks, and commitment to freely available core functionality.
 11. **SH-006 design:** artefact registry vs. a generic aggregate, graph index/query contracts, spatial rendering framework, zoom thresholds and glyph/colour accessibility.
 12. **SH-007 licence and engine:** separate MIT-licensed EAI package vs. SHIORI AGPL-proposed modules, contributor rights, candidate renderer dependency audit, scene-schema interoperability and MCP Apps compatibility.
-13. **Release scope:** whether advanced SH-006/SH-007 features ship before v1.0 or in staged post-v1 releases based on measured quality gates.
+13. **Release scope:** whether advanced SH-006/SH-007/SH-008 features ship before v1.0 or in staged post-v1 releases based on measured quality gates.
+14. **SH-008 security:** native account/session secret store, user-owned Cloudflare reference deployment, credential lifecycle, catalog/capability refresh, safe thread migration and opt-in/opt-out.
 
 ## 9. Near-term next actions
 
