@@ -4,7 +4,7 @@ Local-first task management, independent of AI, account providers, and hosting s
 
 ## Status
 
-**Early implementation, not a public release.** This branch includes the Rust task model, SQLite persistence, a local CLI, the interactive web prototype, and a **development-only localhost adapter** that connects the browser to the real Rust CLI and SQLite database. This is not a public REST/MCP service, authenticated multi-user application, or finished sync/backup system.
+**Early implementation, not a public release.** This branch includes the Rust task model, SQLite persistence, a local CLI, the interactive web prototype, and a **development-only localhost adapter** that connects the browser to the real Rust CLI and SQLite database. The local bridge is not a public REST/MCP service or finished sync/backup system. A separate single-owner Cloudflare MCP alpha now exists, but it is not synchronized with the local Rust store.
 
 ## Development
 
@@ -55,7 +55,7 @@ The optional calendar on **My day** can be collapsed; its state is saved in loca
 
 ## Remote operations and SHIORI MCP status
 
-The Rust and SQLite foundations exist, but the **authenticated remote JSON API and SHIORI MCP server do not yet exist**. They are specified in [ADR 0004](docs/adr/0004-remote-operation-registry-and-mcp.md) and the [per-operation registry](docs/api/operations.v1.json). Every planned operation has a distinct JSON/HTTP path and named MCP tool definition. **Entries marked `planned` are not callable endpoints.** Build and test a small Phase A subset first; do not expose the existing Python development bridge to the public Internet.
+An initial [Cloudflare MCP alpha](cloudflare/shiori-mcp/README.md) is provisioned at `https://shiori-mcp-alpha.cryogenized.workers.dev/mcp`, with **nine** deployed bearer-protected tools and dedicated JSON/HTTP routes. The source and in-memory D1 integration tests pass. **The endpoint has not yet passed an independent authenticated live-network test** (external probes returned an upstream 403), and it does **not** support OAuth, ChatGPT connection, or synchronization with local Rust/SQLite tasks. Cloudflare D1 is an isolated remote dataset. See [ADR 0004](docs/adr/0004-remote-operation-registry-and-mcp.md) and the [per-operation registry](docs/api/operations.v1.json). Entries marked `planned` remain unavailable. Never expose the existing Python local bridge publicly.
 
 ## Infinite Spatial Workspace — Rust-backed alpha
 
