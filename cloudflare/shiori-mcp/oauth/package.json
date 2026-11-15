@@ -5,7 +5,8 @@
   "version": "0.1.0-alpha",
   "scripts": {
     "build": "esbuild auth-server.js --bundle --format=esm --platform=browser --target=es2022 --external:cloudflare:workers --outfile=dist/shiori-auth.js && esbuild resource-server.js --bundle --format=esm --platform=browser --target=es2022 --external:cloudflare:workers --outfile=dist/shiori-resource.js",
-    "check": "node --check auth-server.js && node --check resource-server.js && npm run build"
+    "check": "node --check auth-server.js && node --check resource-server.js && node --check form-origin.js && npm test && npm run build",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4"
