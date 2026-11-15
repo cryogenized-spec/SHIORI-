@@ -33,7 +33,18 @@ class TestRemoteOperationContract(unittest.TestCase):
             self.assertEqual(op["http"]["method"], "POST")
             self.assertEqual(op["http"]["path"], "/api/v1/ops/" + op["id"])
             self.assertEqual(op["mcp_tool"], "shiori_" + op["id"].replace(".", "_"))
-            self.assertEqual(op["availability"], "planned")
+            alpha = {"system.capabilities.read", "tasks.list", "tasks.get",
+                     "tasks.create", "tasks.status.set", "tasks.dependencies.list",
+                     "spatial.scene.read", "spatial.node.position.set",
+                     "spatial.edge.style.set"}
+            self.assertEqual(
+                op["availability"],
+                "cloudflare_alpha" if op["id"] in alpha else "planned"
+            )
+            if op["id"] in alpha:
+                self.assertEqual(
+                    op["data_source"], "isolated_remote_d1_not_synced_with_local_rust"
+                )
         self.assertEqual(self.catalog["mcp"]["endpoint"], "/mcp")
 
     def test_every_operation_has_typed_bounded_input_and_output(self):
