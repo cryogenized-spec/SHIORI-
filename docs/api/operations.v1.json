@@ -100,7 +100,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "system.operations.list",
@@ -269,7 +269,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.get",
@@ -347,7 +347,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.create",
@@ -440,7 +440,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.update",
@@ -642,7 +642,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "tasks.delete",
@@ -907,7 +907,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "spatial.scene.read",
@@ -993,7 +993,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "spatial.node.position.read",
@@ -1185,7 +1185,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "spatial.viewport.read",
@@ -1730,7 +1730,7 @@
       },
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
-      "release_evidence": "Cloudflare script+bindings confirmed; Node D1 contract tests pass. External HTTP verification inconclusive due 403 egress block."
+      "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
     },
     {
       "id": "inbox.list",
