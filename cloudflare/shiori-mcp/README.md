@@ -37,6 +37,16 @@ curl -X POST https://YOUR-WORKER.workers.dev/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
+## Verify an authenticated live connection
+
+The repository includes a **read-only** Python smoke client. After obtaining the private owner token on your own device:
+
+```bash
+python3 cloudflare/shiori-mcp/scripts/smoke_client.py --token-file /path/to/shiori-mcp-access-token.txt
+```
+
+It checks the live health endpoint, authenticated MCP initialize, tools/list, actual capability invocation and an empty or populated remote task list. It uses Cloudflare's recommended descriptive User-Agent to avoid Browser Integrity Check error 1010 on `workers.dev`. The token is never printed. This smoke test is necessary because the CI runner cannot receive the owner's Cloudflare secret; CI only tests live unauthenticated denial and simulated authenticated operations.
+
 ## Data and security
 
 Shiori's Cloudflare Worker is deployed into **the owner's Cloudflare account**, using a separate D1 database, not the existing ClickUp or Google Master Workers/databases. Secrets stay in Worker secret bindings and are never committed. The Cloudflare Worker rejects requests lacking its bearer credential, unexpected JSON fields, unsupported operations and different workspaces.
