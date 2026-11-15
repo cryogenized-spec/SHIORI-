@@ -70,7 +70,20 @@ jobs:
           except HTTPError as e:
               assert e.code==401,e.code
               assert "resource_metadata" in e.headers.get("WWW-Authenticate",""),e.headers
-          print("PASS: OAuth issuer metadata, PKCE S256, resource audience and unauthorized denial.")
+          # Only send malformed/unknown-client authorization requests.
+          # Never transmit or log the owner's local approval code.
+          invalid=issuer+"/authorize?response_type=code&client_id=shiori-smoke-unknown"
+          try:
+              urlopen(Request(invalid,headers=ua),timeout=25)
+              raise AssertionError("Unknown OAuth client unexpectedly authorized")
+          except HTTPError as e:
+              assert e.code==400, f"Expected 400 for invalid client, got {e.code}"
+              body=e.read(1024).decode("utf-8","replace")
+              assert "Owner approval is not configured" not in body, "Owner secret unavailable"
+          protected=read(mcp+"/health")
+          assert protected["service"]=="shiori-mcp-oauth",protected
+          assert protected["local_rust_sync"] is False,protected
+          print("PASS: OAuth issuer metadata, PKCE S256, resource audience, unauthenticated denial, owner-configured authorize handler and resource health.")
           PY
       - name: Publish reviewed deployment bundles in source branch
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
