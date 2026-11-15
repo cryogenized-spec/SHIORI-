@@ -14,7 +14,7 @@ const allowedStyles=new Set(["circuit","curved","straight"]);
 const W=()=>({type:"string",minLength:1,maxLength:128});
 const S=(max=160)=>({type:"string",minLength:1,maxLength:max});
 const I=(max)=>({type:"integer",minimum:0,...(max?{maximum:max}:{})});
-const F={workspace_id:W(),task_id:S(),node_id:S(),title:S(),body:{type:"string",maxLength:65536},status:{enum:["todo","in_progress","done"]},style:{enum:["circuit","curved","straight"]},idempotency_key:{type:"string",minLength:8,maxLength:128},expected_revision:I(),limit:{type:"integer",minimum:1,maximum:100},cursor:{type:"string",maxLength:64},x:{type:"number",minimum:-1000000,maximum:1000000},y:{type:"number",minimum:-1000000,maximum:1000000}};
+const F={workspace_id:W(),task_id:S(),node_id:S(),title:S(),text:{type:"string",maxLength:32768},status:{enum:["todo","in_progress","done"]},style:{enum:["circuit","curved","straight"]},idempotency_key:{type:"string",minLength:8,maxLength:128},expected_revision:I(),limit:{type:"integer",minimum:1,maximum:100},cursor:{type:"string",maxLength:64},x:{type:"number",minimum:-1000000,maximum:1000000},y:{type:"number",minimum:-1000000,maximum:1000000}};
 const op=(id,fields,required=[],description="",write=false)=>({
  id,name:"shiori_"+id.replaceAll(".","_"),description,
  inputSchema:{type:"object",additionalProperties:false,required:["workspace_id",...required,...(write?["idempotency_key"]:[])],
@@ -24,7 +24,7 @@ const OPERATIONS=[
  op("system.capabilities.read",[] ,[],"Read actual deployed capabilities and isolation status"),
  op("tasks.list",["cursor","limit"],[],"List tasks in this isolated Cloudflare workspace"),
  op("tasks.get",["task_id"],["task_id"],"Read one task from the remote D1 workspace"),
- op("tasks.create",["title","body"],["title"],"Create remote-only task (local Rust sync not enabled)",true),
+ op("tasks.create",["title","text"],["title"],"Create remote-only task (local Rust sync not enabled)",true),
  op("tasks.status.set",["task_id","status","expected_revision"],["task_id","status","expected_revision"],"Update remote task status with revision guard",true),
  op("tasks.dependencies.list",["task_id"],["task_id"],"Read remote task prerequisite links"),
  op("spatial.scene.read",["limit","cursor"],[],"Read remote spatial task scene (not local Rust SQLite)"),
@@ -109,7 +109,7 @@ async function run(id,arg,env){
   let cached=await duplicate(db,w,id,a.idempotency_key);if(cached)return cached;
   if(a.title.trim().length===0||a.title.length>160)E(400,"VALIDATION_FAILED","Title must contain 1–160 characters");
   const taskId=crypto.randomUUID(),now=new Date().toISOString();
-  const task={id:taskId,title:a.title.trim(),body:a.body||"",project:"Remote alpha",status:"todo",priority:"medium",version:1,created_at:now,updated_at:now,origin:"cloudflare-d1-remote-alpha"};
+  const task={id:taskId,title:a.title.trim(),body:a.text||"",project:"Remote alpha",status:"todo",priority:"medium",version:1,created_at:now,updated_at:now,origin:"cloudflare-d1-remote-alpha"};
   const result={changed:true,resource_id:taskId,revision:1};
   return writeOnce(env,w,id,a.idempotency_key,result,db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,notes,project,status,priority,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(taskId,w,task.title,task.body,task.project,task.status,task.priority,1,now,now));
  }
