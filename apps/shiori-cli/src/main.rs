@@ -4,7 +4,7 @@ use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
-use shiori_storage::{SqliteStore, TaskFilter};
+use shiori_storage::{SpatialViewStore, SqliteStore, TaskFilter};
 use std::{
     error::Error,
     io::{self, Write},
@@ -96,6 +96,21 @@ enum Command {
     /// Local-only indexed assignment snapshot with blocker state
     #[command(hide = true)]
     BridgeAttention,
+    /// Read-only spatial view positions; versioned independently from tasks.
+    #[command(hide = true)]
+    BridgeSpatial,
+    /// Read-only actual dependency links (prerequisite -> dependent).
+    #[command(hide = true)]
+    BridgeEdges,
+    /// Update only a task's visual placement, guarded by its view revision.
+    #[command(hide = true)]
+    SpatialSet {
+        id: String,
+        x: f64,
+        y: f64,
+        #[arg(long)]
+        if_revision: i64,
+    },
     /// Complete a task
     Done { id: String },
     /// Reopen a task
@@ -218,6 +233,22 @@ fn bridge_attention(items: &[(Task, bool)]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Private length-prefixed machine snapshots shared with the localhost
+/// development bridge. Never parse task metadata by splitting on newlines.
+fn bridge_rows(marker: &[u8], rows: &[Vec<String>]) -> Result<(), Box<dyn Error>> {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    out.write_all(marker)?;
+    for row in rows {
+        for field in row {
+            out.write_all(&u32::try_from(field.len())?.to_be_bytes())?;
+            out.write_all(field.as_bytes())?;
+        }
+    }
+    out.flush()?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let path = match args.database {
@@ -227,6 +258,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let spatial_path = path.with_extension("isw.sqlite3");
     let mut store = SqliteStore::open(path)?;
     match args.command {
         Command::Add {
@@ -384,6 +416,39 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
         Command::BridgeAttention => {
             bridge_attention(&store.assigned_attention("local")?)?;
+        }
+        Command::BridgeSpatial => {
+            let rows: Vec<Vec<String>> = SpatialViewStore::open(&spatial_path)?
+                .positions()?
+                .into_iter()
+                .map(|p| {
+                    vec![
+                        p.task_id,
+                        p.x.to_string(),
+                        p.y.to_string(),
+                        p.revision.to_string(),
+                    ]
+                })
+                .collect();
+            bridge_rows(b"SHIORI-SPATIAL-1\n", &rows)?;
+        }
+        Command::BridgeEdges => {
+            let rows: Vec<Vec<String>> = store
+                .spatial_dependency_edges()?
+                .into_iter()
+                .map(|(from, to)| vec![from, to])
+                .collect();
+            bridge_rows(b"SHIORI-EDGES-1\n", &rows)?;
+        }
+        Command::SpatialSet {
+            id,
+            x,
+            y,
+            if_revision,
+        } => {
+            let mut view = SpatialViewStore::open(&spatial_path)?;
+            let p = view.set_position(&store, &id, x, y, if_revision)?;
+            println!("{} {} {} {}", p.task_id, p.x, p.y, p.revision);
         }
         Command::Status { id, status } => {
             println!("Updated {}", store.set_status(&id, status)?.title);

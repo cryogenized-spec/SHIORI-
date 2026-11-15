@@ -45,13 +45,16 @@ def exercise(cli):
             status, js = request("GET", "/app.js")
             assert status == 200 and b"bootstrapBridge" in js
 
-            assert request("POST", "/api/tasks", {
+            creation_status, created = request("POST", "/api/tasks", {
                 "title": "Build the local bridge",
                 "project": "SHIORI", "priority": "high",
                 "notes": "A line\nand another 栞",
                 "due_on": "2026-11-12",
                 "estimate_minutes": 45
-            }) == (201, {"ok": True})
+            })
+            assert creation_status == 201 and created.get("ok") is True
+            assert isinstance(created.get("task_id"), str)
+            assert len(created["task_id"]) == 36
             status, snapshot = request("GET", "/api/tasks")
             assert status == 200 and len(snapshot["tasks"]) == 1, snapshot
             task = snapshot["tasks"][0]
@@ -61,6 +64,7 @@ def exercise(cli):
             assert task["status"] == "todo"
             assert task["version"] == 1
             task_id = task["id"]
+            assert created["task_id"] == task_id
             assert task["assignee_id"] == "local"
             status, attention = request("GET", "/api/attention")
             assert status == 200

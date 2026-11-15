@@ -8,6 +8,9 @@ use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus, validate_ass
 use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
+mod spatial;
+pub use spatial::SpatialViewStore;
+
 const SCHEMA_VERSION: i64 = 3;
 
 const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on, created_at, updated_at, completed_at, version, deleted_at, estimate_minutes, assignee_id FROM tasks";
@@ -20,6 +23,12 @@ pub enum StorageError {
     Domain(#[from] TaskError),
     #[error("task not found")]
     NotFound,
+    #[error(transparent)]
+    Spatial(shiori_core::spatial::SpatialError),
+    #[error("unsupported ISW view schema version {found} (supported: {supported})")]
+    UnsupportedSpatialSchemaVersion { found: i64, supported: i64 },
+    #[error("ISW view schema is malformed or unversioned")]
+    InvalidSpatialSchema,
     #[error("task was changed by another writer")]
     RevisionConflict,
     #[error("unsupported SQLite schema version {found} (latest supported: {supported})")]
