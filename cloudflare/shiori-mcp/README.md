@@ -1,0 +1,63 @@
+# Shiori Cloudflare MCP — Phase A
+
+This module is the first **remotely deployed, single-owner MCP server** for Shiori. The Worker exposes a **nine-operation subset** of the [113 planned operations](../../docs/api/operations.v1.json). It is a security-gated cloud alpha, not a substitute for the Rust local task database.
+
+## Current limitations
+
+- Cloudflare D1 contains **isolated remote tasks and visual view state**; there is **no automatic synchronisation** with the local Rust/SQLite task store. Never claim remote tasks are local tasks.
+- The Worker does not access GitHub, ClickUp, Gmail or an AI provider.
+- This first authentication mechanism is a **long random bearer token** stored as a Cloudflare Worker secret. It is not OAuth. Many chat clients require OAuth to connect a custom remote MCP server; implement OAuth pairing separately before claiming ChatGPT app integration is complete.
+- No multi-user tenancy, shared Cloudflare hosting, third-party identities or public unauthenticated tools.
+- No durable live EAI renderer, graphical scene hosting or Shiori inbox yet.
+
+## Live tools and JSON operations
+
+`system.capabilities.read`, `tasks.list`, `tasks.get`, `tasks.create`, `tasks.status.set`, `tasks.dependencies.list`, `spatial.scene.read`, `spatial.node.position.set`, `spatial.edge.style.set`.
+
+Each operation is also available at `POST /api/v1/ops/<dot-separated-id>` with the same JSON input schema. MCP uses one `POST /mcp` JSON-RPC Streamable HTTP endpoint with individually named tools `shiori_<underscore_name>`.
+
+`GET /health` returns public, **non-sensitive** status only. All task data, list/discovery, operations and MCP calls require the bearer token. `workspace_id` is `personal` for this single-user alpha.
+
+Example authenticated API call:
+
+```bash
+curl -X POST https://YOUR-WORKER.workers.dev/api/v1/ops/tasks.list \
+  -H "Authorization: Bearer $SHIORI_MCP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"workspace_id":"personal","limit":10}'
+```
+
+Example MCP tools/list:
+
+```bash
+curl -X POST https://YOUR-WORKER.workers.dev/mcp \
+  -H "Authorization: Bearer $SHIORI_MCP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+## Data and security
+
+Shiori's Cloudflare Worker is deployed into **the owner's Cloudflare account**, using a separate D1 database, not the existing ClickUp or Google Master Workers/databases. Secrets stay in Worker secret bindings and are never committed. The Cloudflare Worker rejects requests lacking its bearer credential, unexpected JSON fields, unsupported operations and different workspaces.
+
+The Worker accepts at most 32 KiB per JSON request, caps result pagination, rejects unsafe coordinates and revision conflicts, uses conditional SQLite writes and records idempotency keys for supported write operations. It has a simple per-minute owner rate limit. Production multi-user security, broader quota controls, OAuth and comprehensive sync/conflict reconciliation remain future work.
+
+## Deployment
+
+The owner may provision `shiori-mcp-alpha` D1 and run `schema.sql` once through Cloudflare D1 tools, upload `src/worker.js` as an ES module Worker with `DB` D1 binding and plaintext `WORKSPACE_ID=personal`, and set the **secret** `SHIO_AUTH_TOKEN` using Cloudflare's Workers Secrets. Activate the Worker subdomain only after the secret and schema are in place.
+
+For local tests, Node 22 or newer:
+
+```bash
+cd cloudflare/shiori-mcp
+npm test
+```
+
+Tests use a disposable in-memory SQLite database and do not touch Cloudflare or real tasks.
+
+## Next engineering phases
+
+1. Implement standards-compliant OAuth/PKCE pairing for ChatGPT and similar remote clients; use explicit user identity and revocable sessions.
+2. Introduce a Rust application-service facade over canonical local tasks and a well-defined authenticated sync protocol. Prove field mapping, conflicts, tombstones, revisions and offline queue replay.
+3. Add live EAI/MCP Apps UI resources and typed graph/inbox operations only as Rust-backed services become available. Use the 113-operation registry as a planning inventory, not a dynamic arbitrary-execution endpoint.
