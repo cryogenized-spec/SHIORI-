@@ -5098,6 +5098,11 @@ function isTrustedConsentRequest(request, issuer) {
   return false;
 }
 
+// approval-input.js
+function normalizeApprovalInput(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 // auth-server.js
 var ISSUER = "https://shiori-auth.cryogenized.workers.dev";
 var RESOURCE = "https://shiori-mcp-oauth.cryogenized.workers.dev/mcp";
@@ -5153,7 +5158,7 @@ async function getAuthorize(request, env) {
   const key = nonce();
   await env.OAUTH_KV.put("shiori:pending:" + key, JSON.stringify({ url: request.url, at: Date.now() }), { expirationTtl: 300 });
   const scopes = approval.scope.filter((s) => SCOPES.includes(s));
-  const template = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shiori - Authorize App</title><style>:root{color-scheme:dark}body{background:#0d1117;color:#eef2fc;font:15px system-ui;margin:0}main{max-width:420px;margin:8vh auto;padding:26px;border:1px solid #354055;border-radius:16px;background:#161d29}p{line-height:1.55;color:#b5bfd2}input[type=password]{padding:12px;width:100%;box-sizing:border-box;background:#0d1117;color:white;border:1px solid #64738b;border-radius:8px}button{display:block;margin-top:20px;width:100%;padding:12px;border:0;border-radius:8px;background:#b6cff3;color:#142136;font-weight:700}</style><main><h1>Connect to Shiori</h1><p><strong>' + escaped(client.clientName || approval.clientId) + "</strong> requests access to your personal cloud workspace.</p><p>Permissions: <strong>" + escaped(scopes.join(", ") || "none") + '</strong></p><p>This Cloudflare database is not yet synchronized with your offline Rust tasks.</p><form method="post" action="/authorize"><input type="hidden" name="nonce" value="' + key + '"><label>Owner approval code<br><input type="password" name="code" autocomplete="off" minlength="24" maxlength="160" required></label><p><label><input type="checkbox" name="approve" value="yes" required> I approve this app and its requested permissions.</label></p><button type="submit">Authorize this app</button></form></main></html>';
+  const template = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shiori - Authorize App</title><style>:root{color-scheme:dark}body{background:#0d1117;color:#eef2fc;font:15px system-ui;margin:0}main{max-width:420px;margin:8vh auto;padding:26px;border:1px solid #354055;border-radius:16px;background:#161d29}p{line-height:1.55;color:#b5bfd2}input[type=password]{padding:12px;width:100%;box-sizing:border-box;background:#0d1117;color:white;border:1px solid #64738b;border-radius:8px}button{display:block;margin-top:20px;width:100%;padding:12px;border:0;border-radius:8px;background:#b6cff3;color:#142136;font-weight:700}</style><main><h1>Connect to Shiori</h1><p><strong>' + escaped(client.clientName || approval.clientId) + "</strong> requests access to your personal cloud workspace.</p><p>Permissions: <strong>" + escaped(scopes.join(", ") || "none") + '</strong></p><p>This Cloudflare database is not yet synchronized with your offline Rust tasks.</p><form method="post" action="/authorize"><input type="hidden" name="nonce" value="' + key + '"><label>Owner approval code<br><input type="password" name="code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" minlength="24" maxlength="160" required></label><p><small>Use your separate OAuth owner approval code, not your original MCP bearer token.</small></p><p><label><input type="checkbox" name="approve" value="yes" required> I approve this app and its requested permissions.</label></p><button type="submit">Authorize this app</button></form></main></html>';
   return html(template, 200, "__Host-shiori_oauth=" + key + "; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300");
 }
 async function postAuthorize(request, env) {
@@ -5167,7 +5172,7 @@ async function postAuthorize(request, env) {
   if (!raw) return errorPage("Approval expired.", 403);
   const pending = JSON.parse(raw);
   if (Date.now() - pending.at > 3e5) return errorPage("Approval expired.", 403);
-  if (!await secureEqual(fields.get("code") || "", env.OWNER_APPROVAL_SECRET)) return errorPage("Invalid approval code.", 403);
+  if (!await secureEqual(normalizeApprovalInput(fields.get("code")), normalizeApprovalInput(env.OWNER_APPROVAL_SECRET))) return errorPage("Invalid approval code. Use the private Shiori OAuth owner code saved on your laptop, not the older MCP access token. Restart the connection to retry.", 403);
   if (fields.get("approve") !== "yes") return errorPage("Consent not granted.", 403);
   await env.OAUTH_KV.delete("shiori:pending:" + key);
   const api = oauthServer.getOAuthApi(env);
