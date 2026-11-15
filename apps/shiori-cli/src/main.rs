@@ -417,20 +417,36 @@ fn main() -> Result<(), Box<dyn Error>> {
             bridge_attention(&store.assigned_attention("local")?)?;
         }
         Command::BridgeSpatial => {
-            let rows: Vec<Vec<String>> = store.spatial_positions()?.into_iter().map(|p|
-                vec![p.task_id, p.x.to_string(), p.y.to_string(), p.revision.to_string()]
-            ).collect();
+            let rows: Vec<Vec<String>> = store
+                .spatial_positions()?
+                .into_iter()
+                .map(|p| {
+                    vec![
+                        p.task_id,
+                        p.x.to_string(),
+                        p.y.to_string(),
+                        p.revision.to_string(),
+                    ]
+                })
+                .collect();
             bridge_rows(b"SHIORI-SPATIAL-1\n", &rows)?;
         }
         Command::BridgeEdges => {
-            let rows: Vec<Vec<String>> = store.spatial_dependency_edges()?.into_iter().map(|(from, to)|
-                vec![from, to]
-            ).collect();
+            let rows: Vec<Vec<String>> = store
+                .spatial_dependency_edges()?
+                .into_iter()
+                .map(|(from, to)| vec![from, to])
+                .collect();
             bridge_rows(b"SHIORI-EDGES-1\n", &rows)?;
         }
-        Command::SpatialSet { id, x, y, if_revision } => {
-            let p = store.set_spatial_position(&id,x,y,if_revision)?;
-            println!("{} {} {} {}",p.task_id,p.x,p.y,p.revision);
+        Command::SpatialSet {
+            id,
+            x,
+            y,
+            if_revision,
+        } => {
+            let p = store.set_spatial_position(&id, x, y, if_revision)?;
+            println!("{} {} {} {}", p.task_id, p.x, p.y, p.revision);
         }
         Command::Status { id, status } => {
             println!("Updated {}", store.set_status(&id, status)?.title);
