@@ -215,7 +215,7 @@ test("idempotency protects status, position and connector style writes",async()=
 
 test("migration preserves legacy keys, which fail closed on replay",async()=>{
   const sql=fs.readFileSync(new URL("../schema.sql",import.meta.url),"utf8");
-  const oldSql=sql.replace("  request_hash TEXT NOT NULL CHECK(length(request_hash)=64),\\n","");
+  const oldSql=sql.replace("  request_hash TEXT NOT NULL CHECK(length(request_hash)=64),\n","");
   assert.notEqual(sql,oldSql);
   const d=new DatabaseSync(":memory:");
   d.exec(oldSql);
