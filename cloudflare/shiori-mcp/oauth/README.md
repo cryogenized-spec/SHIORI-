@@ -24,7 +24,7 @@ cd ~/SHIORI-
 git pull --ff-only
 umask 077
 mkdir -p ~/.config/shiori
-openssl rand -hex 32 | tr -d '\\n' > ~/.config/shiori/oauth-approval-code
+openssl rand -hex 32 | tr -d '\n' > ~/.config/shiori/oauth-approval-code
 chmod 600 ~/.config/shiori/oauth-approval-code
 npx wrangler secret put OWNER_APPROVAL_SECRET --name shiori-auth \
   < ~/.config/shiori/oauth-approval-code
