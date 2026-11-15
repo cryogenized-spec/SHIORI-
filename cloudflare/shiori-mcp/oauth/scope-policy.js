@@ -11,7 +11,7 @@ export function requiredScopesForRpc(rpc){
 }
 export function normalizeGrantedScopes(scope){
  if(Array.isArray(scope))return scope.filter(s=>typeof s==="string");
- if(typeof scope==="string")return scope.split(/\\s+/).filter(Boolean);
+ if(typeof scope==="string")return scope.split(/\s+/).filter(Boolean);
  return [];
 }
 export function hasRequiredScopes(scope,needed){
