@@ -1,6 +1,6 @@
 import {OAuthResourceServer,insufficientScope} from "@cloudflare/workers-oauth-provider";
 import legacy from "../src/worker.js";
-import {requiredScopesForRpc,hasRequiredScopes,normalizeGrantedScopes} from "./scope-policy.js";
+import {INITIAL_CONSENT_SCOPES,requiredScopesForRpc,hasRequiredScopes,normalizeGrantedScopes} from "./scope-policy.js";
 
 /**
  * OAuth-protected facade. The original bearer-gated alpha Worker remains
@@ -17,7 +17,7 @@ const oauthResource=new OAuthResourceServer({
  // on first connection so clients that cannot perform OAuth step-up can
  // obtain an explicitly consented read/write grant. The handler continues
  // to enforce read-only tokens safely for non-mutating calls.
- requiredScopes:["mcp:read","mcp:write"],
+ requiredScopes:INITIAL_CONSENT_SCOPES,
  validateToken:env=>env.AUTH_SERVER.validateToken,
  handler:{
   async fetch(request,env,ctx){
