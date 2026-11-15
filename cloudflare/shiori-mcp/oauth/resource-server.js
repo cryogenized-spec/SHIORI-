@@ -26,6 +26,7 @@ const oauthResource=new OAuthResourceServer({
    if(request.method==="POST"){
     try{rpc=await request.clone().json();}catch{return new Response("Invalid JSON",{status:400});}
    }
+   // Exact mcp:write is mandatory for all mutations (unknown tools fail closed).
    const needed=requiredScopesForRpc(rpc);
    if(!hasRequiredScopes(ctx.auth?.scope,needed))return insufficientScope(ctx.auth,needed);
    if(!env.DB)return new Response("Shiori backend unconfigured",{status:503});
