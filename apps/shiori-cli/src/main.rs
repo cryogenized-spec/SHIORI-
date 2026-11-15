@@ -2,9 +2,10 @@
 //! that future desktop, Android, API and MCP adapters will call.
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::{Parser, Subcommand};
+use shiori_core::contextual_intent::{IntentCorrection, IntentScope};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
-use shiori_storage::{SpatialViewStore, SqliteStore, TaskFilter};
+use shiori_storage::{IntentStore, SpatialViewStore, SqliteStore, TaskFilter};
 use std::{
     error::Error,
     io::{self, Write},
@@ -23,6 +24,38 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Record a user's explicit correction as an unverified contextual intent.
+    IntentCorrect {
+        phrase: String,
+        #[arg(long)]
+        meaning: String,
+        /// A registered procedure identifier, not an arbitrary command.
+        #[arg(long)]
+        procedure: String,
+        #[arg(long, default_value = "personal")]
+        workspace: String,
+        #[arg(long)]
+        project: Option<String>,
+        /// Stable ID of the original, independently verified user message.
+        #[arg(long)]
+        evidence: String,
+    },
+    /// Resolve an expression; read-only and never executes a procedure.
+    IntentResolve {
+        phrase: String,
+        #[arg(long, default_value = "personal")]
+        workspace: String,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Record a verified successful procedure outcome to reduce future prompts.
+    IntentSuccess {
+        rule_id: String,
+        #[arg(long)]
+        if_revision: u64,
+        #[arg(long)]
+        evidence: String,
+    },
     /// Create a task
     Add {
         title: String,
@@ -259,8 +292,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::fs::create_dir_all(parent)?;
     }
     let spatial_path = path.with_extension("isw.sqlite3");
+    let intent_path = path.with_extension("intent.sqlite3");
     let mut store = SqliteStore::open(path)?;
     match args.command {
+        Command::IntentCorrect {
+            phrase, meaning, procedure, workspace, project, evidence,
+        } => {
+            let mut memory = IntentStore::open(&intent_path)?;
+            let correction = IntentCorrection {
+                scope: IntentScope { workspace_id: workspace, project_id: project },
+                phrase,
+                meaning,
+                procedure_id: procedure,
+                evidence_id: evidence,
+            };
+            let rule = memory.record_correction(&correction)?;
+            println!("Recorded interpretation {} [revision {}]. Verification pending.",
+                rule.id, rule.revision);
+        }
+        Command::IntentResolve { phrase, workspace, project } => {
+            let memory = IntentStore::open(&intent_path)?;
+            let scope = IntentScope { workspace_id: workspace, project_id: project };
+            println!("{:#?}", memory.resolve(&phrase, &scope)?);
+        }
+        Command::IntentSuccess { rule_id, if_revision, evidence } => {
+            let mut memory = IntentStore::open(&intent_path)?;
+            let rule = memory.record_success(&rule_id, if_revision, &evidence)?;
+            println!("Verified outcomes: {} [revision {}]. Well established: {}",
+                rule.verified_successes, rule.revision, rule.well_established());
+        }
         Command::Add {
             title,
             project,
