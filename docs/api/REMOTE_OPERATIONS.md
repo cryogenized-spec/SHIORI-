@@ -2,7 +2,7 @@
 
 **Status: planned, not deployed.** Last reviewed 2026-11-15. See [machine-readable registry](operations.v1.json) and [ADR 0004](../adr/0004-remote-operation-registry-and-mcp.md).
 
-This document freezes the **shape of the integration**, not the eventual release of all 94 operations. The registry is deliberately wide enough to cover the full ISW vision; only a small proven Phase A subset is needed to open a real MCP connection. `availability: planned` means there is currently **no supported remote route or MCP tool** for that entry. The local Python development bridge is not a production API.
+This document freezes the **shape of the integration**, not the eventual release of all 111 operations. The registry is deliberately wide enough to cover the full ISW vision; only a small proven Phase A subset is needed to open a real MCP connection. `availability: planned` means there is currently **no supported remote route or MCP tool** for that entry. The local Python development bridge is not a production API.
 
 ## One operation, two remote faces
 
@@ -29,6 +29,8 @@ This HTTP API is **explicit action-oriented JSON-over-HTTP**, rather than tradit
 | `spatial` | View scene, camera, position, lock, zoom, routing and groups | Separately versioned view state |
 | `inbox` | Capture, triage, convert, archive and retrieve | Independent SH-005 domain |
 | `artifacts` | Notes, documents, attachment references and typed entities | Artefact registry over domain aggregates |
+| `attachments` / `comments` | Source records, threaded conversations and reviewable ingestion | Separate permissioned content services |
+| `scheduling` | Deterministic time blocking, previews and undo | Scheduling service, never implicit task writes |
 | `graph` | Relationships, backlinks, bounded traversals, impact/restructure | Typed graph domain |
 | `retrieval` | Indexed search, deterministic context budget and source evidence | Bounded query projections |
 | `eai` | Validated polygonal/illustrative scenes, focus, links, animation | Derived scene, not task graph |
