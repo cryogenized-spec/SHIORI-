@@ -34,13 +34,17 @@ const oauthResource=new OAuthResourceServer({
     if(!readOnly.has("shiori_"+operation.replaceAll(".","_")))needed=["mcp:read","mcp:write"];
    }
    if(!needed.every(s=>ctx.auth.scope.includes(s)))return insufficientScope(ctx.auth,needed);
-   if(!env.SHIO_AUTH_TOKEN || !env.DB)return new Response("Shiori backend unconfigured",{status:503});
-   // Internally forward the independently authenticated request to the
-   // existing operation handler. Never forward caller OAuth tokens.
+   if(!env.DB)return new Response("Shiori backend unconfigured",{status:503});
+   // The old alpha handler has its own legacy credential check. After
+   // OAuth validation, satisfy that *internal* check with a fresh random,
+   // per-request value that is never accepted at the public MCP boundary.
+   // No persistent legacy bearer secret is shared with the OAuth Worker.
+   const internalKey=crypto.randomUUID()+crypto.randomUUID();
+   const internalEnv={...env,SHIO_AUTH_TOKEN:internalKey};
    const h=new Headers(request.headers);
-   h.set("authorization","Bearer "+env.SHIO_AUTH_TOKEN);
+   h.set("authorization","Bearer "+internalKey);
    h.delete("cookie");
-   return legacy.fetch(new Request(request,{headers:h}),env);
+   return legacy.fetch(new Request(request,{headers:h}),internalEnv);
   }
  }
 });
