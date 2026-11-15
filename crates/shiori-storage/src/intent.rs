@@ -121,7 +121,11 @@ impl IntentStore {
 
     /// Lists all project-specific and workspace rules within one scoped workspace.
     pub fn list_workspace(&self, workspace_id: &str) -> Result<Vec<IntentRule>, IntentStoreError> {
-        IntentScope { workspace_id: workspace_id.to_owned(), project_id: None }.validate()?;
+        IntentScope {
+            workspace_id: workspace_id.to_owned(),
+            project_id: None,
+        }
+        .validate()?;
         let query = format!(
             "SELECT {RULE_FIELDS} FROM intent_rules WHERE workspace_id=?1 ORDER BY phrase, project_id"
         );
@@ -141,15 +145,22 @@ impl IntentStore {
     }
 
     /// Explicit revocation removes a single rule and its evidence only.
-    pub fn revoke(&mut self, rule_id: &str, expected_revision: i64)
-        -> Result<(), IntentStoreError>
-    {
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    pub fn revoke(
+        &mut self,
+        rule_id: &str,
+        expected_revision: i64,
+    ) -> Result<(), IntentStoreError> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let rule = Self::get_in(&tx, rule_id)?.ok_or(IntentStoreError::NotFound)?;
         if rule.revision != expected_revision {
             return Err(IntentStoreError::RevisionConflict);
         }
-        tx.execute("DELETE FROM intent_evidence WHERE rule_id=?1", params![rule_id])?;
+        tx.execute(
+            "DELETE FROM intent_evidence WHERE rule_id=?1",
+            params![rule_id],
+        )?;
         tx.execute("DELETE FROM intent_rules WHERE id=?1", params![rule_id])?;
         tx.commit()?;
         Ok(())
