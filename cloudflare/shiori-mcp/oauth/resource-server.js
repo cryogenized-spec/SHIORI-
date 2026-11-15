@@ -15,7 +15,7 @@ const isWrite=id=>!readOnly.has(id);
 const oauthResource=new OAuthResourceServer({
  resourceMetadata:{
   resource:ENDPOINT,authorization_servers:[ISSUER],
-  scopes_supported:["mcp:read"],resource_name:"Shiori MCP"
+  resource_name:"Shiori MCP"
  },
  requiredScopes:["mcp:read"],
  validateToken:env=>env.AUTH_SERVER.validateToken,
