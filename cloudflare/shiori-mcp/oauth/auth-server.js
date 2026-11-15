@@ -80,7 +80,13 @@ async function postAuthorize(request,env){
   if(fields.get("approve")!=="yes")return errorPage("Consent not granted.",403);
   let result;
   try {
-    result=await completeOwnerGrant(oauthServer.getOAuthApi(env),pending.url,SCOPES);
+    const api=oauthServer.getOAuthApi(env);
+    // Explicit, limited provider methods for the grant-stage wrapper.
+    result=await completeOwnerGrant({
+      parseAuthRequest:(request)=>api.parseAuthRequest(request),
+      lookupClient:(clientId)=>api.lookupClient(clientId),
+      completeAuthorization:(options)=>api.completeAuthorization(options)
+    },pending.url,SCOPES);
   } catch(e) {
     const stage=e instanceof GrantStageError?e.stage:"unknown";
     const type=e instanceof GrantStageError?e.underlyingType:"unknown";
