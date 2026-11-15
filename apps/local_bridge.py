@@ -299,7 +299,7 @@ def make_server(port, cli, database):
                             raise ValueError("invalid estimate")
                         cmd.extend(["--minutes", str(minutes)])
                     output = self.run_cli(*cmd).decode("utf-8", errors="replace")
-                    created = re.search(r"\\[([0-9a-fA-F-]{36})\\]", output)
+                    created = re.search(r"\[([0-9a-fA-F-]{36})\]", output)
                     if not created or not UUID.fullmatch(created.group(1)):
                         raise ValueError("Rust task created but task ID acknowledgement is invalid")
                     self.response(201, {"ok": True, "task_id": created.group(1)})
