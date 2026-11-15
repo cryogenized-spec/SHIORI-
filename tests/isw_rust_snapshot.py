@@ -98,6 +98,19 @@ def main():
             assert bad_status==409,bad_status
             scene=get(base+"/api/isw/scene")
             assert len(scene["positions"])==1
+            # The canonical task DB stays at schema 3. All canvas data goes
+            # in a separate version-1 sidecar, preserving Android recovery.
+            import sqlite3
+            sidecar=db.with_suffix(".isw.sqlite3")
+            assert sidecar.is_file(),sidecar
+            with sqlite3.connect(db) as taskdb:
+                assert taskdb.execute("PRAGMA user_version").fetchone()[0]==3
+                assert taskdb.execute(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name='isw_positions'"
+                ).fetchone()[0]==0
+            with sqlite3.connect(sidecar) as viewdb:
+                assert viewdb.execute("PRAGMA user_version").fetchone()[0]==1
+                assert viewdb.execute("SELECT COUNT(*) FROM isw_positions").fetchone()[0]==1
             with sync_playwright() as pw:
                 browser=pw.chromium.launch(headless=True)
                 errors=[]
