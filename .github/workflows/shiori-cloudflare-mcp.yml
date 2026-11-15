@@ -32,8 +32,9 @@ jobs:
           import urllib.error
           import sys
           base="https://shiori-mcp-alpha.cryogenized.workers.dev"
+          agent="ShioriCI/0.1 (+https://github.com/cryogenized-spec/SHIORI-)"
           try:
-              response=urllib.request.urlopen(base+"/health",timeout=25)
+              response=urllib.request.urlopen(urllib.request.Request(base+"/health",headers={"User-Agent":agent}),timeout=25)
           except urllib.error.HTTPError as e:
               body=e.read(256).decode("utf-8","replace")
               print("Live health probe received",e.code,"server",e.headers.get("Server"),"body",repr(body))
@@ -49,7 +50,7 @@ jobs:
           req=urllib.request.Request(
               base+"/mcp",
               data=b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
-              headers={"Content-Type":"application/json"},
+              headers={"Content-Type":"application/json","User-Agent":agent},
               method="POST"
           )
           try:
