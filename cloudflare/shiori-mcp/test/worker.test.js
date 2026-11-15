@@ -133,7 +133,9 @@ test("the implemented MCP schemas match the central Shiori operation registry",a
     assert.deepEqual(tool.inputSchema.required,expected.required,entry.id);
     assert.deepEqual(tool.inputSchema.properties,expected.properties,entry.id);
     assert.equal(tool.inputSchema.additionalProperties,false);
-    assert.equal(entry.data_source,"isolated_remote_d1_not_synced_with_local_rust");
+    const expectedSource=entry.id==="system.operations.list"?
+      "bundled-static-schema-not-task-data":"isolated_remote_d1_not_synced_with_local_rust";
+    assert.equal(entry.data_source,expectedSource);
   }
 });
 
