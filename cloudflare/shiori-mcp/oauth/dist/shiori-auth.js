@@ -5138,6 +5138,24 @@ async function completeOwnerGrant(api, storedRequestUrl, allowedScopes) {
   }
 }
 
+// owner-redirect.js
+function ownerRedirect(redirectTo) {
+  if (typeof redirectTo !== "string" || !redirectTo) {
+    throw new TypeError("Missing OAuth redirect");
+  }
+  const location = new URL(redirectTo).href;
+  return new Response(null, {
+    status: 302,
+    headers: {
+      "location": location,
+      "set-cookie": "__Host-shiori_oauth=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff"
+    }
+  });
+}
+
 // auth-server.js
 var ISSUER = "https://shiori-auth.cryogenized.workers.dev";
 var RESOURCE = "https://shiori-mcp-oauth.cryogenized.workers.dev/mcp";
@@ -5226,10 +5244,8 @@ async function postAuthorize(request, env) {
       500
     );
   }
-  const response = Response.redirect(result.redirectTo, 302);
+  const response = ownerRedirect(result.redirectTo);
   await env.OAUTH_KV.delete("shiori:pending:" + key);
-  response.headers.set("set-cookie", "__Host-shiori_oauth=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0");
-  response.headers.set("cache-control", "no-store");
   return response;
 }
 var ShioriOAuthAuthorization = class extends WorkerEntrypoint2 {

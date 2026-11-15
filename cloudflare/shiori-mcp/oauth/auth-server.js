@@ -3,6 +3,7 @@ import {WorkerEntrypoint} from "cloudflare:workers";
 import {isTrustedConsentRequest} from "./form-origin.js";
 import {normalizeApprovalInput} from "./approval-input.js";
 import {completeOwnerGrant,GrantStageError} from "./grant-flow.js";
+import {ownerRedirect} from "./owner-redirect.js";
 
 /** Isolated single-owner OAuth issuer. Never shares Google Master secrets. */
 const ISSUER="https://shiori-auth.cryogenized.workers.dev";
@@ -101,10 +102,10 @@ async function postAuthorize(request,env){
   }
   // Keep the pending record until the provider has successfully issued a
   // grant. A transient grant failure must not silently consume consent.
-  const response=Response.redirect(result.redirectTo,302);
+  // Response.redirect() returns an immutable Headers object. Adding the
+  // cookie after construction threw TypeError and surfaced as an OAuth 500.
+  const response=ownerRedirect(result.redirectTo);
   await env.OAUTH_KV.delete("shiori:pending:"+key);
-  response.headers.set("set-cookie","__Host-shiori_oauth=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0");
-  response.headers.set("cache-control","no-store");
   return response;
 }
 export default class ShioriOAuthAuthorization extends WorkerEntrypoint{
