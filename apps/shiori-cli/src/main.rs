@@ -52,7 +52,7 @@ enum Command {
     IntentSuccess {
         rule_id: String,
         #[arg(long)]
-        if_revision: u64,
+        if_revision: i64,
         #[arg(long)]
         evidence: String,
     },
