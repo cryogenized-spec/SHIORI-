@@ -187,6 +187,12 @@ tests/              # integration, contract, performance and migration tests
 
 **Exit:** generated blocks respect availability and dependency order; unschedulable work is reported rather than dropped; user remains in control of applying changes.
 
+### M3.5 — Contract-first operation architecture (required before remote MCP)
+
+**Deliver:** inventory the full ISW, tasks, inbox, comments, scheduling, graph, artefacts, retrieval, EAI, companion, automations and provider-operation surface. Adopt [ADR 0004](docs/adr/0004-remote-operation-registry-and-mcp.md), the [remote API plan](docs/api/REMOTE_OPERATIONS.md) and the [versioned per-operation JSON schema registry](docs/api/operations.v1.json). Each capability receives a unique typed application operation, remote JSON/HTTP route and separately named MCP tool. Categorize read, transient UI, persistent layout, domain write, and external side effect; require user-bound scopes, revisions, idempotency and preview/apply where appropriate.
+
+**Exit:** contract tests check unique tool/route names, schemas, scope/risk classifications and the separation between visual routing and true graph mutations. This milestone is **a design and test contract, not a deployed MCP server**. Phase A implements a small working subset before exposing the wider catalogue.
+
 ### M4 — Optional sync, accounts and portable hosting
 **Deliver:** independent server, authentication and permission model, sync protocol, conflict resolution, tombstones, secure backup/restore, multiple-device testing, and Docker/local deployment. Additional cloud targets remain adapters, not prerequisites.
 
@@ -195,7 +201,7 @@ tests/              # integration, contract, performance and migration tests
 ### M5 — MCP interoperability and compact UI
 **SH-008 groundwork:** define model-provider capability contracts, account/secret setup boundary and a strictly optional local companion UI prototype. Its chat state must not become another task store or bypass application permissions.
 
-**Deliver:** typed, separately named MCP tools for tasks, inbox capture/triage/conversion/archive, projects, assignments, filters, dependencies and schedules, plus bounded artefact-graph queries and optional EAI scene retrieval; scoped tokens/permissions; error contracts; optional lightweight versioned MCP Apps views.
+**Deliver:** a small implemented **Phase A** subset of independently named tools first (capabilities, tasks, Rust-backed scene read, positions and presentation settings) driven from the versioned operation registry; then staged tools for inbox capture/triage/conversion/archive, projects, assignments, filters, dependencies and schedules, plus bounded artefact-graph queries and optional EAI scene retrieval; scoped tokens/permissions; error contracts; optional lightweight versioned MCP Apps views.
 
 **Exit:** supported MCP clients can read/manage permitted tasks; destructive operations have appropriate safeguards; clients without UI support still work; no model API key required by SHIORI.
 
@@ -246,7 +252,7 @@ tests/              # integration, contract, performance and migration tests
 3. **Task model:** single-user-first with team-ready permissions vs. a full multi-user model from day one.
 4. **Synchronization:** operation-log vs. other change-tracking approaches; conflict-resolution contract; local storage and server DB adapters.
 5. **Scheduling:** precise policy for ranking, task splitting, manually pinned time blocks, recurring schedules, travel/break constraints, and overflow.
-6. **MCP tool set:** separate explicit operations, auth scopes, confirmation requirements, write audit trail, and UI resource versions.
+6. **MCP tool set:** adopt the ADR 0004 and versioned 113-operation draft catalogue as a **planning inventory**, not a deployed all-at-once server; validate auth scopes, confirmation, write audit trails and UI resource versions before marking entries available.
 7. **OCR:** engine choices, offline-language support, image retention, confidence indicators, and user verification.
 8. **CalDAV:** required VTODO fields, compatibility matrix, recurrence behaviour, mapping losses, and treatment of newer extensions.
 9. **Release scope:** whether M6 OCR and CalDAV are firm v1.0 blockers or early post-v1 additions, based on measured effort.
@@ -262,7 +268,7 @@ tests/              # integration, contract, performance and migration tests
 2. Turn SH-001–SH-007 into detailed user stories and reproducible acceptance tests; preserve the already confirmed SH-005 inbox requirement.
 3. Write an architecture decision comparing selective reuse versus a new core, including licensing and dependency risk.
 4. Specify the canonical task schema, recurrence semantics, dependencies, indexing and offline conflict model.
-5. Create the minimal project skeleton, CI and a local-only task CRUD prototype **after** the M0 decisions.
+5. Preserve the existing local Rust CRUD, bridge and ISW alpha; implement an authenticated application-service/remote API subset only after the M3.5 contract and threat-model gates.
 6. Prototype SH-006 on existing demo or fixture data with read-only graph views, then separately validate an EAI scene-schema/locust explanation proof (SH-007); neither is a replacement for unfinished offline/SQLite/sync gates.
 
 ---
