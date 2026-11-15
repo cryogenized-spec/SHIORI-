@@ -61,9 +61,10 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,9);
+  assert.equal(list.data.result.tools.length,10);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
+  assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
   const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",arguments:{workspace_id:"personal"}}));
   assert.equal(caps.data.result.structuredContent.capabilities.local_rust_sync,false);
 });
@@ -118,10 +119,10 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
   const malformed=await worker.fetch(new Request("https://shiori-mcp-alpha.example.com/mcp",{method:"POST",headers:{authorization:"Bearer "+token},body:"{"}),e);
   assert.equal(malformed.status,400);
 });
-test("the 9 deployed MCP schemas match the central Shiori operation registry",async()=>{
+test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,9);
+  assert.equal(available.length,10);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -230,4 +231,82 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
   const bad=await call(e,"/api/v1/ops/tasks.create",request(legacyKey,{title:"New record"}));
   assert.equal(bad.status,409);
   assert.equal(bad.data.error.code,"IDEMPOTENCY_CONFLICT");
+});
+
+test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
+ const e=env();
+ const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
+ assert.equal(expected.operations.length,113);
+ const listed=await call(e,"/mcp",rpc("resources/list",{}));
+ assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
+ const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
+ assert.match(templates.data.result.resourceTemplates[0].uriTemplate,/operation_id/);
+ const full=await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1"}));
+ assert.deepEqual(JSON.parse(full.data.result.contents[0].text),expected);
+ const individual=await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1/tasks.delete"}));
+ const entry=JSON.parse(individual.data.result.contents[0].text);
+ assert.equal(entry.availability,"planned");
+ assert.equal(entry.effect,"destructive");
+ assert.deepEqual(entry.inputSchema,expected.operations.find(x=>x.id==="tasks.delete").inputSchema);
+ assert.deepEqual(entry.outputSchema,expected.operations.find(x=>x.id==="tasks.delete").outputSchema);
+ const missing=await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1/not.real"}));
+ assert.equal(missing.data.error.code,-32002);
+ assert.equal((await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1"}),{auth:null})).status,401);
+});
+
+test("catalog tool paginates all 113 schemas and filters availability and exact ID",async()=>{
+ const e=env();
+ const name="shiori_system_operations_list";
+ const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
+ const first=await callCatalog({limit:7});
+ const a=first.data.result.structuredContent;
+ assert.equal(a.registry_total,113);
+ assert.equal(a.total,113);
+ assert.equal(a.items.length,7);
+ assert.equal(a.next_cursor,"7");
+ assert(a.items[0].inputSchema);
+ assert(a.items[0].outputSchema);
+ const second=await callCatalog({limit:7,cursor:"7"});
+ const b=second.data.result.structuredContent;
+ assert.equal(b.items.length,7);
+ assert.notEqual(a.items[0].id,b.items[0].id);
+ const planned=await callCatalog({availability:"planned",limit:500});
+ assert.equal(planned.data.result.structuredContent.total,103);
+ const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
+ assert.equal(implemented.data.result.structuredContent.total,10);
+ const item=await callCatalog({operation_id:"tasks.delete"});
+ assert.equal(item.data.result.structuredContent.items.length,1);
+ assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
+ const missing=await callCatalog({operation_id:"unknown.operation"});
+ assert.equal(missing.data.result.structuredContent.items.length,0);
+ const invalid=await callCatalog({cursor:"15n"});
+ assert.equal(invalid.data.result.structuredContent.error.code,"VALIDATION_FAILED");
+});
+
+test("planned operations are discoverable but never callable",async()=>{
+ const e=env();
+ const list=await call(e,"/mcp",rpc("tools/list",{}));
+ const names=list.data.result.tools.map(x=>x.name);
+ assert.equal(names.length,10);
+ assert(!names.includes("shiori_tasks_delete"));
+ const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_tasks_delete",arguments:{
+  workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
+ }}));
+ assert.equal(planned.data.error.code,-32602);
+ const http=await call(e,"/api/v1/ops/tasks.delete",{workspace_id:"personal"});
+ assert.equal(http.status,404);
+ assert.equal(http.data.error.code,"UNSUPPORTED_CAPABILITY");
+ const tasks=await call(e,"/api/v1/ops/tasks.list",{workspace_id:"personal"});
+ assert.deepEqual(tasks.data.data.items,[]);
+});
+
+test("capabilities advertise catalog URI and actual callable tool count",async()=>{
+ const e=env();
+ const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
+   arguments:{workspace_id:"personal"}}));
+ const c=caps.data.result.structuredContent.capabilities;
+ assert.equal(c.registry_total,113);
+ assert.equal(c.planned_total,113);
+ assert.equal(c.implemented_total,10);
+ assert.equal(c.registry_uri,"shiori://operations/v1");
 });
