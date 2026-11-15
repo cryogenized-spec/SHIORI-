@@ -39,15 +39,16 @@ The following are the first requirements confirmed from real use of task manager
 especially after corrective feedback, without tying interpretation to an AI
 model or requiring paid memory infrastructure.
 
-The first PR adds a pure Rust contextual-intent resolver, durable optional
-SQLite intent sidecar and local CLI for recording explicit corrections,
-resolving expressions and recording verified outcomes. A phrase remains
+The PR adds a pure Rust contextual-intent resolver, durable optional
+SQLite intent sidecar, CLI, and a development-only Language & intent view
+that uses SHIORI's existing localhost bridge. Users can manually teach,
+inspect, test and revoke contextual meanings. A phrase remains
 provisional until two verified successful uses; project-specific meanings
 override workspace meanings; corrections invalidate evidence for older
 meanings. Interpretation is not authorization.
 
 **Not implemented:** autonomous identification of corrections in chat,
-workflow execution, semantic aliases, native UI, user memory settings,
+workflow execution, semantic aliases, Android-native UI, user memory settings,
 authenticated shared application service, or live MCP tools. These require
 the feature gates in [ADR 0006](docs/adr/0006-contextual-intent-memory.md)
 and must not be advertised as deployed.
@@ -279,7 +280,7 @@ tests/              # integration, contract, performance and migration tests
 3. **Task model:** single-user-first with team-ready permissions vs. a full multi-user model from day one.
 4. **Synchronization:** operation-log vs. other change-tracking approaches; conflict-resolution contract; local storage and server DB adapters.
 5. **Scheduling:** precise policy for ranking, task splitting, manually pinned time blocks, recurring schedules, travel/break constraints, and overflow.
-6. **MCP tool set:** adopt the ADR 0004 and versioned 113-operation draft catalogue as a **planning inventory**, not a deployed all-at-once server; validate auth scopes, confirmation, write audit trails and UI resource versions before marking entries available.
+6. **MCP tool set:** adopt the ADR 0004 and versioned 118-operation draft catalogue as a **planning inventory**, not a deployed all-at-once server; validate auth scopes, confirmation, write audit trails and UI resource versions before marking entries available.
 7. **OCR:** engine choices, offline-language support, image retention, confidence indicators, and user verification.
 8. **CalDAV:** required VTODO fields, compatibility matrix, recurrence behaviour, mapping losses, and treatment of newer extensions.
 9. **Release scope:** whether M6 OCR and CalDAV are firm v1.0 blockers or early post-v1 additions, based on measured effort.
