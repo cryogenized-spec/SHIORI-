@@ -685,11 +685,13 @@ var oauthResource = new OAuthResourceServer({
         if (!readOnly.has("shiori_" + operation.replaceAll(".", "_"))) needed = ["mcp:read", "mcp:write"];
       }
       if (!needed.every((s) => ctx.auth.scope.includes(s))) return insufficientScope(ctx.auth, needed);
-      if (!env.SHIO_AUTH_TOKEN || !env.DB) return new Response("Shiori backend unconfigured", { status: 503 });
+      if (!env.DB) return new Response("Shiori backend unconfigured", { status: 503 });
+      const internalKey = crypto.randomUUID() + crypto.randomUUID();
+      const internalEnv = { ...env, SHIO_AUTH_TOKEN: internalKey };
       const h = new Headers(request.headers);
-      h.set("authorization", "Bearer " + env.SHIO_AUTH_TOKEN);
+      h.set("authorization", "Bearer " + internalKey);
       h.delete("cookie");
-      return worker_default.fetch(new Request(request, { headers: h }), env);
+      return worker_default.fetch(new Request(request, { headers: h }), internalEnv);
     }
   }
 });
