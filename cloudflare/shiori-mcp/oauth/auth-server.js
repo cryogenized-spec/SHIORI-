@@ -2,6 +2,7 @@ import {OAuthAuthorizationServer,AuthorizationError} from "@cloudflare/workers-o
 import {WorkerEntrypoint} from "cloudflare:workers";
 import {isTrustedConsentRequest} from "./form-origin.js";
 import {normalizeApprovalInput} from "./approval-input.js";
+import {completeOwnerGrant,GrantStageError} from "./grant-flow.js";
 
 /** Isolated single-owner OAuth issuer. Never shares Google Master secrets. */
 const ISSUER="https://shiori-auth.cryogenized.workers.dev";
@@ -77,18 +78,25 @@ async function postAuthorize(request,env){
   if(Date.now()-pending.at>300000)return errorPage("Approval expired.",403);
   if(!await secureEqual(normalizeApprovalInput(fields.get("code")),normalizeApprovalInput(env.OWNER_APPROVAL_SECRET)))return errorPage("Invalid approval code. Use the private Shiori OAuth owner code saved on your laptop, not the older MCP access token. Restart the connection to retry.",403);
   if(fields.get("approve")!=="yes")return errorPage("Consent not granted.",403);
+  let result;
+  try {
+    result=await completeOwnerGrant(oauthServer.getOAuthApi(env),pending.url,SCOPES);
+  } catch(e) {
+    const stage=e instanceof GrantStageError?e.stage:"unknown";
+    const type=e instanceof GrantStageError?e.underlyingType:"unknown";
+    // Log only a fixed stage identifier and exception class. Never log
+    // approval codes, client callbacks, access tokens or request URLs.
+    console.error("Shiori OAuth grant failure",stage,type);
+    return errorPage(
+      "Authorization could not finish (stage: "+stage+"). "+
+      "This is a Shiori server error, not an invalid approval code.",
+      500
+    );
+  }
+  // Keep the pending record until the provider has successfully issued a
+  // grant. A transient grant failure must not silently consume consent.
+  const response=Response.redirect(result.redirectTo,302);
   await env.OAUTH_KV.delete("shiori:pending:"+key);
-  const api=oauthServer.getOAuthApi(env);
-  const original=await api.parseAuthRequest(new Request(pending.url));
-  const client=await api.lookupClient(original.clientId);
-  if(!client)return errorPage("OAuth client no longer exists.",403);
-  const {redirectTo}=await api.completeAuthorization({
-    request:original,userId:"shiori-owner",
-    metadata:{clientName:client.clientName},
-    scope:original.scope.filter(x=>SCOPES.includes(x)),
-    props:{userId:"shiori-owner",displayName:"Shiori owner"}
-  });
-  const response=Response.redirect(redirectTo,302);
   response.headers.set("set-cookie","__Host-shiori_oauth=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0");
   response.headers.set("cache-control","no-store");
   return response;
@@ -98,11 +106,11 @@ export default class ShioriOAuthAuthorization extends WorkerEntrypoint{
     const url=new URL(request.url);
     try{
       if(url.pathname==="/authorize"){
-        if(request.method==="GET")return getAuthorize(request,this.env);
-        if(request.method==="POST")return postAuthorize(request,this.env);
+        if(request.method==="GET")return await getAuthorize(request,this.env);
+        if(request.method==="POST")return await postAuthorize(request,this.env);
         return errorPage("Unsupported method.",405);
       }
-      return oauthServer.fetch(request,this.env,this.ctx);
+      return await oauthServer.fetch(request,this.env,this.ctx);
     }catch(e){
       console.error("Shiori OAuth error:",e?.name||"unknown");
       return errorPage("Authorization service unavailable.",500);
