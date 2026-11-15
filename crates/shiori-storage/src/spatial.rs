@@ -154,7 +154,9 @@ mod tests {
         let b = Task::new("B", "Ops", Priority::Low, None).unwrap();
         store.insert(&a).unwrap();
         store.insert(&b).unwrap();
-        store.set_dependencies(&b.id, std::slice::from_ref(&a.id)).unwrap();
+        store
+            .set_dependencies(&b.id, std::slice::from_ref(&a.id))
+            .unwrap();
         assert_eq!(
             store.spatial_dependency_edges().unwrap(),
             vec![(a.id, b.id)]
