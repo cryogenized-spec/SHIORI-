@@ -37,8 +37,8 @@ jobs:
           except urllib.error.HTTPError as e:
               body=e.read(256).decode("utf-8","replace")
               print("Live health probe received",e.code,"server",e.headers.get("Server"),"body",repr(body))
-              if e.code==403 and "requests to" in body and "not allowed" in body:
-                  print("WARNING: Runner outbound policy blocks workers.dev; live HTTP verification is INCONCLUSIVE.")
+              if e.code==403 and (("requests to" in body and "not allowed" in body) or "error code: 1010" in body):
+                  print("WARNING: External client blocked before reaching Worker; live HTTP verification is INCONCLUSIVE.")
                   sys.exit(0)
               raise
           with response as result:
