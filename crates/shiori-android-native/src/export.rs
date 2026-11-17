@@ -103,7 +103,7 @@ pub fn export_working_database(
 mod tests {
     use super::*;
     use crate::working_copy::initialize_working_copy;
-    use chrono::Utc;
+    use jiff::Timestamp;
     use shiori_core::{Priority, Task};
     use shiori_storage::SqliteStore;
 
@@ -111,7 +111,7 @@ mod tests {
         let suffix = format!(
             "{}-{}",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         );
         let dir = std::env::temp_dir();
         (
