@@ -1,10 +1,10 @@
 //! SQLite persistence adapter. Domain validation stays in `shiori-core`.
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::{civil::Date, Timestamp};
 use rusqlite::{
     Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter,
     types::{Type, Value},
 };
-use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus, validate_assignee_id};
+use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id};
 use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
@@ -53,7 +53,7 @@ pub enum StorageError {
 pub struct TaskFilter<'a> {
     pub project: Option<&'a str>,
     pub status: Option<TaskStatus>,
-    pub due_on_or_before: Option<NaiveDate>,
+    pub due_on_or_before: Option<Date>,
     pub search: Option<&'a str>,
     pub include_deleted: bool,
 }
@@ -170,7 +170,7 @@ impl SqliteStore {
     pub fn insert(&self, task: &Task) -> Result<(), StorageError> {
         self.db.execute(
             "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes,assignee_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
-            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(), task.completed_at.map(|t| t.to_rfc3339()), task.version, task.deleted_at.map(|t| t.to_rfc3339()), task.estimate_minutes, task.assignee_id]
+            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), utc_rfc3339(task.created_at), utc_rfc3339(task.updated_at), task.completed_at.map(|t| utc_rfc3339(t)), task.version, task.deleted_at.map(|t| utc_rfc3339(t)), task.estimate_minutes, task.assignee_id]
         )?;
         Ok(())
     }
@@ -220,10 +220,10 @@ impl SqliteStore {
                 params![
                     task.id, task.title, task.notes, task.project,
                     task.priority.as_str(), task.status.as_str(),
-                    task.due_on.map(|d| d.to_string()), task.created_at.to_rfc3339(),
-                    task.updated_at.to_rfc3339(),
-                    task.completed_at.map(|t| t.to_rfc3339()),
-                    task.version, task.deleted_at.map(|t| t.to_rfc3339()),
+                    task.due_on.map(|d| d.to_string()), utc_rfc3339(task.created_at),
+                    utc_rfc3339(task.updated_at),
+                    task.completed_at.map(|t| utc_rfc3339(t)),
+                    task.version, task.deleted_at.map(|t| utc_rfc3339(t)),
                     task.estimate_minutes, task.assignee_id
                 ],
             )?;
@@ -478,7 +478,7 @@ impl SqliteStore {
         let updated = tx.execute(
             "UPDATE tasks SET version=version+1, updated_at=?2
              WHERE id=?1 AND version=?3 AND deleted_at IS NULL",
-            params![id, Utc::now().to_rfc3339(), version],
+            params![id, utc_rfc3339(Timestamp::now()), version],
         )?;
         if updated != 1 {
             return Err(StorageError::RevisionConflict);
@@ -510,9 +510,9 @@ impl SqliteStore {
             params![
                 task.id, task.title, task.notes, task.project, task.priority.as_str(),
                 task.status.as_str(), task.due_on.map(|d| d.to_string()),
-                task.updated_at.to_rfc3339(),
-                task.completed_at.map(|t| t.to_rfc3339()),
-                task.version, task.deleted_at.map(|t| t.to_rfc3339()),
+                utc_rfc3339(task.updated_at),
+                task.completed_at.map(|t| utc_rfc3339(t)),
+                task.version, task.deleted_at.map(|t| utc_rfc3339(t)),
                 task.version - 1, task.estimate_minutes, task.assignee_id
             ]
         )?;
@@ -538,9 +538,8 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
     let updated: String = row.get(8)?;
     let completed: Option<String> = row.get(9)?;
     let deleted: Option<String> = row.get(11)?;
-    let timestamp = |s: &str, col: usize| -> rusqlite::Result<DateTime<Utc>> {
-        DateTime::parse_from_rfc3339(s)
-            .map(|d| d.with_timezone(&Utc))
+    let timestamp = |s: &str, col: usize| -> rusqlite::Result<Timestamp> {
+        s.parse::<Timestamp>()
             .map_err(|e| invalid(col, e))
     };
     Ok(Task {
@@ -551,7 +550,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         priority: Priority::from_str(&priority).map_err(|e| invalid(4, e))?,
         status: TaskStatus::from_str(&status).map_err(|e| invalid(5, e))?,
         due_on: due
-            .map(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|e| invalid(6, e)))
+            .map(|d| d.parse::<Date>().map_err(|e| invalid(6, e)))
             .transpose()?,
         created_at: timestamp(&created, 7)?,
         updated_at: timestamp(&updated, 8)?,
@@ -594,7 +593,7 @@ mod tests {
     #[test]
     fn roundtrip_filter_complete_rename_and_tombstone() {
         let store = SqliteStore::in_memory().unwrap();
-        let date = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
+        let date = Date::new(2026, 11, 11).unwrap();
         let task = Task::new("Draft roadmap", "SHIORI", Priority::High, Some(date)).unwrap();
         store.insert(&task).unwrap();
         assert_eq!(store.get(&task.id).unwrap().title, "Draft roadmap");
