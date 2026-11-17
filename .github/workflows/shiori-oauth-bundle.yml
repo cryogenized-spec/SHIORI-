@@ -33,8 +33,10 @@ jobs:
           node - <<'NODE'
           const fs=require('node:fs');
           const auth=fs.readFileSync('auth-server.js','utf8');
+          const consent=fs.readFileSync('consent-form.js','utf8');
           const server=fs.readFileSync('resource-server.js','utf8');
-          if(!auth.includes('OWNER_APPROVAL_SECRET') || !auth.includes('approve') || !auth.includes('parseAuthRequest') || !auth.includes('completeAuthorization')) throw Error('Missing owner consent validation');
+          if(!auth.includes('OWNER_APPROVAL_SECRET') || !auth.includes('validateConsentSelections') || !auth.includes('parseAuthRequest') || !auth.includes('completeOwnerGrant')) throw Error('Missing owner consent validation');
+          if(!consent.includes('read_access') || !consent.includes('write_access') || !consent.includes('approve') || !consent.includes('checked required')) throw Error('Missing explicit read/write checkboxes');
           if(!server.includes('insufficientScope') || !server.includes('mcp:write')) throw Error('Missing API scope enforcement');
           for(const path of ['dist/shiori-auth.js','dist/shiori-resource.js']){
             const b=fs.statSync(path);
