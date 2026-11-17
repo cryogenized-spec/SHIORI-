@@ -17,7 +17,7 @@ SHIORI remains local-first. The canonical Rust task engine and its SQLite v3 tas
 
 **S0 — present:** `scripts/sync_preview.py` executes a Rust `bridge-dump` and authenticated read-only remote `tasks.list`. It compares stable IDs and reports count-only conflicts; it does not execute any write operation and does not expose notes in its output.
 
-**S1 — preview-only snapshot protocol:** define signed/permissioned device identity, read-only change manifests, paginated full snapshot hashes, tombstones and snapshot version indicators. Provide `sync.preview` with explicit missing/modified/conflict counts and source evidence. No write before device pairing.
+**S1 — preview-only snapshot protocol (in progress):** define signed/permissioned device identity, read-only change manifests, paginated full snapshot hashes, tombstones and snapshot version indicators. Provide `sync.preview` with explicit missing/modified/conflict counts and source evidence. No write before device pairing.
 
 **S2 — initial explicit upload (one direction):** user approves a reviewed mapping; use idempotent task batches, transactional outbox, chunked transfers, per-item results and rollback journal. Never batch-ack uncommitted writes. Preserve original task IDs and dependency references. Imported cloud records are isolated until linked to a verified owner.
 
