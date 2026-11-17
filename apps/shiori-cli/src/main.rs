@@ -1,9 +1,16 @@
 //! A small local-only client for exercising the same Rust domain and storage layers
 //! that future desktop, Android, API and MCP adapters will call.
-use jiff::{civil::{Date, Time}, fmt::strtime, tz::Offset, Timestamp, ZonedDateTime};
 use clap::{Parser, Subcommand};
+use jiff::{
+    Timestamp, ZonedDateTime,
+    civil::{Date, Time},
+    fmt::strtime,
+    tz::Offset,
+};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
-use shiori_core::{Priority, Task, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id, validate_estimate};
+use shiori_core::{
+    Priority, Task, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id, validate_estimate,
+};
 use shiori_storage::{SpatialViewStore, SqliteStore, TaskFilter};
 use std::{
     error::Error,
@@ -344,7 +351,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             let offset = Offset::from_seconds(seconds)?;
             let zone = offset.to_time_zone();
             let local_to_utc = |clock: Time| -> Result<Timestamp, Box<dyn Error>> {
-                Ok(date.to_datetime(clock).to_zoned_datetime(zone.clone())?.timestamp())
+                Ok(date
+                    .to_datetime(clock)
+                    .to_zoned_datetime(zone.clone())?
+                    .timestamp())
             };
             let availability = vec![Interval::new(local_to_utc(start)?, local_to_utc(end)?)?];
             let busy = match (break_start, break_end) {
