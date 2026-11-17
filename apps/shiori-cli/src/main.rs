@@ -1,9 +1,9 @@
 //! A small local-only client for exercising the same Rust domain and storage layers
 //! that future desktop, Android, API and MCP adapters will call.
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
+use jiff::{civil::{Date, Time}, fmt::strtime, tz::Offset, Timestamp, ZonedDateTime};
 use clap::{Parser, Subcommand};
 use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledReason, plan_day};
-use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
+use shiori_core::{Priority, Task, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id, validate_estimate};
 use shiori_storage::{SpatialViewStore, SqliteStore, TaskFilter};
 use std::{
     error::Error,
@@ -32,7 +32,7 @@ enum Command {
         priority: Priority,
         /// Due calendar day (YYYY-MM-DD)
         #[arg(long)]
-        due: Option<NaiveDate>,
+        due: Option<Date>,
         /// Expected effort for this task, in minutes (1–1440)
         #[arg(long)]
         minutes: Option<i64>,
@@ -55,19 +55,19 @@ enum Command {
     /// Local-only urgent, due and in-progress tasks (assignment is not yet supported)
     Attention {
         #[arg(long)]
-        on: Option<NaiveDate>,
+        on: Option<Date>,
     },
     /// Preview one workday's time blocks without modifying tasks
     Plan {
-        date: NaiveDate,
-        #[arg(long, default_value = "08:00")]
-        start: NaiveTime,
-        #[arg(long, default_value = "17:00")]
-        end: NaiveTime,
-        #[arg(long, requires = "break_end")]
-        break_start: Option<NaiveTime>,
-        #[arg(long, requires = "break_start")]
-        break_end: Option<NaiveTime>,
+        date: Date,
+        #[arg(long, default_value = "08:00", value_parser = parse_clock)]
+        start: Time,
+        #[arg(long, default_value = "17:00", value_parser = parse_clock)]
+        end: Time,
+        #[arg(long, requires = "break_end", value_parser = parse_clock)]
+        break_start: Option<Time>,
+        #[arg(long, requires = "break_start", value_parser = parse_clock)]
+        break_end: Option<Time>,
         /// Local wall-clock UTC offset in minutes (120 means UTC+02:00).
         /// This preview does not yet implement named timezones or DST.
         #[arg(long, default_value_t = 120)]
@@ -133,7 +133,7 @@ enum Command {
         priority: Option<Priority>,
         /// Set a due date (YYYY-MM-DD)
         #[arg(long, conflicts_with = "clear_due")]
-        due: Option<NaiveDate>,
+        due: Option<Date>,
         /// Remove the current due date
         #[arg(long)]
         clear_due: bool,
@@ -162,6 +162,10 @@ enum Command {
     },
 }
 
+fn parse_clock(raw: &str) -> Result<Time, String> {
+    Time::strptime("%H:%M", raw).map_err(|e| e.to_string())
+}
+
 fn default_database() -> Result<PathBuf, Box<dyn Error>> {
     if let Some(base) = std::env::var_os("XDG_DATA_HOME") {
         return Ok(PathBuf::from(base).join("shiori/tasks.sqlite3"));
@@ -186,8 +190,8 @@ fn bridge_dump(tasks: &[Task]) -> Result<(), Box<dyn Error>> {
             task.priority.as_str().to_owned(),
             task.status.as_str().to_owned(),
             task.due_on.map(|d| d.to_string()).unwrap_or_default(),
-            task.created_at.to_rfc3339(),
-            task.updated_at.to_rfc3339(),
+            utc_rfc3339(task.created_at),
+            utc_rfc3339(task.updated_at),
             task.estimate_minutes
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
@@ -218,8 +222,8 @@ fn bridge_attention(items: &[(Task, bool)]) -> Result<(), Box<dyn Error>> {
             task.priority.as_str().to_owned(),
             task.status.as_str().to_owned(),
             task.due_on.map(|date| date.to_string()).unwrap_or_default(),
-            task.created_at.to_rfc3339(),
-            task.updated_at.to_rfc3339(),
+            utc_rfc3339(task.created_at),
+            utc_rfc3339(task.updated_at),
             task.estimate_minutes
                 .map(|minutes| minutes.to_string())
                 .unwrap_or_default(),
@@ -304,7 +308,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         Command::Attention { on } => {
-            let today = on.unwrap_or_else(|| Local::now().date_naive());
+            let today = on.unwrap_or_else(|| ZonedDateTime::now().date());
             println!("LOCAL ATTENTION · {today} · due, high priority or in progress");
             println!("Assignment-aware attention requires the future identity model.");
             for task in store.list(TaskFilter::default())?.iter().filter(|task| {
@@ -334,15 +338,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             let seconds = utc_offset_minutes
                 .checked_mul(60)
                 .ok_or("UTC offset minutes overflow")?;
-            let offset =
-                FixedOffset::east_opt(seconds).ok_or("UTC offset minutes must fit within a day")?;
-            let local_to_utc = |clock: NaiveTime| -> Result<DateTime<Utc>, Box<dyn Error>> {
-                let local = date
-                    .and_time(clock)
-                    .and_local_timezone(offset)
-                    .single()
-                    .ok_or("ambiguous or invalid local time")?;
-                Ok(local.with_timezone(&Utc))
+            if seconds.abs() >= 86_400 {
+                return Err("UTC offset minutes must fit within a day".into());
+            }
+            let offset = Offset::from_seconds(seconds)?;
+            let zone = offset.to_time_zone();
+            let local_to_utc = |clock: Time| -> Result<Timestamp, Box<dyn Error>> {
+                Ok(date.to_datetime(clock).to_zoned_datetime(zone.clone())?.timestamp())
             };
             let availability = vec![Interval::new(local_to_utc(start)?, local_to_utc(end)?)?];
             let busy = match (break_start, break_end) {
@@ -391,8 +393,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             for block in &result.blocks {
                 println!(
                     "{}–{}  {}{}",
-                    block.start.with_timezone(&offset).format("%H:%M"),
-                    block.end.with_timezone(&offset).format("%H:%M"),
+                    strtime::format("%H:%M", &block.start.to_zoned_datetime(zone.clone()))?,
+                    strtime::format("%H:%M", &block.end.to_zoned_datetime(zone.clone()))?,
                     block.title,
                     if block.overdue { " [OVERDUE]" } else { "" }
                 );
@@ -463,8 +465,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         task.id.clone(),
                         task.version.to_string(),
                         task.status.as_str().to_owned(),
-                        task.updated_at.to_rfc3339(),
-                        task.deleted_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+                        utc_rfc3339(task.updated_at),
+                        task.deleted_at.map(|t| utc_rfc3339(t)).unwrap_or_default(),
                         dependencies.join(","),
                     ])
                 })
