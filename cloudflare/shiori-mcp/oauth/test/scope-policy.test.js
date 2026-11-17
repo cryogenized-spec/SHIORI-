@@ -15,6 +15,7 @@ test("read methods retain mcp:read only",()=>{
 test("known writes and unknown tools both require mcp:write",()=>{
  for(const name of ["shiori_tasks_create","shiori_tasks_status_set",
                     "shiori_spatial_node_position_set","shiori_spatial_edge_style_set",
+                    "shiori_tasks_dependencies_add",
                     "shiori_not_implemented",undefined]){
   const needed=requiredScopesForRpc({method:"tools/call",params:{name}});
   assert.deepEqual(needed,["mcp:read","mcp:write"]);
