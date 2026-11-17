@@ -4,6 +4,7 @@ import {isTrustedConsentRequest} from "./form-origin.js";
 import {normalizeApprovalInput} from "./approval-input.js";
 import {completeOwnerGrant,GrantStageError} from "./grant-flow.js";
 import {ownerRedirect} from "./owner-redirect.js";
+import {renderConsentPage,validateConsentSelections} from "./consent-form.js";
 
 /** Isolated single-owner OAuth issuer. Never shares Google Master secrets. */
 const ISSUER="https://shiori-auth.cryogenized.workers.dev";
@@ -49,25 +50,12 @@ async function getAuthorize(request,env){
   }
   const client=await api.lookupClient(approval.clientId);
   if(!client)return errorPage("Unknown client.",400);
+  // A read grant is a prerequisite for opening an MCP workspace.
+  const scopes=approval.scope.filter(s=>SCOPES.includes(s));
+  if(!scopes.includes("mcp:read"))return errorPage("Shiori requires mcp:read permission.",400);
   const key=nonce();
   await env.OAUTH_KV.put("shiori:pending:"+key,JSON.stringify({url:request.url,at:Date.now()}),{expirationTtl:300});
-  const scopes=approval.scope.filter(s=>SCOPES.includes(s));
-  const writeRequested=scopes.includes("mcp:write");
-  const template='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shiori - Authorize App</title>'+
-    '<style>:root{color-scheme:dark}body{background:#0d1117;color:#eef2fc;font:15px system-ui;margin:0}'+
-    'main{max-width:420px;margin:8vh auto;padding:26px;border:1px solid #354055;border-radius:16px;background:#161d29}'+
-    'p{line-height:1.55;color:#b5bfd2}input[type=password]{padding:12px;width:100%;box-sizing:border-box;background:#0d1117;color:white;border:1px solid #64738b;border-radius:8px}'+
-    'button{display:block;margin-top:20px;width:100%;padding:12px;border:0;border-radius:8px;background:#b6cff3;color:#142136;font-weight:700}</style>'+
-    '<main><h1>Connect to Shiori</h1><p><strong>'+escaped(client.clientName||approval.clientId)+'</strong> requests access to your personal cloud workspace.</p>'+
-    '<p>Requested permissions: <strong>'+escaped(scopes.join(", ")||"none")+'</strong></p>'+
-    '<p>This Cloudflare database is not yet synchronized with your offline Rust tasks.</p>'+
-    '<form method="post" action="/authorize"><input type="hidden" name="nonce" value="'+key+'">'+
-    '<label>Owner approval code<br><input type="password" name="code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" minlength="24" maxlength="160" required></label><p><small>Use your separate OAuth owner approval code, not your original MCP bearer token.</small></p>'+
-    (scopes.includes("mcp:read") ? '<p><label><input type="checkbox" name="write_access" value="yes"> <strong>Enable write access (mcp:write)</strong> to create tasks, update statuses and edit spatial positions.</label></p><p><small>'+ 
-       (writeRequested ? 'Write access was requested by this app; it is only granted if you tick the box.' : 'This is optional extra access beyond the read-only scope requested by this app; leave unchecked for read-only access.')+
-       '</small></p>' : '')+
-    '<p><label><input type="checkbox" name="approve" value="yes" required> I approve this app and the permissions I selected.</label></p>'+
-    '<button type="submit">Authorize this app</button></form></main></html>';
+  const template=renderConsentPage({clientName:client.clientName||approval.clientId,requestedScopes:scopes,nonce:key});
   return html(template,200,"__Host-shiori_oauth="+key+"; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300");
 }
 async function postAuthorize(request,env){
@@ -82,12 +70,9 @@ async function postAuthorize(request,env){
   const pending=JSON.parse(raw);
   if(Date.now()-pending.at>300000)return errorPage("Approval expired.",403);
   if(!await secureEqual(normalizeApprovalInput(fields.get("code")),normalizeApprovalInput(env.OWNER_APPROVAL_SECRET)))return errorPage("Invalid approval code. Use the private Shiori OAuth owner code saved on your laptop, not the older MCP access token. Restart the connection to retry.",403);
-  if(fields.get("approve")!=="yes")return errorPage("Consent not granted.",403);
-  // Never treat a malformed/multiple write selection as an owner grant.
-  const writeValues=fields.getAll("write_access");
-  if(writeValues.length>1||(writeValues.length===1&&writeValues[0]!=="yes"))
-    return errorPage("Invalid write permission selection.",400);
-  const writeApproved=writeValues.length===1;
+  const consent=validateConsentSelections(fields);
+  if(!consent.ok)return errorPage(consent.error,403);
+  const writeApproved=consent.writeApproved;
   let result;
   try {
     const api=oauthServer.getOAuthApi(env);
