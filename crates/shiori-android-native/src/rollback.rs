@@ -61,14 +61,14 @@ pub fn verify_legacy_rollback(
 mod tests {
     use super::*;
     use crate::{parity::preflight, store_snapshot};
-    use chrono::Utc;
+    use jiff::Timestamp;
     use serde_json::{Value, json};
 
     fn paths() -> (std::path::PathBuf, std::path::PathBuf) {
         let stamp = format!(
             "{}-{}",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         );
         let parent = std::env::temp_dir();
         (
