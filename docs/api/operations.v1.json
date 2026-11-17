@@ -1,6 +1,6 @@
 {
   "registry_version": "1.0.0-draft",
-  "date": "2026-11-15",
+  "date": "2026-11-17",
   "status": "planned-only; remote handlers not deployed",
   "http": {
     "base": "/api/v1/ops",
@@ -924,6 +924,109 @@
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
       "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
+    },
+    {
+      "id": "tasks.dependencies.add",
+      "phase": "A",
+      "description": "Add one real prerequisite between two active remote tasks, with cycle protection and revision checks [isolated Cloudflare D1, not synced with Rust].",
+      "availability": "cloudflare_alpha",
+      "effect": "write",
+      "approval": "contextual",
+      "scope": "tasks:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/tasks.dependencies.add"
+      },
+      "mcp_tool": "shiori_tasks_dependencies_add",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "task_id",
+          "depends_on_id",
+          "expected_revision",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "depends_on_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "tasks.dependencies.add"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed",
+              "resource_id",
+              "depends_on_id",
+              "revision"
+            ],
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "resource_id": {
+                "type": "string"
+              },
+              "depends_on_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Source and fake-D1 contract tests; live OAuth and mutation verification required before release."
     },
     {
       "id": "spatial.scene.read",
@@ -9963,7 +10066,7 @@
       }
     }
   ],
-  "notes": "Registry describes all 113 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
+  "notes": "Registry describes all 114 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",
