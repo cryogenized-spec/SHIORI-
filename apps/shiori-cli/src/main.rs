@@ -476,7 +476,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         task.version.to_string(),
                         task.status.as_str().to_owned(),
                         utc_rfc3339(task.updated_at),
-                        task.deleted_at.map(|t| utc_rfc3339(t)).unwrap_or_default(),
+                        task.deleted_at.map(utc_rfc3339).unwrap_or_default(),
                         dependencies.join(","),
                     ])
                 })
