@@ -1,6 +1,6 @@
 //! Repeatable local benchmark probe for CI and developer diagnostics.
 //! No telemetry, no network requests, and no user task data are collected.
-use jiff::{civil::Date, ToSpan};
+use jiff::{ToSpan, civil::Date};
 use shiori_core::{Priority, Task};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{env, error::Error, time::Instant};
