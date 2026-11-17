@@ -117,7 +117,11 @@ before the user approves. This changes initial authorisation for new
 connections; existing grants are **not** silently upgraded. A token
 containing `mcp:read` only remains valid for read tools, and writes still
 require `mcp:write`. This does not override ChatGPT's independent
-write-action approval policy or plan restrictions.
+write-action approval policy or plan restrictions. The OAuth owner consent form now also
+provides a separate, unchecked **Enable write access** checkbox. The owner must
+explicitly select it before a grant includes `mcp:write` — including when the
+client requests only `mcp:read` or requests both scopes. Unchecked means
+read-only. Reconnect/re-authorize to replace an existing read-only grant.
 
 `system.capabilities.read` now reports **the actual credential context**:
 `oauth: true`, `authentication: oauth2.1-pkce`, and the granted read/write
