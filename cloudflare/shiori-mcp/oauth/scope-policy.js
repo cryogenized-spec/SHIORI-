@@ -5,7 +5,9 @@ export const INITIAL_CONSENT_SCOPES=["mcp:read","mcp:write"];
 // Unknown tools fail closed: read-only grants cannot invoke them.
 const READ_TOOLS=new Set([
  "shiori_system_capabilities_read","shiori_system_operations_list","shiori_tasks_list","shiori_tasks_get",
- "shiori_tasks_dependencies_list","shiori_spatial_scene_read"
+ "shiori_tasks_dependencies_list","shiori_spatial_scene_read",
+ "shiori_spatial_node_position_read","shiori_spatial_viewport_read",
+ "shiori_spatial_node_inspect","shiori_spatial_scene_export"
 ]);
 export function requiredScopesForRpc(rpc){
  if(rpc?.method==="tools/call" && !READ_TOOLS.has(rpc?.params?.name))
