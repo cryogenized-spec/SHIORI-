@@ -3,7 +3,8 @@
 //! Audits both archived original data and the current WebView export.
 //! An audit result is NOT permission to activate or delete a legacy store.
 
-use chrono::{DateTime, Utc};
+use jiff::{Timestamp};
+use shiori_core::utc_rfc3339;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 use std::{error::Error, path::Path};
@@ -32,9 +33,7 @@ pub(crate) fn normalized_snapshot(raw: &str) -> Result<Value, Box<dyn Error>> {
 }
 
 fn utc_timestamp(raw: &str) -> Result<String, Box<dyn Error>> {
-    Ok(DateTime::parse_from_rfc3339(raw)?
-        .with_timezone(&Utc)
-        .to_rfc3339())
+    Ok(utc_rfc3339(raw.parse::<Timestamp>()?))
 }
 
 fn optional_time(task: &Value, key: &str) -> Result<Option<String>, Box<dyn Error>> {
@@ -237,7 +236,7 @@ mod tests {
         std::env::temp_dir().join(format!(
             "shiori-audit-{}-{}.sqlite3",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         ))
     }
 
