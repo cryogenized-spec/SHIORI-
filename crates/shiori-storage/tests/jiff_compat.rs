@@ -22,8 +22,9 @@ fn pre_migration_rfc3339_and_calendar_date_survive_roundtrip() {
             "2024-02-28T23:58:59.123456+00:00",
             "2024-02-29T01:58:59.123456+02:00",
             task.id
-        ]
-    ).unwrap();
+        ],
+    )
+    .unwrap();
     let old = store.get(&task.id).unwrap();
     assert_eq!(old.due_on, Some(due));
     let instant: Timestamp = "2024-02-28T23:58:59.123456Z".parse().unwrap();
@@ -34,10 +35,15 @@ fn pre_migration_rfc3339_and_calendar_date_survive_roundtrip() {
     let updated = store.set_status(&task.id, TaskStatus::Done).unwrap();
     assert_eq!(updated.due_on, Some(due));
     assert_eq!(updated.created_at, instant);
-    let timestamp: String = db.query_row(
-        "SELECT updated_at FROM tasks WHERE id=?1",
-        params![task.id],
-        |row| row.get(0)
-    ).unwrap();
-    assert!(timestamp.ends_with("+00:00"), "legacy UTC spelling changed: {timestamp}");
+    let timestamp: String = db
+        .query_row(
+            "SELECT updated_at FROM tasks WHERE id=?1",
+            params![task.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        timestamp.ends_with("+00:00"),
+        "legacy UTC spelling changed: {timestamp}"
+    );
 }
