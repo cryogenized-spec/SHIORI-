@@ -1,0 +1,29 @@
+name: One-time Jiff Rust format
+on:
+  push:
+    branches: [feat/shiori-jiff1-migration-20261117]
+    paths:
+      - '.github/workflows/jiff-format-bootstrap.yml'
+permissions:
+  contents: write
+jobs:
+  rustfmt:
+    if: github.repository == 'cryogenized-spec/SHIORI-'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: true
+      - name: Install Rust formatter
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt
+      - name: Apply workspace rustfmt
+        run: cargo fmt --all
+      - name: Commit formatting
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -u
+            git commit -m "style(rust): format Jiff migration [skip ci]"
+            git push origin HEAD:feat/shiori-jiff1-migration-20261117
+          fi
