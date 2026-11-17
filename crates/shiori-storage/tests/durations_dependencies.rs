@@ -1,6 +1,6 @@
 //! M2/M3: tasks keep their own estimates and safe prerequisite edges.
-use shiori_core::utc_rfc3339;
 use rusqlite::{Connection, params};
+use shiori_core::utc_rfc3339;
 use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus};
 use shiori_storage::{SqliteStore, StorageError, TaskFilter};
 
