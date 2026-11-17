@@ -172,7 +172,7 @@ impl SqliteStore {
     pub fn insert(&self, task: &Task) -> Result<(), StorageError> {
         self.db.execute(
             "INSERT INTO tasks(id,title,notes,project,priority,status,due_on,created_at,updated_at,completed_at,version,deleted_at,estimate_minutes,assignee_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
-            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), utc_rfc3339(task.created_at), utc_rfc3339(task.updated_at), task.completed_at.map(|t| utc_rfc3339(t)), task.version, task.deleted_at.map(|t| utc_rfc3339(t)), task.estimate_minutes, task.assignee_id]
+            params![task.id, task.title, task.notes, task.project, task.priority.as_str(), task.status.as_str(), task.due_on.map(|d| d.to_string()), utc_rfc3339(task.created_at), utc_rfc3339(task.updated_at), task.completed_at.map(utc_rfc3339), task.version, task.deleted_at.map(utc_rfc3339), task.estimate_minutes, task.assignee_id]
         )?;
         Ok(())
     }
@@ -224,8 +224,8 @@ impl SqliteStore {
                     task.priority.as_str(), task.status.as_str(),
                     task.due_on.map(|d| d.to_string()), utc_rfc3339(task.created_at),
                     utc_rfc3339(task.updated_at),
-                    task.completed_at.map(|t| utc_rfc3339(t)),
-                    task.version, task.deleted_at.map(|t| utc_rfc3339(t)),
+                    task.completed_at.map(utc_rfc3339),
+                    task.version, task.deleted_at.map(utc_rfc3339),
                     task.estimate_minutes, task.assignee_id
                 ],
             )?;
@@ -513,8 +513,8 @@ impl SqliteStore {
                 task.id, task.title, task.notes, task.project, task.priority.as_str(),
                 task.status.as_str(), task.due_on.map(|d| d.to_string()),
                 utc_rfc3339(task.updated_at),
-                task.completed_at.map(|t| utc_rfc3339(t)),
-                task.version, task.deleted_at.map(|t| utc_rfc3339(t)),
+                task.completed_at.map(utc_rfc3339),
+                task.version, task.deleted_at.map(utc_rfc3339),
                 task.version - 1, task.estimate_minutes, task.assignee_id
             ]
         )?;
