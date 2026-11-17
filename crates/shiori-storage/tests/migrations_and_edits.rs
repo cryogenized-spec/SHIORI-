@@ -1,6 +1,6 @@
-use shiori_core::utc_rfc3339;
 //! Offline editing and schema-baseline migration regressions.
 //! No live-backup or cross-device synchronization behaviour is claimed here.
+use shiori_core::utc_rfc3339;
 use jiff::civil::Date;
 use rusqlite::{Connection, params};
 use shiori_core::{Priority, Task, TaskError, TaskPatch};
