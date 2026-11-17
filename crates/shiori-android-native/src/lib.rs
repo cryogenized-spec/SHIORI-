@@ -13,7 +13,7 @@ mod resume;
 mod rollback;
 mod working_copy;
 
-use chrono::NaiveDate;
+use jiff::{civil::Date, Timestamp};
 use jni::{
     JNIEnv,
     objects::{JObject, JString},
@@ -70,7 +70,7 @@ fn validate_snapshot(raw: &str) -> Result<(), &'static str> {
         {
             return Err("invalid task fields");
         }
-        if !due.is_empty() && NaiveDate::parse_from_str(due, "%Y-%m-%d").is_err() {
+        if !due.is_empty() && due.parse::<Date>().is_err() {
             return Err("invalid calendar date");
         }
         if let Some(minutes) = task.get("mins").filter(|v| !v.is_null())
@@ -570,7 +570,7 @@ mod tests {
         let db = std::env::temp_dir().join(format!(
             "shiori-vault-test-{}-{}.db",
             std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         ));
         assert!(load_snapshot(&db).unwrap().is_none());
         let payload = sample();
