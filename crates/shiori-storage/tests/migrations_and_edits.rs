@@ -118,8 +118,8 @@ fn unversioned_legacy_database_upgrades_without_dropping_tombstones() {
                     task.priority.as_str(), task.status.as_str(),
                     task.due_on.map(|d| d.to_string()),
                     utc_rfc3339(task.created_at), utc_rfc3339(task.updated_at),
-                    task.completed_at.map(|t| utc_rfc3339(t)),
-                    task.version, task.deleted_at.map(|t| utc_rfc3339(t))
+                    task.completed_at.map(utc_rfc3339),
+                    task.version, task.deleted_at.map(utc_rfc3339)
                 ],
             )
             .unwrap();
