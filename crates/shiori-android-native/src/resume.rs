@@ -99,14 +99,14 @@ pub fn inspect_interrupted_stage(
 mod tests {
     use super::*;
     use crate::{export::export_working_database, store_snapshot};
-    use chrono::Utc;
+    use jiff::Timestamp;
     use serde_json::json;
 
     fn paths() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
         let suffix = format!(
             "{}-{}",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         );
         let root = std::env::temp_dir();
         (
