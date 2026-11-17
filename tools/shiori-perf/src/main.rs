@@ -1,6 +1,6 @@
 //! Repeatable local benchmark probe for CI and developer diagnostics.
 //! No telemetry, no network requests, and no user task data are collected.
-use chrono::NaiveDate;
+use jiff::{civil::Date, ToSpan};
 use shiori_core::{Priority, Task};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{env, error::Error, time::Instant};
@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     let store = SqliteStore::in_memory()?;
     let startup_ms = start.elapsed().as_secs_f64() * 1_000.0;
-    let due_base = NaiveDate::from_ymd_opt(2026, 11, 1).ok_or("invalid fixture date")?;
+    let due_base = Date::new(2026, 11, 1)?;
     let mut picked = String::new();
 
     for i in 0..rows {
@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         } else {
             Priority::Medium
         };
-        let due = due_base + chrono::Duration::days((i % 30) as i64);
+        let due = due_base + ((i % 30) as i64).days();
         let task = Task::new(&title, project, priority, Some(due))?;
         if i == rows / 2 {
             picked = task.id.clone();
@@ -112,7 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?);
     measurements.push(Measurement::capture("due_filter", QUERY_SAMPLES, || {
         let result = store.list(TaskFilter {
-            due_on_or_before: Some(due_base + chrono::Duration::days(4)),
+            due_on_or_before: Some(due_base + 4.days()),
             ..Default::default()
         })?;
         assert!(!result.is_empty());
