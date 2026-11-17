@@ -3,10 +3,10 @@
 //! Audits both archived original data and the current WebView export.
 //! An audit result is NOT permission to activate or delete a legacy store.
 
-use jiff::{Timestamp};
-use shiori_core::utc_rfc3339;
+use jiff::Timestamp;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
+use shiori_core::utc_rfc3339;
 use std::{error::Error, path::Path};
 
 use crate::validate_snapshot;
