@@ -54,8 +54,41 @@ test("owner grant includes write only when requested and approved",async()=>{
   received=args;
   return {redirectTo:"https://example.com/callback?code=approved"};
  }});
- await completeOwnerGrant(api,url,["mcp:read","mcp:write"]);
+ await completeOwnerGrant(api,url,["mcp:read","mcp:write"],true);
  assert.deepEqual(received.scope,["mcp:read","mcp:write"]);
  // The provider is supplied only the intersection of request and supported
  // scopes. Actual consent is checked before completeOwnerGrant is called.
+});
+
+test("read-only ChatGPT request gains write only after explicit owner opt-in",async()=>{
+ let scopes;
+ const api=apiWith({
+   parseAuthRequest:async()=>({clientId:"demo",scope:["mcp:read"]}),
+   completeAuthorization:async options=>{scopes=options.scope;return {redirectTo:"https://example.com/callback?code=ok"};}
+ });
+ await completeOwnerGrant(api,url,["mcp:read","mcp:write"]);
+ assert.deepEqual(scopes,["mcp:read"],"default must be read-only");
+ await completeOwnerGrant(api,url,["mcp:read","mcp:write"],true);
+ assert.deepEqual(scopes,["mcp:read","mcp:write"],"owner actively chose write");
+});
+test("client-requested write is also withheld without explicit owner consent",async()=>{
+ let scopes;
+ const api=apiWith({completeAuthorization:async options=>{scopes=options.scope;return {redirectTo:"https://example.com/callback?code=ok"};}});
+ await completeOwnerGrant(api,url,["mcp:read","mcp:write"],false);
+ assert.deepEqual(scopes,["mcp:read"]);
+});
+test("write opt-in cannot bypass server scope allowlist or read prerequisite",async()=>{
+ let scopes;
+ const api=apiWith({
+   parseAuthRequest:async()=>({clientId:"demo",scope:["mcp:read"]}),
+   completeAuthorization:async options=>{scopes=options.scope;return {redirectTo:"https://example.com/callback?code=ok"};}
+ });
+ await completeOwnerGrant(api,url,["mcp:read"],true);
+ assert.deepEqual(scopes,["mcp:read"]);
+ const noRead=apiWith({
+   parseAuthRequest:async()=>({clientId:"demo",scope:[]}),
+   completeAuthorization:async options=>{scopes=options.scope;return {redirectTo:"https://example.com/callback?code=ok"};}
+ });
+ await completeOwnerGrant(noRead,url,["mcp:read","mcp:write"],true);
+ assert.deepEqual(scopes,[]);
 });

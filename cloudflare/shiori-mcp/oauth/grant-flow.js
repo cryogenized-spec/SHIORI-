@@ -15,7 +15,7 @@ export class GrantStageError extends Error {
   }
 }
 
-export async function completeOwnerGrant(api, storedRequestUrl, allowedScopes) {
+export async function completeOwnerGrant(api, storedRequestUrl, allowedScopes, writeApproved=false) {
   let stage="restore_request";
   try {
     const original=await api.parseAuthRequest(new Request(storedRequestUrl));
@@ -23,11 +23,17 @@ export async function completeOwnerGrant(api, storedRequestUrl, allowedScopes) {
     const client=await api.lookupClient(original.clientId);
     if (!client) throw new Error("OAuth client no longer exists");
     stage="create_grant";
+    // The owner must actively opt in to write access. A client requesting
+    // mcp:read only does not silently receive extra privileges, and a
+    // client requesting mcp:write is not granted them without owner consent.
+    const scope=original.scope.filter(x=>allowedScopes.includes(x)&&x!=="mcp:write");
+    if(writeApproved && scope.includes("mcp:read") && allowedScopes.includes("mcp:write"))
+      scope.push("mcp:write");
     const result=await api.completeAuthorization({
       request:original,
       userId:"shiori-owner",
       metadata:{clientName:client.clientName},
-      scope:original.scope.filter(x=>allowedScopes.includes(x)),
+      scope,
       props:{userId:"shiori-owner",displayName:"Shiori owner"}
     });
     stage="validate_redirect";
