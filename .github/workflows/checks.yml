@@ -58,7 +58,10 @@ jobs:
       - name: Install pinned RustSec audit tool
         run: cargo install cargo-audit --version 0.23.0 --locked
       - name: Block vulnerable dependencies
-        run: cargo audit --file Cargo.lock --deny warnings
+        # RUSTSEC-2026-0543 labels chrono unmaintained; no patched version exists.
+        # Narrow tracking exception only; retain denial of all other warnings.
+        # Migration issue: https://github.com/cryogenized-spec/SHIORI-/issues/62
+        run: cargo audit --file Cargo.lock --deny warnings --ignore RUSTSEC-2026-0543
 
   rust-coverage:
     name: Rust coverage
