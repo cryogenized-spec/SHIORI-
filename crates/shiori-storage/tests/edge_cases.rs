@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use shiori_core::{Priority, Task, TaskStatus};
 use shiori_storage::{SqliteStore, StorageError, TaskFilter};
 
@@ -40,7 +40,7 @@ fn escaped_wildcards_and_sql_metacharacters_do_not_bypass_search() {
 #[test]
 fn filter_combinations_are_intersections_not_unions() {
     let store = SqliteStore::in_memory().unwrap();
-    let due = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
+    let due = Date::new(2026, 11, 11).unwrap();
     store
         .insert(&Task::new("One", "Core", Priority::Low, Some(due)).unwrap())
         .unwrap();
