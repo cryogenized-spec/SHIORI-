@@ -15,11 +15,10 @@ fn pre_migration_chrono_json_deserializes_and_roundtrips_with_jiff() {
     assert_eq!(previous.created_at, old);
     assert_eq!(previous.updated_at, old);
 
-    let legacy = json.replace(
-        "\"2026-11-17T08:23:44.25Z\"",
-        "\"2026-11-17T08:23:44.250000+00:00\"",
-    );
-    let restored: Task = serde_json::from_str(&legacy).unwrap();
+    let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
+    legacy["created_at"] = serde_json::json!("2026-11-17T08:23:44.250000+00:00");
+    legacy["updated_at"] = serde_json::json!("2026-11-17T08:23:44.250000+00:00");
+    let restored: Task = serde_json::from_value(legacy).unwrap();
     assert_eq!(restored.created_at, old);
     assert_eq!(restored.due_on, Some(due));
     assert_eq!(restored.version, task.version);
