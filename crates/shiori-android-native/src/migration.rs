@@ -2,7 +2,7 @@
 //! canonical SHIORI Task rows, *without* making the target authoritative.
 //! The entire original JSON (including tags, saved views and sort settings)
 //! is archived transactionally next to the imported rows for lossless recovery.
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::{civil::Date, Timestamp};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::Value;
 use shiori_core::{Priority, Task, TaskStatus, validate_assignee_id};
@@ -20,8 +20,8 @@ pub struct ShadowReport {
     pub inferred_timestamps: usize,
 }
 
-fn timestamp(s: &str) -> Result<DateTime<Utc>, Box<dyn Error>> {
-    Ok(DateTime::parse_from_rfc3339(s)?.with_timezone(&Utc))
+fn timestamp(s: &str) -> Result<Timestamp, Box<dyn Error>> {
+    Ok(s.parse::<Timestamp>()?)
 }
 
 /// Preserve legacy per-task tags and workspace preferences as first-class
@@ -160,7 +160,7 @@ pub fn stage_legacy_backup(db_path: &Path, raw: &str) -> Result<ShadowReport, Bo
         .and_then(Value::as_str)
         .map(timestamp)
         .transpose()?;
-    let fallback = exported.unwrap_or_else(Utc::now);
+    let fallback = exported.unwrap_or_else(Timestamp::now);
     let mut inferred_timestamps = 0;
     let mut converted = Vec::with_capacity(data.len());
     for legacy in data {
@@ -175,7 +175,7 @@ pub fn stage_legacy_backup(db_path: &Path, raw: &str) -> Result<ShadowReport, Bo
         let due_on = if due.is_empty() {
             None
         } else {
-            Some(NaiveDate::parse_from_str(due, "%Y-%m-%d")?)
+            Some(due.parse::<Date>()?)
         };
         let priority = Priority::from_str(required("priority")?)?;
         let mut task = Task::new(required("title")?, required("project")?, priority, due_on)?;
@@ -276,7 +276,7 @@ mod tests {
         std::env::temp_dir().join(format!(
             "shiori-android-shadow-{}-{}.sqlite3",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         ))
     }
 
