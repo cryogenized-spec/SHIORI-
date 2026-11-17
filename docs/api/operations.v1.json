@@ -1,7 +1,7 @@
 {
   "registry_version": "1.0.0-draft",
   "date": "2026-11-17",
-  "status": "planned-only; remote handlers not deployed",
+  "status": "mixed; cloudflare_alpha only for implemented operations",
   "http": {
     "base": "/api/v1/ops",
     "method": "POST",
@@ -462,7 +462,7 @@
       "id": "tasks.update",
       "phase": "A",
       "description": "Edit task",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "write",
       "approval": "contextual",
       "scope": "tasks:write",
@@ -490,16 +490,16 @@
           "task_id": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 160
           },
           "title": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 160
           },
           "text": {
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 32768
           },
           "expected_revision": {
             "type": "integer",
@@ -556,7 +556,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "tasks.status.set",
@@ -664,7 +667,7 @@
       "id": "tasks.delete",
       "phase": "A",
       "description": "Soft delete task",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "destructive",
       "approval": "explicit_confirmation",
       "scope": "tasks:write",
@@ -749,13 +752,16 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "tasks.restore",
       "phase": "A",
       "description": "Restore task",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "write",
       "approval": "contextual",
       "scope": "tasks:write",
@@ -840,7 +846,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "tasks.dependencies.list",
@@ -1029,6 +1038,109 @@
       "release_evidence": "Source and fake-D1 contract tests; live OAuth and mutation verification required before release."
     },
     {
+      "id": "tasks.dependencies.remove",
+      "phase": "A",
+      "description": "Remove one existing prerequisite from an active remote task, using revision and idempotency protection. This changes the dependency graph, not the visual connector style.",
+      "availability": "cloudflare_alpha",
+      "effect": "write",
+      "approval": "contextual",
+      "scope": "tasks:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/tasks.dependencies.remove"
+      },
+      "mcp_tool": "shiori_tasks_dependencies_remove",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "task_id",
+          "depends_on_id",
+          "expected_revision",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "depends_on_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "tasks.dependencies.remove"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed",
+              "resource_id",
+              "depends_on_id",
+              "revision"
+            ],
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "resource_id": {
+                "type": "string"
+              },
+              "depends_on_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation, local fake-D1 contract tests"
+    },
+    {
       "id": "spatial.scene.read",
       "phase": "A",
       "description": "Read visible spatial scene [Cloudflare isolated remote alpha; NOT synchronized with local Rust.]",
@@ -1118,7 +1230,7 @@
       "id": "spatial.node.position.read",
       "phase": "A",
       "description": "Read node position",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "spatial:read",
@@ -1187,7 +1299,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "spatial.node.position.set",
@@ -1310,7 +1425,7 @@
       "id": "spatial.viewport.read",
       "phase": "A",
       "description": "Read camera state",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "spatial:read",
@@ -1373,13 +1488,16 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "spatial.viewport.save",
       "phase": "A",
       "description": "Save camera",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "view_write",
       "approval": "none",
       "scope": "spatial:write",
@@ -1481,7 +1599,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "spatial.selection.set",
@@ -1662,7 +1783,7 @@
       "id": "spatial.layout.lock.set",
       "phase": "A",
       "description": "Set visual movement lock",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "view_write",
       "approval": "none",
       "scope": "spatial:write",
@@ -1745,7 +1866,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "spatial.edge.style.set",
@@ -6603,7 +6727,7 @@
       "id": "spatial.node.inspect",
       "phase": "A",
       "description": "Inspect node provenance and related artefacts",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "spatial:read",
@@ -6672,7 +6796,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "spatial.camera.fit",
@@ -6952,7 +7079,7 @@
       "id": "spatial.scene.export",
       "phase": "B",
       "description": "Export schema-validated view scene",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
       "scope": "spatial:read",
@@ -7019,7 +7146,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "spatial.scene.import.preview",
@@ -8590,7 +8720,7 @@
       "id": "tasks.priority.set",
       "phase": "A",
       "description": "tasks priority set",
-      "availability": "planned",
+      "availability": "cloudflare_alpha",
       "effect": "write",
       "approval": "contextual",
       "scope": "tasks:write",
@@ -8684,7 +8814,10 @@
             }
           }
         }
-      }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Cloudflare isolated D1 implementation; fake-D1 tests and explicit OAuth live checks required"
     },
     {
       "id": "comments.list",
@@ -10066,7 +10199,7 @@
       }
     }
   ],
-  "notes": "Registry describes all 114 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
+  "notes": "Registry describes all 115 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",

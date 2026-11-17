@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 from urllib.request import Request, urlopen
 
@@ -29,6 +30,87 @@ def load_local(cli: Path, database: Path | None) -> list[dict]:
     args.append("bridge-dump")
     result=subprocess.run(args,capture_output=True,timeout=35,check=True)
     return decode_snapshot(result.stdout)
+
+
+def decode_manifest(data: bytes) -> list[dict]:
+    """Parse the local Rust length-prefixed identity manifest.
+
+    This intentionally contains no customer titles, task bodies or notes.
+    It cannot be fed to the cloud as a batch import.
+    """
+    marker = b"SHIORI-MANIFEST-1\n"
+    if not isinstance(data, bytes) or not data.startswith(marker):
+        raise ValueError("Unexpected local manifest version")
+    rows = []
+    offset = len(marker)
+    while offset < len(data):
+        if len(rows) >= MAX_TASKS:
+            raise ValueError("Local manifest exceeds task budget")
+        fields = []
+        for _ in range(6):
+            if offset + 4 > len(data):
+                raise ValueError("Truncated manifest record")
+            size = struct.unpack_from(">I", data, offset)[0]
+            offset += 4
+            if size > 4096 or offset + size > len(data):
+                raise ValueError("Invalid manifest field size")
+            fields.append(data[offset:offset + size].decode("utf-8"))
+            offset += size
+        task_id, version, status, updated, deleted, prerequisites = fields
+        if not task_id or not version.isdecimal() or int(version) < 1:
+            raise ValueError("Invalid local task identity/version")
+        if status not in ("todo", "in_progress", "done"):
+            raise ValueError("Invalid task status in manifest")
+        deps = prerequisites.split(",") if prerequisites else []
+        if len(deps) != len(set(deps)) or task_id in deps:
+            raise ValueError("Invalid local prerequisite identities")
+        rows.append({
+            "id": task_id, "version": int(version), "status": status,
+            "updated_at": updated, "deleted": bool(deleted), "depends_on": deps,
+        })
+    if len({r["id"] for r in rows}) != len(rows):
+        raise ValueError("Duplicate task IDs in manifest")
+    return rows
+
+
+def load_local_manifest(cli: Path, database: Path | None) -> list[dict]:
+    args = [str(cli)]
+    if database:
+        args.extend(["--database", str(database)])
+    args.append("bridge-manifest")
+    output = subprocess.run(args, capture_output=True, timeout=35, check=True)
+    return decode_manifest(output.stdout)
+
+
+def compare_manifest(local: list[dict], remote: list[dict]) -> dict:
+    """Compare identity/version only; titles are never trusted as shared IDs."""
+    active = {task["id"]: task for task in local if not task["deleted"]}
+    tombstones = {task["id"] for task in local if task["deleted"]}
+    remote_by_id = {task["id"]: task for task in remote}
+    overlap = active.keys() & remote_by_id.keys()
+    return {
+        "mode": "s1_read_only_manifest_no_sync",
+        "data_boundary": "local Rust SQLite is authoritative locally; cloud D1 remains isolated",
+        "counts": {
+            "local_active": len(active),
+            "local_tombstones": len(tombstones),
+            "local_dependency_edges": sum(len(task["depends_on"]) for task in local if not task["deleted"]),
+            "remote_active": len(remote),
+            "matching_active_ids_unverified": len(overlap),
+            "matching_id_revision_differences": sum(
+                active[key]["version"] != remote_by_id[key].get("version") for key in overlap
+            ),
+            "local_active_only": len(active.keys() - remote_by_id.keys()),
+            "remote_active_only": len(remote_by_id.keys() - active.keys()),
+        },
+        "warnings": [
+            "Matching identifiers do not prove shared origin without a provenance mapping.",
+            "Remote tombstones and edge versions are not exposed by the cloud alpha task list.",
+            "No local task content or manifest IDs were transmitted to the cloud.",
+            "No local or remote record was changed.",
+        ],
+    }
+
 
 def remote_request(base: str, token: str, cursor: str|None) -> dict:
     data={"workspace_id":"personal","limit":100}
@@ -111,13 +193,14 @@ def main():
     p.add_argument("--database",type=Path)
     p.add_argument("--base",default=DEFAULT_BASE)
     p.add_argument("--token-file",type=Path)
+    p.add_argument("--manifest",action="store_true",help="Compare local Rust task IDs, revisions and tombstone counts without exposing content")
     p.add_argument("--report-file",type=Path,help="Write counts-only JSON report to the specified local file")
     args=p.parse_args()
     token=read_secret(args)
-    local=load_local(Path(args.cli),args.database)
+    local=load_local_manifest(Path(args.cli),args.database) if args.manifest else load_local(Path(args.cli),args.database)
     if len(local)>MAX_TASKS:raise ValueError("Local result exceeds safe budget")
     remote=load_remote(args.base,token)
-    report=compare(local,remote)
+    report=compare_manifest(local,remote) if args.manifest else compare(local,remote)
     print(json.dumps(report,indent=2))
     if args.report_file:
         args.report_file.parent.mkdir(parents=True,exist_ok=True)

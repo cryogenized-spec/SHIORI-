@@ -61,7 +61,7 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,11);
+  assert.equal(list.data.result.tools.length,22);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
@@ -123,7 +123,7 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
 test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,11);
+  assert.equal(available.length,22);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -239,19 +239,19 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
 test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
  const e=env();
  const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
- assert.equal(expected.operations.length,114);
+ assert.equal(expected.operations.length,115);
  const listed=await call(e,"/mcp",rpc("resources/list",{}));
  assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
  const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
  assert.match(templates.data.result.resourceTemplates[0].uriTemplate,/operation_id/);
  const full=await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1"}));
  assert.deepEqual(JSON.parse(full.data.result.contents[0].text),expected);
- const individual=await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1/tasks.delete"}));
+ const individual=await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1/comments.delete"}));
  const entry=JSON.parse(individual.data.result.contents[0].text);
  assert.equal(entry.availability,"planned");
  assert.equal(entry.effect,"destructive");
- assert.deepEqual(entry.inputSchema,expected.operations.find(x=>x.id==="tasks.delete").inputSchema);
- assert.deepEqual(entry.outputSchema,expected.operations.find(x=>x.id==="tasks.delete").outputSchema);
+ assert.deepEqual(entry.inputSchema,expected.operations.find(x=>x.id==="comments.delete").inputSchema);
+ assert.deepEqual(entry.outputSchema,expected.operations.find(x=>x.id==="comments.delete").outputSchema);
  const missing=await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1/not.real"}));
  assert.equal(missing.data.error.code,-32002);
  assert.equal((await call(e,"/mcp",rpc("resources/read",{uri:"shiori://operations/v1"}),{auth:null})).status,401);
@@ -263,8 +263,8 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
  const first=await callCatalog({limit:7});
  const a=first.data.result.structuredContent;
- assert.equal(a.registry_total,114);
- assert.equal(a.total,114);
+ assert.equal(a.registry_total,115);
+ assert.equal(a.total,115);
  assert.equal(a.items.length,7);
  assert.equal(a.next_cursor,"7");
  assert(a.items[0].inputSchema);
@@ -274,10 +274,10 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  assert.equal(b.items.length,7);
  assert.notEqual(a.items[0].id,b.items[0].id);
  const planned=await callCatalog({availability:"planned",limit:500});
- assert.equal(planned.data.result.structuredContent.total,103);
+ assert.equal(planned.data.result.structuredContent.total,93);
  const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
- assert.equal(implemented.data.result.structuredContent.total,11);
- const item=await callCatalog({operation_id:"tasks.delete"});
+ assert.equal(implemented.data.result.structuredContent.total,22);
+ const item=await callCatalog({operation_id:"comments.delete"});
  assert.equal(item.data.result.structuredContent.items.length,1);
  assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
  const missing=await callCatalog({operation_id:"unknown.operation"});
@@ -290,13 +290,13 @@ test("planned operations are discoverable but never callable",async()=>{
  const e=env();
  const list=await call(e,"/mcp",rpc("tools/list",{}));
  const names=list.data.result.tools.map(x=>x.name);
- assert.equal(names.length,11);
- assert(!names.includes("shiori_tasks_delete"));
- const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_tasks_delete",arguments:{
+ assert.equal(names.length,22);
+ assert(!names.includes("shiori_comments_delete"));
+ const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_comments_delete",arguments:{
   workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
  }}));
  assert.equal(planned.data.error.code,-32602);
- const http=await call(e,"/api/v1/ops/tasks.delete",{workspace_id:"personal"});
+ const http=await call(e,"/api/v1/ops/comments.delete",{workspace_id:"personal"});
  assert.equal(http.status,404);
  assert.equal(http.data.error.code,"UNSUPPORTED_CAPABILITY");
  const tasks=await call(e,"/api/v1/ops/tasks.list",{workspace_id:"personal"});
@@ -308,9 +308,9 @@ test("capabilities advertise catalog URI and actual callable tool count",async()
  const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
    arguments:{workspace_id:"personal"}}));
  const c=caps.data.result.structuredContent.capabilities;
- assert.equal(c.registry_total,114);
- assert.equal(c.planned_total,114);
- assert.equal(c.implemented_total,11);
+ assert.equal(c.registry_total,115);
+ assert.equal(c.planned_total,115);
+ assert.equal(c.implemented_total,22);
  assert.equal(c.registry_uri,"shiori://operations/v1");
 });
 
@@ -395,4 +395,100 @@ test("MCP prerequisite write is a distinct typed tool and rejects bad fields",as
  assert.equal(r.status,200);
  assert.equal(r.data.result.isError,true);
  assert.equal(r.data.result.structuredContent.error.code,"VALIDATION_FAILED");
+});
+
+
+test("expanded task editing and priority are revision guarded, idempotent and validate fields",async()=>{
+ const e=env();
+ const id=(await call(e,"/api/v1/ops/tasks.create",request("mut-task-001",{title:"Original",text:"Old note"}))).data.data.resource_id;
+ const patch=request("mut-update-001",{task_id:id,title:"Renamed",text:"Revised description",expected_revision:1});
+ const edited=await call(e,"/api/v1/ops/tasks.update",patch);
+ assert.equal(edited.status,200,JSON.stringify(edited.data));
+ assert.deepEqual(edited.data.data,{changed:true,resource_id:id,revision:2});
+ assert.deepEqual((await call(e,"/api/v1/ops/tasks.update",patch)).data.data,edited.data.data);
+ const conflict=await call(e,"/api/v1/ops/tasks.update",request("mut-update-002",{task_id:id,title:"stale",expected_revision:1}));
+ assert.equal(conflict.status,409);
+ const empty=await call(e,"/api/v1/ops/tasks.update",request("mut-update-003",{task_id:id,expected_revision:2}));
+ assert.equal(empty.status,400);
+ const notitle=await call(e,"/api/v1/ops/tasks.update",request("mut-update-004",{task_id:id,title:"  ",expected_revision:2}));
+ assert.equal(notitle.status,400);
+ const pri=await call(e,"/api/v1/ops/tasks.priority.set",request("mut-priority-1",{task_id:id,priority:"urgent",expected_revision:2}));
+ assert.equal(pri.status,200);
+ assert.equal(pri.data.data.revision,3);
+ const again=await call(e,"/api/v1/ops/tasks.priority.set",request("mut-priority-2",{task_id:id,priority:"urgent",expected_revision:3}));
+ assert.deepEqual(again.data.data,{changed:false,resource_id:id,revision:3});
+ const get=await call(e,"/api/v1/ops/tasks.get",{workspace_id:"personal",task_id:id});
+ assert.equal(get.data.data.item.title,"Renamed");
+ assert.equal(get.data.data.item.body,"Revised description");
+ assert.equal(get.data.data.item.priority,"urgent");
+ const tamper=await call(e,"/mcp",rpc("tools/call",{name:"shiori_tasks_priority_set",arguments:request("mcp-pri-001",{task_id:id,priority:"not-valid",expected_revision:3})}));
+ assert.equal(tamper.data.result.structuredContent.error.code,"VALIDATION_FAILED");
+});
+
+test("soft-delete and restore preserve graph identities without touching unrelated tasks",async()=>{
+ const e=env();
+ const a=(await call(e,"/api/v1/ops/tasks.create",request("delete-a-01",{title:"A"}))).data.data.resource_id;
+ const b=(await call(e,"/api/v1/ops/tasks.create",request("delete-b-01",{title:"B"}))).data.data.resource_id;
+ assert.equal((await call(e,"/api/v1/ops/tasks.dependencies.add",request("before-delete-dep",{task_id:b,depends_on_id:a,expected_revision:1}))).status,200);
+ const del=request("delete-001",{task_id:a,expected_revision:1});
+ const deleted=await call(e,"/api/v1/ops/tasks.delete",del);
+ assert.equal(deleted.status,200,JSON.stringify(deleted.data));
+ assert.equal(deleted.data.data.revision,2);
+ assert.equal((await call(e,"/api/v1/ops/tasks.delete",del)).data.data.revision,2);
+ assert.equal((await call(e,"/api/v1/ops/tasks.get",{workspace_id:"personal",task_id:a})).status,404);
+ const scene=await call(e,"/api/v1/ops/spatial.scene.read",{workspace_id:"personal"});
+ assert.equal(scene.data.data.scene.nodes.length,1);
+ assert.equal(scene.data.data.scene.edges.length,0);
+ assert.equal((await call(e,"/api/v1/ops/tasks.restore",request("restore-stale-1",{task_id:a,expected_revision:1}))).status,409);
+ const restored=await call(e,"/api/v1/ops/tasks.restore",request("restore-1",{task_id:a,expected_revision:2}));
+ assert.equal(restored.status,200);
+ assert.equal(restored.data.data.revision,3);
+ const again=await call(e,"/api/v1/ops/spatial.scene.read",{workspace_id:"personal"});
+ assert.equal(again.data.data.scene.edges.length,1);
+ assert.equal((await call(e,"/api/v1/ops/tasks.get",{workspace_id:"personal",task_id:b})).data.data.item.version,2);
+});
+
+test("dependency removal preserves revision and rejects stale duplicate attempts",async()=>{
+ const e=env();
+ const a=(await call(e,"/api/v1/ops/tasks.create",request("remove-da-01",{title:"A"}))).data.data.resource_id;
+ const b=(await call(e,"/api/v1/ops/tasks.create",request("remove-db-01",{title:"B"}))).data.data.resource_id;
+ assert.equal((await call(e,"/api/v1/ops/tasks.dependencies.add",request("remove-dadd-01",{task_id:b,depends_on_id:a,expected_revision:1}))).status,200);
+ const args=request("remove-dep-01",{task_id:b,depends_on_id:a,expected_revision:2});
+ const out=await call(e,"/api/v1/ops/tasks.dependencies.remove",args);
+ assert.equal(out.status,200,JSON.stringify(out.data));
+ assert.equal(out.data.data.revision,3);
+ assert.deepEqual((await call(e,"/api/v1/ops/tasks.dependencies.remove",args)).data.data,out.data.data);
+ const list=await call(e,"/api/v1/ops/tasks.dependencies.list",{workspace_id:"personal",task_id:b});
+ assert.deepEqual(list.data.data.items,[]);
+ assert.equal((await call(e,"/api/v1/ops/tasks.dependencies.remove",request("remove-dep-02",{task_id:b,depends_on_id:a,expected_revision:3}))).status,404);
+});
+
+test("spatial read, viewport save, layout lock and bounded scene export",async()=>{
+ const e=env();
+ const a=(await call(e,"/api/v1/ops/tasks.create",request("spatialnew-a",{title:"Position example"}))).data.data.resource_id;
+ const initial=await call(e,"/api/v1/ops/spatial.node.position.read",{workspace_id:"personal",node_id:a});
+ assert.equal(initial.data.data.item.revision,0);
+ assert.equal(initial.data.data.item.stored,false);
+ const moved=await call(e,"/api/v1/ops/spatial.node.position.set",request("spatialnew-p",{node_id:a,x:150,y:75,expected_revision:0}));
+ assert.equal(moved.status,200);
+ const position=await call(e,"/api/v1/ops/spatial.node.position.read",{workspace_id:"personal",node_id:a});
+ assert.equal(position.data.data.item.x,150);
+ assert.equal(position.data.data.item.revision,1);
+ const inspected=await call(e,"/api/v1/ops/spatial.node.inspect",{workspace_id:"personal",node_id:a});
+ assert.equal(inspected.data.data.item.id,a);
+ assert.equal(inspected.data.data.item.position.x,150);
+ const viewport=await call(e,"/api/v1/ops/spatial.viewport.save",request("spatialnew-view",{viewport:{x:80,y:-12,zoom:1.5},expected_revision:0}));
+ assert.equal(viewport.status,200,JSON.stringify(viewport.data));
+ assert.equal((await call(e,"/api/v1/ops/spatial.viewport.read",{workspace_id:"personal"})).data.data.item.viewport.zoom,1.5);
+ assert.equal((await call(e,"/api/v1/ops/spatial.viewport.save",request("spatialnew-view2",{viewport:{x:0,y:0,zoom:0},expected_revision:1}))).status,400);
+ assert.equal((await call(e,"/api/v1/ops/spatial.viewport.save",request("spatialnew-view3",{viewport:{x:0,y:0,zoom:1,extra:true},expected_revision:1}))).status,400);
+ const locked=await call(e,"/api/v1/ops/spatial.layout.lock.set",request("spatialnew-lock",{locked:true,expected_revision:0}));
+ assert.equal(locked.status,200,JSON.stringify(locked.data));
+ assert.equal((await call(e,"/api/v1/ops/spatial.scene.read",{workspace_id:"personal"})).data.data.scene.layout_locked,true);
+ const scene=await call(e,"/api/v1/ops/spatial.scene.export",{workspace_id:"personal"});
+ assert.equal(scene.status,200,JSON.stringify(scene.data));
+ assert.equal(scene.data.data.scene.nodes.length,1);
+ assert.equal(scene.data.data.scene.nodes[0].x,150);
+ const denied=await call(e,"/api/v1/ops/spatial.scene.export",{workspace_id:"personal",scene_id:"other"});
+ assert.equal(denied.status,404);
 });

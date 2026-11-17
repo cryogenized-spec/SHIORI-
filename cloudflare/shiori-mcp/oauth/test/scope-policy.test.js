@@ -7,7 +7,9 @@ test("read methods retain mcp:read only",()=>{
   assert.deepEqual(requiredScopesForRpc({method}),["mcp:read"]);
  }
  for(const name of ["shiori_tasks_list","shiori_system_capabilities_read","shiori_tasks_get",
-                     "shiori_tasks_dependencies_list","shiori_spatial_scene_read","shiori_system_operations_list"]){
+                     "shiori_tasks_dependencies_list","shiori_spatial_scene_read","shiori_system_operations_list",
+                     "shiori_spatial_node_position_read","shiori_spatial_viewport_read",
+                     "shiori_spatial_node_inspect","shiori_spatial_scene_export"]){
   assert.deepEqual(requiredScopesForRpc({method:"tools/call",params:{name}}),["mcp:read"]);
  }
 });
@@ -15,7 +17,10 @@ test("read methods retain mcp:read only",()=>{
 test("known writes and unknown tools both require mcp:write",()=>{
  for(const name of ["shiori_tasks_create","shiori_tasks_status_set",
                     "shiori_spatial_node_position_set","shiori_spatial_edge_style_set",
-                    "shiori_tasks_dependencies_add",
+                    "shiori_tasks_dependencies_add","shiori_tasks_dependencies_remove",
+                    "shiori_tasks_update","shiori_tasks_delete","shiori_tasks_restore",
+                    "shiori_tasks_priority_set","shiori_spatial_viewport_save",
+                    "shiori_spatial_layout_lock_set",
                     "shiori_not_implemented",undefined]){
   const needed=requiredScopesForRpc({method:"tools/call",params:{name}});
   assert.deepEqual(needed,["mcp:read","mcp:write"]);
