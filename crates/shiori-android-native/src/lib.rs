@@ -13,7 +13,7 @@ mod resume;
 mod rollback;
 mod working_copy;
 
-use jiff::{civil::Date, Timestamp};
+use jiff::{Timestamp, civil::Date};
 use jni::{
     JNIEnv,
     objects::{JObject, JString},
