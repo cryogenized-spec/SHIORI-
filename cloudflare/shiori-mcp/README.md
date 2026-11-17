@@ -68,8 +68,8 @@ Tests use a disposable in-memory SQLite database and do not touch Cloudflare or 
 
 ## Complete operation schema discovery
 
-Shiori has **114 operation contracts** in `docs/api/operations.v1.json`.
-The Cloudflare MCP makes **all 114 full contracts discoverable** without
+Shiori has **115 operation contracts** in `docs/api/operations.v1.json`.
+The Cloudflare MCP makes **all 115 full contracts discoverable** without
 presenting unimplemented commands as runnable. The registry includes
 input and output JSON Schemas, operation ID, scope, effect, approval
 requirements, phase and actual availability.
@@ -83,8 +83,8 @@ requirements, phase and actual availability.
   access with `workspace_id`, `cursor`, `limit`, and optional
   `availability` or exact `operation_id` lookup. It returns full contracts,
   not merely names.
-- `tools/list` deliberately advertises **only the 11 runnable operations**:
-  the original nine plus the read-only catalog tool and dependency creation tool. Unsupported operations
+- `tools/list` deliberately advertises **only the 22 runnable operations**:
+  the the original operations plus guarded CRUD and spatial operations. Unsupported operations
   are never executed; they cannot be called merely because their schema
   exists in the catalog.
 
@@ -172,3 +172,7 @@ with tombstones, source IDs, conflict resolution and rollback is implemented.
 ## Native cloud prerequisite links (2026-11-17)
 
 `tasks.dependencies.add` / `shiori_tasks_dependencies_add` connects one active Cloudflare D1 task to an active prerequisite, using the dependent task's current version in `expected_revision` and a unique `idempotency_key`. It rejects self-links, duplicates, inactive/missing tasks, stale versions and cycles (including indirect cycles) through an atomic SQL check; successful writes increment the dependent task revision and appear in `tasks.dependencies.list` and spatial `scene.edges` as `blocks` links. This does **not** import local Rust edges or synchronize offline tasks. The user has approved linking the eight clearly marked dummy tasks only, and broader graph edits remain reviewable.
+
+## Expanded MCP task + spatial operations (2026-11-17)
+
+The isolated Cloudflare D1 worker now implements `tasks.update`, `tasks.delete` (soft tombstone), `tasks.restore`, `tasks.priority.set`, `tasks.dependencies.remove`, `spatial.node.position.read`, `spatial.viewport.read`, `spatial.viewport.save`, `spatial.layout.lock.set`, `spatial.node.inspect`, and bounded `spatial.scene.export`. Every mutation requires owner-scoped OAuth write permission or a valid legacy bearer, a fresh revision (where applicable), and a unique idempotency key. Task deletion never physically purges rows. The host should request explicit confirmation for destructive actions. This does not perform Rust/SQLite cloud synchronization.
