@@ -102,6 +102,9 @@ enum Command {
     /// Read-only actual dependency links (prerequisite -> dependent).
     #[command(hide = true)]
     BridgeEdges,
+    /// Read-only, content-free native task and dependency identity manifest.
+    #[command(hide = true)]
+    BridgeManifest,
     /// Update only a task's visual placement, guarded by its view revision.
     #[command(hide = true)]
     SpatialSet {
@@ -439,6 +442,34 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .map(|(from, to)| vec![from, to])
                 .collect();
             bridge_rows(b"SHIORI-EDGES-1\n", &rows)?;
+        }
+        Command::BridgeManifest => {
+            // This is a LOCAL-only read. No names, notes, API keys, attachments,
+            // remote requests, or sync writes; include tombstones for reconciliation.
+            let mut tasks = store.list(TaskFilter {
+                include_deleted: true,
+                ..Default::default()
+            })?;
+            tasks.sort_by(|a, b| a.id.cmp(&b.id));
+            let rows: Vec<Vec<String>> = tasks
+                .iter()
+                .map(|task| {
+                    let dependencies = if task.deleted_at.is_none() {
+                        store.get_dependencies(&task.id)?
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(vec![
+                        task.id.clone(),
+                        task.version.to_string(),
+                        task.status.as_str().to_owned(),
+                        task.updated_at.to_rfc3339(),
+                        task.deleted_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+                        dependencies.join(","),
+                    ])
+                })
+                .collect::<Result<_, shiori_storage::StorageError>>()?;
+            bridge_rows(b"SHIORI-MANIFEST-1\n", &rows)?;
         }
         Command::SpatialSet {
             id,
