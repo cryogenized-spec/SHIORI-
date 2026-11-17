@@ -12,7 +12,7 @@ This module is the first **remotely deployed, single-owner MCP server** for Shio
 
 ## Live tools and JSON operations
 
-`system.capabilities.read`, `tasks.list`, `tasks.get`, `tasks.create`, `tasks.status.set`, `tasks.dependencies.list`, `spatial.scene.read`, `spatial.node.position.set`, `spatial.edge.style.set`.
+`system.capabilities.read`, `tasks.list`, `tasks.get`, `tasks.create`, `tasks.status.set`, `tasks.dependencies.list`, `tasks.dependencies.add`, `spatial.scene.read`, `spatial.node.position.set`, `spatial.edge.style.set`.
 
 Each operation is also available at `POST /api/v1/ops/<dot-separated-id>` with the same JSON input schema. MCP uses one `POST /mcp` JSON-RPC Streamable HTTP endpoint with individually named tools `shiori_<underscore_name>`.
 
@@ -68,8 +68,8 @@ Tests use a disposable in-memory SQLite database and do not touch Cloudflare or 
 
 ## Complete operation schema discovery
 
-Shiori has **113 operation contracts** in `docs/api/operations.v1.json`.
-The Cloudflare MCP makes **all 113 full contracts discoverable** without
+Shiori has **114 operation contracts** in `docs/api/operations.v1.json`.
+The Cloudflare MCP makes **all 114 full contracts discoverable** without
 presenting unimplemented commands as runnable. The registry includes
 input and output JSON Schemas, operation ID, scope, effect, approval
 requirements, phase and actual availability.
@@ -83,8 +83,8 @@ requirements, phase and actual availability.
   access with `workspace_id`, `cursor`, `limit`, and optional
   `availability` or exact `operation_id` lookup. It returns full contracts,
   not merely names.
-- `tools/list` deliberately advertises **only the 10 runnable operations**:
-  the original nine plus the read-only catalog tool. Unsupported operations
+- `tools/list` deliberately advertises **only the 11 runnable operations**:
+  the original nine plus the read-only catalog tool and dependency creation tool. Unsupported operations
   are never executed; they cannot be called merely because their schema
   exists in the catalog.
 
@@ -168,3 +168,7 @@ with tombstones, source IDs, conflict resolution and rollback is implemented.
 1. Implement standards-compliant OAuth/PKCE pairing for ChatGPT and similar remote clients; use explicit user identity and revocable sessions.
 2. Introduce a Rust application-service facade over canonical local tasks and a well-defined authenticated sync protocol. Prove field mapping, conflicts, tombstones, revisions and offline queue replay.
 3. Add live EAI/MCP Apps UI resources and typed graph/inbox operations only as Rust-backed services become available. Use the 113-operation registry as a planning inventory, not a dynamic arbitrary-execution endpoint.
+
+## Native cloud prerequisite links (2026-11-17)
+
+`tasks.dependencies.add` / `shiori_tasks_dependencies_add` connects one active Cloudflare D1 task to an active prerequisite, using the dependent task's current version in `expected_revision` and a unique `idempotency_key`. It rejects self-links, duplicates, inactive/missing tasks, stale versions and cycles (including indirect cycles) through an atomic SQL check; successful writes increment the dependent task revision and appear in `tasks.dependencies.list` and spatial `scene.edges` as `blocks` links. This does **not** import local Rust edges or synchronize offline tasks. The user has approved linking the eight clearly marked dummy tasks only, and broader graph edits remain reviewable.
