@@ -1,10 +1,12 @@
 //! SQLite persistence adapter. Domain validation stays in `shiori-core`.
-use jiff::{civil::Date, Timestamp};
+use jiff::{Timestamp, civil::Date};
 use rusqlite::{
     Connection, OptionalExtension, Row, TransactionBehavior, params, params_from_iter,
     types::{Type, Value},
 };
-use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id};
+use shiori_core::{
+    Priority, Task, TaskError, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id,
+};
 use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
@@ -539,8 +541,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
     let completed: Option<String> = row.get(9)?;
     let deleted: Option<String> = row.get(11)?;
     let timestamp = |s: &str, col: usize| -> rusqlite::Result<Timestamp> {
-        s.parse::<Timestamp>()
-            .map_err(|e| invalid(col, e))
+        s.parse::<Timestamp>().map_err(|e| invalid(col, e))
     };
     Ok(Task {
         id: row.get(0)?,
