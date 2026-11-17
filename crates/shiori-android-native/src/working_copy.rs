@@ -2,7 +2,7 @@
 //! Never reads from or writes to the live WebView task store, native safety
 //! vault, or immutable canonical migration shadow. Only Kotlin supplies the
 //! app-private database path; there is no JavaScript/native object bridge.
-use jiff::{Timestamp, civil::Date};
+use jiff::civil::Date;
 use serde_json::{Value, json};
 use shiori_core::utc_rfc3339;
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
@@ -282,6 +282,7 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jiff::Timestamp;
 
     fn location() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
