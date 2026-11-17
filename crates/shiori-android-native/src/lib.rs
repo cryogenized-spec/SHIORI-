@@ -13,7 +13,7 @@ mod resume;
 mod rollback;
 mod working_copy;
 
-use jiff::{Timestamp, civil::Date};
+use jiff::civil::Date;
 use jni::{
     JNIEnv,
     objects::{JObject, JString},
@@ -551,6 +551,7 @@ pub extern "system" fn Java_dev_cryogenized_shiori_NativeVault_inspectInterrupte
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jiff::Timestamp;
 
     fn sample() -> String {
         serde_json::json!({
