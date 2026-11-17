@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use shiori_core::{Priority, Task, TaskError, TaskPatch};
 
 #[test]
@@ -16,7 +16,7 @@ fn patch_validates_before_mutating_and_does_not_bump_noop() {
     assert_eq!(task.version, original.version);
     assert!(!task.apply_patch(TaskPatch::default()).unwrap());
     assert_eq!(task.version, original.version);
-    let due = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
+    let due = Date::new(2026, 11, 20).unwrap();
     assert!(
         task.apply_patch(TaskPatch {
             due_on: Some(Some(due)),

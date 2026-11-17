@@ -102,14 +102,14 @@ pub fn preflight(path: &Path, current: &str) -> Result<Value, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
+    use jiff::Timestamp;
     use shiori_storage::SqliteStore;
 
     fn path() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "shiori-parity-{}-{}.sqlite3",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         ))
     }
     fn input() -> String {

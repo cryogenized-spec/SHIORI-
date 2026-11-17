@@ -1,6 +1,6 @@
 //! M2.4d: canonical Rust/SQLite owners for Android tags, saved views and
 //! sorting. These writes never touch the archived legacy JSON or WebView.
-use chrono::Utc;
+use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 use std::{collections::HashSet, error::Error, path::Path};
@@ -54,7 +54,7 @@ pub fn set_task_tags(path: &Path, input: &Value) -> Result<Value, Box<dyn Error>
     let updated = tx.execute(
         "UPDATE tasks SET updated_at=?3, version=version+1
          WHERE id=?1 AND version=?2 AND deleted_at IS NULL",
-        params![id, expected, Utc::now().to_rfc3339()],
+        params![id, expected, shiori_core::utc_rfc3339(Timestamp::now())],
     )?;
     if updated != 1 {
         return Err("task changed or was removed; reload before changing tags".into());
@@ -216,7 +216,7 @@ mod tests {
         let suffix = format!(
             "{}-{}",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         );
         let root = std::env::temp_dir();
         (

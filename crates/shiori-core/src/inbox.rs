@@ -4,7 +4,7 @@
 //! ClickUp. It does not persist items or create tasks. Application services
 //! will coordinate durable, atomic conversion and authorization.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -110,8 +110,8 @@ pub struct InboxItem {
     pub state: InboxState,
     pub disposition: Option<InboxDisposition>,
     pub linked: Option<InboxLink>,
-    pub captured_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub captured_at: Timestamp,
+    pub updated_at: Timestamp,
     pub version: i64,
 }
 
@@ -121,7 +121,7 @@ impl InboxItem {
     pub fn capture_text(
         text: &str,
         source: InboxSource,
-        at: DateTime<Utc>,
+        at: Timestamp,
     ) -> Result<Self, InboxError> {
         if text.trim().is_empty() {
             return Err(InboxError::EmptyCapture);
@@ -147,7 +147,7 @@ impl InboxItem {
     pub fn triage(
         &mut self,
         disposition: InboxDisposition,
-        at: DateTime<Utc>,
+        at: Timestamp,
     ) -> Result<bool, InboxError> {
         match self.state {
             InboxState::Archived => return Err(InboxError::Archived),
@@ -170,7 +170,7 @@ impl InboxItem {
         &mut self,
         kind: InboxDisposition,
         local_id: &str,
-        at: DateTime<Utc>,
+        at: Timestamp,
     ) -> Result<bool, InboxError> {
         if local_id.trim().is_empty() || local_id != local_id.trim() || local_id.len() > 256 {
             return Err(InboxError::InvalidLocalId);
@@ -198,7 +198,7 @@ impl InboxItem {
     }
 
     /// Archiving is not deletion and preserves capture provenance and links.
-    pub fn archive(&mut self, at: DateTime<Utc>) -> Result<bool, InboxError> {
+    pub fn archive(&mut self, at: Timestamp) -> Result<bool, InboxError> {
         if self.state == InboxState::Archived {
             return Ok(false);
         }
@@ -209,7 +209,7 @@ impl InboxItem {
     }
 
     /// Restores the most informative prior state without losing triage/link.
-    pub fn restore(&mut self, at: DateTime<Utc>) -> Result<bool, InboxError> {
+    pub fn restore(&mut self, at: Timestamp) -> Result<bool, InboxError> {
         if self.state != InboxState::Archived {
             return Ok(false);
         }
@@ -225,14 +225,14 @@ impl InboxItem {
         Ok(true)
     }
 
-    fn validate_timestamp(&self, at: DateTime<Utc>) -> Result<(), InboxError> {
+    fn validate_timestamp(&self, at: Timestamp) -> Result<(), InboxError> {
         if at < self.updated_at {
             return Err(InboxError::TimestampRegressed);
         }
         Ok(())
     }
 
-    fn bump(&mut self, at: DateTime<Utc>) {
+    fn bump(&mut self, at: Timestamp) {
         self.updated_at = at;
         self.version += 1;
     }
@@ -241,10 +241,10 @@ impl InboxItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration, TimeZone};
+    use jiff::SignedDuration;
 
-    fn now() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 11, 14, 9, 0, 0).unwrap()
+    fn now() -> Timestamp {
+        "2026-11-14T09:00:00Z".parse().unwrap()
     }
 
     #[test]
@@ -294,14 +294,14 @@ mod tests {
     fn link_requires_explicit_matching_triage_and_is_idempotent() {
         let mut item =
             InboxItem::capture_text("Supplier reply", InboxSource::Local, now()).unwrap();
-        let t1 = now() + Duration::seconds(1);
+        let t1 = now() + SignedDuration::from_secs(1);
         assert_eq!(
             item.link_existing(InboxDisposition::Task, "task-1", t1),
             Err(InboxError::NotTriagedForTarget)
         );
         assert!(item.triage(InboxDisposition::Task, t1).unwrap());
         assert!(!item.triage(InboxDisposition::Task, t1).unwrap());
-        let t2 = t1 + Duration::seconds(1);
+        let t2 = t1 + SignedDuration::from_secs(1);
         assert_eq!(
             item.link_existing(InboxDisposition::Memo, "memo-1", t2),
             Err(InboxError::NotTriagedForTarget)
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn archive_restore_preserves_source_triage_and_link() {
         let mut item = InboxItem::capture_text("Note", InboxSource::Ocr, now()).unwrap();
-        let at = now() + Duration::seconds(1);
+        let at = now() + SignedDuration::from_secs(1);
         item.triage(InboxDisposition::Memo, at).unwrap();
         item.link_existing(InboxDisposition::Memo, "memo-1", at)
             .unwrap();
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn stale_timestamps_do_not_partially_mutate() {
         let mut item = InboxItem::capture_text("Note", InboxSource::Local, now()).unwrap();
-        let old = now() - Duration::seconds(1);
+        let old = now() - SignedDuration::from_secs(1);
         assert_eq!(
             item.triage(InboxDisposition::Task, old),
             Err(InboxError::TimestampRegressed)

@@ -2,8 +2,9 @@
 //! Never reads from or writes to the live WebView task store, native safety
 //! vault, or immutable canonical migration shadow. Only Kotlin supplies the
 //! app-private database path; there is no JavaScript/native object bridge.
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde_json::{Value, json};
+use shiori_core::utc_rfc3339;
 use shiori_core::{Priority, Task, TaskPatch, TaskStatus, validate_assignee_id, validate_estimate};
 use shiori_storage::{SqliteStore, TaskFilter};
 use std::{error::Error, path::Path, str::FromStr};
@@ -50,11 +51,11 @@ fn version(obj: &Value) -> Result<i64, Box<dyn Error>> {
         .filter(|v| *v > 0)
         .ok_or_else(|| "expected_version must be a positive integer".into())
 }
-fn date(raw: &str) -> Result<Option<NaiveDate>, Box<dyn Error>> {
+fn date(raw: &str) -> Result<Option<Date>, Box<dyn Error>> {
     if raw.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(NaiveDate::parse_from_str(raw, "%Y-%m-%d")?))
+        Ok(Some(raw.parse::<Date>()?))
     }
 }
 fn summary(t: Task) -> Value {
@@ -122,7 +123,7 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
                     task.id.len(),
                     task.id,
                     task.version,
-                    task.updated_at.to_rfc3339()
+                    utc_rfc3339(task.updated_at)
                 );
                 for byte in marker.bytes() {
                     fingerprint ^= u64::from(byte);
@@ -213,7 +214,7 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
                 .transpose()?;
             let due_on = input
                 .get("due_on")
-                .map(|v| -> Result<Option<NaiveDate>, Box<dyn Error>> {
+                .map(|v| -> Result<Option<Date>, Box<dyn Error>> {
                     if v.is_null() {
                         Ok(None)
                     } else {
@@ -281,13 +282,13 @@ pub fn working_request(path: &Path, request: &str) -> Result<Value, Box<dyn Erro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
+    use jiff::Timestamp;
 
     fn location() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "shiori-native-working-{}-{}.sqlite3",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         ))
     }
     fn backup() -> String {

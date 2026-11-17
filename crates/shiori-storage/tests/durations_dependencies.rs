@@ -1,5 +1,6 @@
 //! M2/M3: tasks keep their own estimates and safe prerequisite edges.
 use rusqlite::{Connection, params};
+use shiori_core::utc_rfc3339;
 use shiori_core::{Priority, Task, TaskError, TaskPatch, TaskStatus};
 use shiori_storage::{SqliteStore, StorageError, TaskFilter};
 
@@ -138,9 +139,9 @@ fn version_one_database_upgrades_without_losing_existing_or_deleted_tasks() {
                     task.id, task.title, task.notes, task.project,
                     task.priority.as_str(), task.status.as_str(),
                     task.due_on.map(|day| day.to_string()),
-                    task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(),
-                    task.completed_at.map(|at| at.to_rfc3339()),
-                    task.version, task.deleted_at.map(|at| at.to_rfc3339())
+                    utc_rfc3339(task.created_at), utc_rfc3339(task.updated_at),
+                    task.completed_at.map(utc_rfc3339),
+                    task.version, task.deleted_at.map(utc_rfc3339)
                 ],
             )
             .unwrap();

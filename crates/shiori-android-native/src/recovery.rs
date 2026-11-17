@@ -120,7 +120,7 @@ pub fn recover_to_separate_preview(
 mod tests {
     use super::*;
     use crate::{export::export_working_database, working_copy::initialize_working_copy};
-    use chrono::Utc;
+    use jiff::Timestamp;
     use shiori_core::{Priority, Task};
     use shiori_storage::SqliteStore;
 
@@ -128,7 +128,7 @@ mod tests {
         let stamp = format!(
             "{}-{}",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
+            Timestamp::now().as_nanosecond()
         );
         let root = std::env::temp_dir();
         (

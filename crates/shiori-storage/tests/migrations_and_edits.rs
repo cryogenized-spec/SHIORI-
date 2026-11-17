@@ -1,7 +1,8 @@
 //! Offline editing and schema-baseline migration regressions.
 //! No live-backup or cross-device synchronization behaviour is claimed here.
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rusqlite::{Connection, params};
+use shiori_core::utc_rfc3339;
 use shiori_core::{Priority, Task, TaskError, TaskPatch};
 use shiori_storage::{SqliteStore, StorageError, TaskFilter};
 
@@ -9,7 +10,7 @@ use shiori_storage::{SqliteStore, StorageError, TaskFilter};
 fn edits_survive_reopen_clear_dates_and_preserve_existing_identity() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tasks.sqlite3");
-    let due = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
+    let due = Date::new(2026, 11, 30).unwrap();
     let task = Task::new("Draft", "Inbox", Priority::Low, Some(due)).unwrap();
     let original_id = task.id.clone();
     let original_created = task.created_at;
@@ -116,9 +117,9 @@ fn unversioned_legacy_database_upgrades_without_dropping_tombstones() {
                     task.id, task.title, task.notes, task.project,
                     task.priority.as_str(), task.status.as_str(),
                     task.due_on.map(|d| d.to_string()),
-                    task.created_at.to_rfc3339(), task.updated_at.to_rfc3339(),
-                    task.completed_at.map(|t| t.to_rfc3339()),
-                    task.version, task.deleted_at.map(|t| t.to_rfc3339())
+                    utc_rfc3339(task.created_at), utc_rfc3339(task.updated_at),
+                    task.completed_at.map(utc_rfc3339),
+                    task.version, task.deleted_at.map(utc_rfc3339)
                 ],
             )
             .unwrap();

@@ -4,18 +4,18 @@
 //! Callers must supply real UTC availability and busy intervals. Timezone-aware
 //! construction of those intervals belongs at the client boundary.
 use crate::Priority;
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use jiff::{SignedDuration, Timestamp, civil::Date};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Interval {
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
+    pub start: Timestamp,
+    pub end: Timestamp,
 }
 
 impl Interval {
-    pub fn new(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Self, PlanError> {
+    pub fn new(start: Timestamp, end: Timestamp) -> Result<Self, PlanError> {
         if start >= end {
             return Err(PlanError::InvalidInterval);
         }
@@ -28,7 +28,7 @@ pub struct PlanningTask {
     pub id: String,
     pub title: String,
     pub priority: Priority,
-    pub due_on: Option<NaiveDate>,
+    pub due_on: Option<Date>,
     pub minutes: i64,
     /// IDs must be completed already or appear earlier in this preview.
     pub dependencies: Vec<String>,
@@ -36,7 +36,7 @@ pub struct PlanningTask {
 
 #[derive(Debug, Clone)]
 pub struct PlanRequest {
-    pub day: NaiveDate,
+    pub day: Date,
     pub tasks: Vec<PlanningTask>,
     pub completed_ids: Vec<String>,
     pub availability: Vec<Interval>,
@@ -47,8 +47,8 @@ pub struct PlanRequest {
 pub struct PlannedBlock {
     pub task_id: String,
     pub title: String,
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
+    pub start: Timestamp,
+    pub end: Timestamp,
     pub overdue: bool,
 }
 
@@ -92,15 +92,15 @@ fn rank(priority: Priority) -> u8 {
 fn find_free(
     availability: &[Interval],
     reserved: &[Interval],
-    earliest: Option<DateTime<Utc>>,
+    earliest: Option<Timestamp>,
     minutes: i64,
 ) -> Option<Interval> {
-    let length = Duration::minutes(minutes);
+    let length = SignedDuration::from_secs(minutes * 60);
     for window in availability {
         let mut cursor = earliest
             .map(|time| time.max(window.start))
             .unwrap_or(window.start);
-        while let Some(end) = cursor.checked_add_signed(length) {
+        while let Ok(end) = cursor.checked_add(length) {
             if end > window.end {
                 break;
             }
@@ -132,7 +132,7 @@ pub fn plan_day(mut request: PlanRequest) -> Result<PlanPreview, PlanError> {
         if task.id.trim().is_empty() || !seen.insert(task.id.as_str()) {
             return Err(PlanError::InvalidTaskId);
         }
-        if task.minutes <= 0 || Duration::try_minutes(task.minutes).is_none() {
+        if task.minutes <= 0 || task.minutes > 1440 {
             return Err(PlanError::InvalidDuration(task.id.clone()));
         }
     }
@@ -146,7 +146,7 @@ pub fn plan_day(mut request: PlanRequest) -> Result<PlanPreview, PlanError> {
     });
 
     let completed: HashSet<String> = request.completed_ids.into_iter().collect();
-    let mut ends: HashMap<String, DateTime<Utc>> = HashMap::new();
+    let mut ends: HashMap<String, Timestamp> = HashMap::new();
     let mut reserved = request.busy;
     let mut blocks = Vec::new();
     let mut unscheduled = Vec::new();
@@ -198,11 +198,10 @@ pub fn plan_day(mut request: PlanRequest) -> Result<PlanPreview, PlanError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
-    fn at(hour: u32, minute: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 11, 12, hour, minute, 0)
-            .single()
+    fn at(hour: u32, minute: u32) -> Timestamp {
+        format!("2026-11-12T{hour:02}:{minute:02}:00Z")
+            .parse()
             .unwrap()
     }
     fn task(id: &str, priority: Priority, mins: i64) -> PlanningTask {
@@ -217,7 +216,7 @@ mod tests {
     }
     fn request(tasks: Vec<PlanningTask>) -> PlanRequest {
         PlanRequest {
-            day: NaiveDate::from_ymd_opt(2026, 11, 12).unwrap(),
+            day: Date::new(2026, 11, 12).unwrap(),
             tasks,
             completed_ids: vec![],
             availability: vec![Interval::new(at(8, 0), at(12, 0)).unwrap()],

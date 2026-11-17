@@ -5,11 +5,17 @@ pub mod inbox;
 pub mod scheduling;
 pub mod spatial;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::{Timestamp, civil::Date};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
+
+/// Preserve the legacy SQLite UTC offset spelling while storing Jiff instants.
+/// Both `Z` and `+00:00` denote UTC; existing rows are parsed either way.
+pub fn utc_rfc3339(ts: Timestamp) -> String {
+    format!("{}+00:00", ts.to_string().trim_end_matches('Z'))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -128,7 +134,7 @@ pub struct TaskPatch {
     pub notes: Option<String>,
     pub project: Option<String>,
     pub priority: Option<Priority>,
-    pub due_on: Option<Option<NaiveDate>>,
+    pub due_on: Option<Option<Date>>,
     pub estimate_minutes: Option<Option<i64>>,
     /// None leaves assignee unchanged; Some(None) makes task unassigned.
     pub assignee_id: Option<Option<String>>,
@@ -154,20 +160,20 @@ pub struct Task {
     pub priority: Priority,
     pub status: TaskStatus,
     /// A calendar date, not a UTC midnight timestamp.
-    pub due_on: Option<NaiveDate>,
+    pub due_on: Option<Date>,
     /// Optional effort estimate in whole minutes. A missing estimate is not zero.
     #[serde(default)]
     pub estimate_minutes: Option<i64>,
     /// Opaque local assignment identity, distinct from authentication.
     #[serde(default)]
     pub assignee_id: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub completed_at: Option<Timestamp>,
     /// Incremented on every mutation; base for future conflict detection.
     pub version: i64,
     /// Tombstones preserve deletions for eventual synchronization.
-    pub deleted_at: Option<DateTime<Utc>>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 impl Task {
@@ -175,11 +181,11 @@ impl Task {
         title: &str,
         project: &str,
         priority: Priority,
-        due_on: Option<NaiveDate>,
+        due_on: Option<Date>,
     ) -> Result<Self, TaskError> {
         let title = validate_title(title)?;
         let project = validate_project(project)?;
-        let now = Utc::now();
+        let now = Timestamp::now();
         Ok(Self {
             id: Uuid::now_v7().to_string(),
             title,
@@ -201,7 +207,7 @@ impl Task {
     pub fn change_status(&mut self, status: TaskStatus) {
         self.status = status;
         self.completed_at = if status == TaskStatus::Done {
-            Some(Utc::now())
+            Some(Timestamp::now())
         } else {
             None
         };
@@ -273,12 +279,12 @@ impl Task {
     }
 
     pub fn soft_delete(&mut self) {
-        self.deleted_at = Some(Utc::now());
+        self.deleted_at = Some(Timestamp::now());
         self.bump();
     }
 
     fn bump(&mut self) {
-        self.updated_at = Utc::now();
+        self.updated_at = Timestamp::now();
         self.version += 1;
     }
 }
@@ -313,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_calendar_date_is_not_shifted_by_timezone_conversion() {
-        let due = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
+        let due = Date::new(2026, 11, 11).unwrap();
         assert_eq!(
             Task::new("Task", "Inbox", Priority::Low, Some(due))
                 .unwrap()

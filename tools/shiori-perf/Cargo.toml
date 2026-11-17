@@ -8,4 +8,4 @@ publish = false
 [dependencies]
 shiori-core = { path = "../../crates/shiori-core" }
 shiori-storage = { path = "../../crates/shiori-storage" }
-chrono.workspace = true
+jiff.workspace = true

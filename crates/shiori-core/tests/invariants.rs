@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use shiori_core::{Priority, Task, TaskError, TaskStatus, validate_title};
 
 #[test]
@@ -36,7 +36,7 @@ fn completion_is_reversible_and_revisions_are_monotonic() {
 #[test]
 fn due_date_is_preserved_as_a_calendar_day() {
     for (year, month, day) in [(2024, 2, 29), (2026, 11, 11), (2030, 12, 31)] {
-        let day = NaiveDate::from_ymd_opt(year, month, day).unwrap();
+        let day = Date::new(year, month, day).unwrap();
         let task = Task::new("Check date", "Inbox", Priority::Low, Some(day)).unwrap();
         assert_eq!(task.due_on, Some(day));
     }
