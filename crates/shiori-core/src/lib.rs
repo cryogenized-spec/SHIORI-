@@ -5,7 +5,7 @@ pub mod inbox;
 pub mod scheduling;
 pub mod spatial;
 
-use jiff::{civil::Date, Timestamp};
+use jiff::{Timestamp, civil::Date};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
@@ -16,7 +16,6 @@ use uuid::Uuid;
 pub fn utc_rfc3339(ts: Timestamp) -> String {
     format!("{}+00:00", ts.to_string().trim_end_matches('Z'))
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
