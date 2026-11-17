@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 shiori-core = { path = "../shiori-core" }
-chrono.workspace = true
+jiff.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
 
