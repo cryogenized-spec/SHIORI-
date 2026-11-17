@@ -140,8 +140,8 @@ fn version_one_database_upgrades_without_losing_existing_or_deleted_tasks() {
                     task.priority.as_str(), task.status.as_str(),
                     task.due_on.map(|day| day.to_string()),
                     utc_rfc3339(task.created_at), utc_rfc3339(task.updated_at),
-                    task.completed_at.map(|at| utc_rfc3339(at)),
-                    task.version, task.deleted_at.map(|at| utc_rfc3339(at))
+                    task.completed_at.map(utc_rfc3339),
+                    task.version, task.deleted_at.map(utc_rfc3339)
                 ],
             )
             .unwrap();
