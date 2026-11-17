@@ -4,7 +4,7 @@
 //! Callers must supply real UTC availability and busy intervals. Timezone-aware
 //! construction of those intervals belongs at the client boundary.
 use crate::Priority;
-use jiff::{civil::Date, SignedDuration, Timestamp};
+use jiff::{SignedDuration, Timestamp, civil::Date};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
@@ -200,7 +200,9 @@ mod tests {
     use super::*;
 
     fn at(hour: u32, minute: u32) -> Timestamp {
-        format!("2026-11-12T{hour:02}:{minute:02}:00Z").parse().unwrap()
+        format!("2026-11-12T{hour:02}:{minute:02}:00Z")
+            .parse()
+            .unwrap()
     }
     fn task(id: &str, priority: Priority, mins: i64) -> PlanningTask {
         PlanningTask {
