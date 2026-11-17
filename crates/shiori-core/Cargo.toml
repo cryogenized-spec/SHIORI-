@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-chrono.workspace = true
+jiff.workspace = true
 serde.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
