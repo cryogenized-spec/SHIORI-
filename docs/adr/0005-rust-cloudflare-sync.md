@@ -1,6 +1,6 @@
 # ADR 0005 — Identity-safe Rust ↔ Cloudflare sync protocol
 
-**Status:** Proposed, 2026-11-15. Read-only comparison implemented. **No import, upload, replication or bidirectional sync is enabled.**
+**Status:** Accepted as staged architecture; S1 identity/tombstone manifest and offline outbox developed 2026-11-18. **No import, upload, replication or bidirectional sync is enabled.**
 
 ## Decision
 
@@ -15,11 +15,11 @@ SHIORI remains local-first. The canonical Rust task engine and its SQLite v3 tas
 
 ### Synchronisation phases
 
-**S0 — present:** `scripts/sync_preview.py` executes a Rust `bridge-dump` and authenticated read-only remote `tasks.list`. It compares stable IDs and reports count-only conflicts; it does not execute any write operation and does not expose notes in its output.
+**S0 — baseline:** `scripts/sync_preview.py` can execute Rust `bridge-dump` and authenticated remote `tasks.list`, reporting counts only. This legacy comparison is retained as a diagnostic for fixture data, but titles/UUID equality cannot authorize merging.
 
-**S1 — preview-only snapshot protocol (in progress):** define signed/permissioned device identity, read-only change manifests, paginated full snapshot hashes, tombstones and snapshot version indicators. Provide `sync.preview` with explicit missing/modified/conflict counts and source evidence. No write before device pairing.
+**S1 — manifest and durable local outbox (implemented as alpha building blocks, pending release verification):** Rust `bridge-manifest` exports content-free task IDs, revisions, statuses, tombstones and prerequisite IDs; the authenticated D1 `sync.manifest.read` operation returns bounded ID-ordered pages with remote tombstones and **no titles or notes**. The counts-only Python `--manifest` comparison detects ambiguous identity/revision and deleted-vs-active conflicts. **These D1 pages are not a consistent snapshot**, do not establish provenance, and cannot support automatic writes. A separate private `tasks.sync.sqlite3` journal now persists explicitly staged full Rust snapshots, stable per-device/event IDs, conflict and acknowledgement state. `sync-stage --if-version` and `sync-queue` never send network requests. Signed device pairing, server sequence/snapshot consistency and reviewed import are still missing.
 
-**S2 — initial explicit upload (one direction):** user approves a reviewed mapping; use idempotent task batches, transactional outbox, chunked transfers, per-item results and rollback journal. Never batch-ack uncommitted writes. Preserve original task IDs and dependency references. Imported cloud records are isolated until linked to a verified owner.
+**S2 — initial explicit upload (one direction; NOT ENABLED):** user approves a reviewed mapping; use idempotent task batches, the staged local outbox, chunked transfers, authenticated per-item receipts and rollback journal. Never batch-ack uncommitted writes. Preserve original task IDs and dependency references. Imported cloud records are isolated until linked to a verified owner.
 
 **S3 — bidirectional replication:** incremental delta cursor, locally queued offline edits, per-field conflict resolution, invalid/dangling edge checks, tombstone propagation and conflict UX. Prohibit same-ID updates with stale revisions; no silent last-write-wins. Treat personal note bodies and attachments as separately permissioned data.
 
