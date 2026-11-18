@@ -128,6 +128,21 @@ enum Command {
         #[arg(long)]
         journal: Option<PathBuf>,
     },
+    /// Mark an event acknowledged only after a separate client verifies a
+    /// matching authenticated remote import receipt. No network is performed.
+    SyncAck {
+        event_id: String,
+        #[arg(long)]
+        remote_id: String,
+        #[arg(long)]
+        remote_revision: i64,
+        #[arg(long)]
+        local_task_id: String,
+        #[arg(long)]
+        local_revision: i64,
+        #[arg(long)]
+        journal: Option<PathBuf>,
+    },
     /// Update only a task's visual placement, guarded by its view revision.
     #[command(hide = true)]
     SpatialSet {
@@ -487,6 +502,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     item.event_id, item.task_id, item.local_version, item.state
                 );
             }
+        }
+        Command::SyncAck {
+            event_id, remote_id, remote_revision, local_task_id, local_revision, journal,
+        } => {
+            let mut outbox=SyncJournal::open(journal.unwrap_or(default_journal_path))?;
+            let changed=outbox.acknowledge(&event_id,&remote_id,remote_revision,
+                                          &local_task_id,local_revision)?;
+            println!("{} verified remote receipt for {} (remote revision {}).",
+                if changed {"Acknowledged"} else {"Already acknowledged"},
+                event_id,remote_revision);
         }
         Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
         Command::BridgeAttention => {
