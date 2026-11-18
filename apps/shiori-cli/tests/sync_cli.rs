@@ -119,3 +119,22 @@ fn only_matching_remote_receipt_can_acknowledge_a_staged_local_event() {
     let shown = stdout(&cli(&db, &["show", id]));
     assert!(shown.contains("Private fixture"));
 }
+
+#[test]
+fn concurrent_canonical_edit_cannot_be_acknowledged_as_synced() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("tasks.sqlite3");
+    let created = stdout(&cli(&db, &["add", "Original fixture"]));
+    let id = created.rsplit_once('[').unwrap().1.trim_end_matches(']').trim();
+    let staged = stdout(&cli(&db, &["sync-stage", id, "--if-version", "1"]));
+    let event = staged.split("local event ").nth(1).unwrap().split_whitespace().next().unwrap();
+    let edited = cli(&db, &["rename", id, "Changed offline"]);
+    assert!(edited.status.success());
+    let stale = cli(&db, &[
+        "sync-ack", event, "--remote-id", id, "--remote-revision", "1",
+        "--local-task-id", id, "--local-revision", "1"
+    ]);
+    assert!(!stale.status.success(), "receipt cannot override a newer canonical edit");
+    assert!(stdout(&cli(&db, &["sync-queue"])).contains("pending"));
+    assert!(stdout(&cli(&db, &["show", id])).contains("Changed offline"));
+}
