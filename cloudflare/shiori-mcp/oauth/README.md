@@ -1,6 +1,6 @@
-# SHIORI OAuth 2.1 pairing and read-only sync (Phase B)
+# SHIORI OAuth 2.1 / PKCE pairing and isolated D1 MCP
 
-**Development status:** two new Workers are staged alongside the existing single-owner bearer alpha; **do not treat the OAuth path as connected to ChatGPT until paired and tested.**
+**Verified 18 November 2026:** the single-owner OAuth issuer and protected MCP resource are live. Owner code approval, explicit read/write consent, ChatGPT read/write pairing and authenticated remote task operations have been exercised. **There is no Rust↔Cloudflare replication or multi-user identity.**
 
 ## Why a separate authorization Worker?
 
@@ -9,7 +9,7 @@ Cloudflare's maintained `@cloudflare/workers-oauth-provider` (pinned to version 
 - `shiori-auth`: authorization issuer, with its own `OAUTH_KV` namespace and a **single-owner approval form**.
 - `shiori-mcp-oauth`: authenticated MCP resource server, calling `shiori-auth` over a Cloudflare Service Binding. Shares the existing isolated `shiori-mcp-alpha` D1 workspace, **not the local Rust database**.
 
-The OAuth resource Worker is **MCP-only**, audience-bound to `/mcp`. The original private-bearer Cloudflare Worker retains the dedicated JSON/HTTP routes. The OAuth resource requires `mcp:read` to discover/read and `mcp:write` for mutations. Its protected handler forwards only validated requests to the same nine Shiori operations that the bearer alpha exposes. The legacy internal auth check receives a random per-request nonce; no persistent bearer secret is shared.
+The OAuth resource Worker is **MCP-only**, audience-bound to `/mcp`. The original private-bearer Cloudflare Worker retains the dedicated JSON/HTTP routes. The OAuth resource requires `mcp:read` to discover/read and `mcp:write` for mutations. Its protected handler forwards only validated requests to the same 22 implemented Shiori operations that the bearer alpha exposes. The legacy internal auth check receives a random per-request nonce; no persistent bearer secret is shared.
 
 ### OAuth sign-in protection
 
@@ -49,7 +49,7 @@ Before any import, you can run a **read-only compare** from your HP OMEN:
 cd ~/SHIORI-
 cargo build --locked -p shiori-cli
 python3 cloudflare/shiori-mcp/scripts/sync_preview.py \
-  --cli target/debug/shiori-cli \
+  --cli target/debug/shiori-cli --manifest \
   --token-file ~/Downloads/shiori-mcp-access-token.txt
 ```
 
@@ -63,7 +63,7 @@ The script reads your local Rust task snapshot and pages through the remote **re
 
 Set `OAUTH_KV` and the owner secret only on `shiori-auth`; set `AUTH_SERVER` service binding and `DB` on `shiori-mcp-oauth`. Never add the approval secret to source control or a Wrangler `vars` entry. Preserve the original `shiori-mcp-alpha` deployment while evaluating the OAuth migration.
 
-**Still missing before production:** a real end-to-end PKCE authorization from a permitted client, revocation test, token audience/scope negative tests on deployed Workers, account-based credential recovery/rotation, and a shared Rust/cloud reconciliation protocol. An OAuth script compiling does not prove that a client can finish login.
+**Still missing before production:** comprehensive revocation/rotation and authorization penetration testing; multi-user credential recovery and authorization; signed/paired device identities; deterministic Rust↔Cloudflare convergence and full offline conflict recovery. Successful owner pairing verifies only the current single-user OAuth alpha.
 
 ## Browser compatibility: OAuth form Origin
 
@@ -71,8 +71,8 @@ On 2026-11-15 a Firefox form submission produced `Invalid form origin.` because 
 
 ## Failed grant diagnostics (Cloudflare 1101)
 
-A November 15 authorization failure exposed an asynchronous error boundary: `fetch()` returned the Promise from `postAuthorize()` without `await`, which allowed rejected authorization promises to escape its `try/catch` and show Cloudflare Error 1101. The handler now awaits all routed handlers. The grant handoff reports a redacted stage identifier (`restore_request`, `lookup_client`, `create_grant`, `validate_redirect`) without logging approval codes or OAuth URLs. The pending consent KV record is only deleted after the authorization grant succeeds. The endpoint must still be tested with a real consenting client to prove the full flow; unit tests alone are not sufficient.
+A November 15 authorization failure exposed an asynchronous error boundary: `fetch()` returned the Promise from `postAuthorize()` without `await`, which allowed rejected authorization promises to escape its `try/catch` and show Cloudflare Error 1101. The handler now awaits all routed handlers. The grant handoff reports a redacted stage identifier (`restore_request`, `lookup_client`, `create_grant`, `validate_redirect`) without logging approval codes or OAuth URLs. The pending consent KV record is only deleted after the authorization grant succeeds. The failure boundary was later exercised successfully with a real consenting owner connection; unit tests alone remain insufficient for ongoing security validation.
 
 ## 2026-11-15: authorization redirect header fix
 
-After Shiori had successfully accepted the owner code, Cloudflare returned a generic `Authorization service unavailable` page. The post-authorization handler constructed a redirect with `Response.redirect()`, then attempted to mutate its **immutable** headers to clear the approval cookie. That throws `TypeError` per the Fetch response-header guard, *after* the OAuth grant work. The `owner-redirect.js` helper now constructs a `new Response(null, {status:302, headers:{...}})` with `Location`, secure cookie expiration, and no-store already attached. The pending KV record is deleted only after response creation. Regression tests reproduce the original `TypeError` and verify the correct 302/cookie response. A fresh owner authorization remains necessary to validate full end-to-end pairing; no existing tokens or approval secret were changed.
+After Shiori had successfully accepted the owner code, Cloudflare returned a generic `Authorization service unavailable` page. The post-authorization handler constructed a redirect with `Response.redirect()`, then attempted to mutate its **immutable** headers to clear the approval cookie. That throws `TypeError` per the Fetch response-header guard, *after* the OAuth grant work. The `owner-redirect.js` helper now constructs a `new Response(null, {status:302, headers:{...}})` with `Location`, secure cookie expiration, and no-store already attached. The pending KV record is deleted only after response creation. Regression tests reproduce the original `TypeError` and verify the correct 302/cookie response. Full owner pairing was subsequently completed; no existing tokens or approval secret were changed by this specific redirect fix.
