@@ -305,14 +305,24 @@ async function run(id,arg,env){
   const proposal_id=crypto.randomUUID();
   const expires_at=new Date(Date.now()+15*60*1000).toISOString();
   const result={changed:true,proposal_id,expires_at,task_id:a.task_id,local_version:1};
-  try{return await writeOnce(env,w,id,a.idempotency_key,fingerprint,result,
-   db.prepare("INSERT INTO sync_import_previews(proposal_id,workspace_id,device_id,event_id,task_id,local_version,payload_sha256,expires_at) VALUES(?,?,?,?,?,?,?,?)")
-    .bind(proposal_id,w,a.device_id,a.event_id,a.task_id,1,a.payload_sha256,expires_at));}
-  catch(err){
+  let out;
+  try{
+   out=await db.batch([
+    db.prepare("INSERT INTO sync_import_previews(proposal_id,workspace_id,device_id,event_id,task_id,local_version,payload_sha256,expires_at) "+
+      "SELECT ?,?,?,?,?,?,?,? WHERE EXISTS "+
+      "(SELECT 1 FROM sync_devices WHERE workspace_id=? AND device_id=? AND revoked_at IS NULL)")
+     .bind(proposal_id,w,a.device_id,a.event_id,a.task_id,1,a.payload_sha256,expires_at,w,a.device_id),
+    db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,request_hash,result_json,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
+     .bind(w,id,a.idempotency_key,fingerprint,JSON.stringify(result),new Date().toISOString())
+   ]);
+  }catch(err){
    const replay=await duplicate(db,w,id,a.idempotency_key,fingerprint);
    if(replay)return replay;
    E(409,"CONFLICT","Unable to create an import proposal");
   }
+  if(out[0].meta.changes!==1 || out[1].meta.changes!==1)
+   E(403,"FORBIDDEN","Device was revoked before the preview transaction committed");
+  return result;
  }
  if(id==="sync.import.apply"){
   if(a.owner_approved!==true)E(412,"PRECONDITION_REQUIRED","Owner must explicitly approve the exact proposed import");
@@ -341,7 +351,9 @@ async function run(id,arg,env){
   let out;
   try{
    out=await db.batch([
-    db.prepare("UPDATE sync_import_previews SET used_at=? WHERE proposal_id=? AND workspace_id=? AND used_at IS NULL AND expires_at>?")
+    db.prepare("UPDATE sync_import_previews SET used_at=? WHERE proposal_id=? AND workspace_id=? AND used_at IS NULL AND expires_at>? "+
+      "AND EXISTS (SELECT 1 FROM sync_devices d WHERE d.workspace_id=sync_import_previews.workspace_id "+
+      "AND d.device_id=sync_import_previews.device_id AND d.revoked_at IS NULL)")
       .bind(now,a.proposal_id,w,now),
     db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,notes,project,priority,status,version,created_at,updated_at,deleted_at) SELECT ?,?,?,?,?,?,?,1,?,?,NULL WHERE changes()=1")
       .bind(t.id,w,t.title,t.notes,t.project,t.priority,t.status,t.created_at,t.updated_at),
