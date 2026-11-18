@@ -87,6 +87,7 @@ def init_journal(path: Path) -> sqlite3.Connection:
         # v1 -> v2 is additive: preserve all events, checkpoints and the
         # required-review flag while adding a *metadata-only* baseline.
         if version in (0,1):
+            con.execute("BEGIN IMMEDIATE")
             with con:
                 con.execute("""CREATE TABLE pull_baseline_meta (
                     workspace_id TEXT PRIMARY KEY,
