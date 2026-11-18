@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import {createHash} from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import worker from "../src/worker.js";
 
@@ -61,7 +62,7 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,23);
+  assert.equal(list.data.result.tools.length,27);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
@@ -123,7 +124,7 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
 test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,23);
+  assert.equal(available.length,27);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -239,7 +240,7 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
 test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
  const e=env();
  const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
- assert.equal(expected.operations.length,116);
+ assert.equal(expected.operations.length,120);
  const listed=await call(e,"/mcp",rpc("resources/list",{}));
  assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
  const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
@@ -263,8 +264,8 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
  const first=await callCatalog({limit:7});
  const a=first.data.result.structuredContent;
- assert.equal(a.registry_total,116);
- assert.equal(a.total,116);
+ assert.equal(a.registry_total,120);
+ assert.equal(a.total,120);
  assert.equal(a.items.length,7);
  assert.equal(a.next_cursor,"7");
  assert(a.items[0].inputSchema);
@@ -276,7 +277,7 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const planned=await callCatalog({availability:"planned",limit:500});
  assert.equal(planned.data.result.structuredContent.total,93);
  const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
- assert.equal(implemented.data.result.structuredContent.total,23);
+ assert.equal(implemented.data.result.structuredContent.total,27);
  const item=await callCatalog({operation_id:"comments.delete"});
  assert.equal(item.data.result.structuredContent.items.length,1);
  assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
@@ -290,7 +291,7 @@ test("planned operations are discoverable but never callable",async()=>{
  const e=env();
  const list=await call(e,"/mcp",rpc("tools/list",{}));
  const names=list.data.result.tools.map(x=>x.name);
- assert.equal(names.length,23);
+ assert.equal(names.length,27);
  assert(!names.includes("shiori_comments_delete"));
  const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_comments_delete",arguments:{
   workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
@@ -308,9 +309,9 @@ test("capabilities advertise catalog URI and actual callable tool count",async()
  const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
    arguments:{workspace_id:"personal"}}));
  const c=caps.data.result.structuredContent.capabilities;
- assert.equal(c.registry_total,116);
+ assert.equal(c.registry_total,120);
  assert.equal(c.planned_total,93);
- assert.equal(c.implemented_total,23);
+ assert.equal(c.implemented_total,27);
  assert.equal(c.registry_uri,"shiori://operations/v1");
 });
 
@@ -536,4 +537,144 @@ test("S1 manifest is private and its pagination rejects invalid inputs",async()=
  assert.equal(result.data.result.isError,undefined);
  assert.equal(result.data.result.structuredContent.local_rust_sync,false);
  assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency").get().n,0,"read must not create mutations");
+});
+
+
+function importFixture(){
+ const device_id="22222222-2222-4222-8222-222222222222";
+ const task_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+ const event_id="sync1:"+device_id+":"+task_id+":1";
+ const envelope={schema_version:1,event_id,origin_device_id:device_id,
+   workspace_id:"personal",
+   task:{id:task_id,title:"[DUMMY] Native owner-approved first import",
+     notes:"Fixture note intentionally preserved",project:"Fixture",priority:"high",
+     status:"todo",due_on:"2026-11-20",estimate_minutes:30,assignee_id:"local",
+     created_at:"2026-11-18T08:00:00Z",updated_at:"2026-11-18T08:00:00Z",
+     completed_at:null,version:1,deleted_at:null},
+   depends_on:[]};
+ const payload_json=JSON.stringify(envelope);
+ const payload_sha256=createHash("sha256").update(payload_json).digest("hex");
+ return {device_id,task_id,event_id,envelope,payload_json,payload_sha256};
+}
+async function pairFixture(e,fixture=importFixture(),key="pair-00001"){
+ return call(e,"/api/v1/ops/sync.device.pair",request(key,{
+  device_id:fixture.device_id,confirm_pairing:true
+ }));
+}
+async function previewFixture(e,fixture=importFixture(),key="preview-0001"){
+ return call(e,"/api/v1/ops/sync.import.preview",request(key,{
+  device_id:fixture.device_id,task_id:fixture.task_id,event_id:fixture.event_id,
+  local_version:1,payload_sha256:fixture.payload_sha256
+ }));
+}
+test("S2 refuses unpaired or unapproved uploads and never sends title in preview",async()=>{
+ const e=env(),f=importFixture();
+ const withoutPair=await previewFixture(e,f);
+ assert.equal(withoutPair.status,403);
+ assert.equal((await call(e,"/api/v1/ops/sync.device.pair",request("pair-denied-1",{device_id:f.device_id,confirm_pairing:false}))).status,412);
+ assert.equal((await call(e,"/api/v1/ops/sync.device.pair",request("pair-invalid-1",{device_id:"not-uuid",confirm_pairing:true}))).status,400);
+ assert.equal((await pairFixture(e,f)).status,200);
+ const replay=await pairFixture(e,f);
+ assert.equal(replay.status,200,"same owner pairing key is idempotent");
+ assert.equal((await pairFixture(e,f,"pair-newkey")).status,409);
+ const preview=await previewFixture(e,f,"preview-good-1");
+ assert.equal(preview.status,200,JSON.stringify(preview.data));
+ assert(preview.data.data.proposal_id);
+ assert(!JSON.stringify(preview.data).includes(f.envelope.task.title));
+ const stored=e.DB.db.prepare("SELECT * FROM sync_import_previews WHERE task_id=?").get(f.task_id);
+ assert(!JSON.stringify(stored).includes(f.envelope.task.notes));
+ assert.equal(stored.payload_sha256,f.payload_sha256);
+ assert.equal((await previewFixture(e,f,"preview-good-1")).data.data.proposal_id,preview.data.data.proposal_id);
+ const denied=await call(e,"/api/v1/ops/sync.import.apply",request("import-denied-1",{
+   proposal_id:preview.data.data.proposal_id,payload_json:f.payload_json,owner_approved:false
+ }));
+ assert.equal(denied.status,412);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM remote_tasks").get().n,0);
+});
+
+test("S2 commits a lossless new native task, proves receipt and avoids replay duplication",async()=>{
+ const e=env(),f=importFixture();
+ assert.equal((await pairFixture(e,f)).status,200);
+ const preview=await previewFixture(e,f);
+ assert.equal(preview.status,200);
+ const args=request("apply-demo-01",{
+    proposal_id:preview.data.data.proposal_id,payload_json:f.payload_json,owner_approved:true});
+ const result=await call(e,"/api/v1/ops/sync.import.apply",args);
+ assert.equal(result.status,200,JSON.stringify(result.data));
+ const receipt=result.data.data;
+ assert.deepEqual(
+   {resource_id:receipt.resource_id,revision:receipt.revision,source_event_id:receipt.source_event_id,source_version:receipt.source_version,source_payload_sha256:receipt.source_payload_sha256},
+   {resource_id:f.task_id,revision:1,source_event_id:f.event_id,source_version:1,source_payload_sha256:f.payload_sha256}
+ );
+ const source=e.DB.db.prepare("SELECT * FROM sync_imports WHERE event_id=?").get(f.event_id);
+ assert.equal(source.payload_json,f.payload_json,"all native fields must be retained");
+ assert.equal(source.device_id,f.device_id);
+ const remote=await call(e,"/api/v1/ops/tasks.get",{workspace_id:"personal",task_id:f.task_id});
+ assert.equal(remote.status,200);
+ assert.equal(remote.data.data.item.id,f.task_id);
+ assert.equal(remote.data.data.item.body,f.envelope.task.notes);
+ assert.equal(remote.data.data.item.project,f.envelope.task.project);
+ const receiptResult=await call(e,"/api/v1/ops/sync.import.receipt.read",{workspace_id:"personal",event_id:f.event_id});
+ assert.equal(receiptResult.status,200);
+ assert.equal(receiptResult.data.data.receipt_id,receipt.receipt_id);
+ assert.equal(receiptResult.data.data.remote_modified,false);
+ assert(!JSON.stringify(receiptResult.data.data).includes("Fixture note"));
+ const repeat=await call(e,"/api/v1/ops/sync.import.apply",args);
+ assert.deepEqual(repeat.data.data,receipt);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM sync_imports").get().n,1);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM remote_tasks").get().n,1);
+ const differentKey=await call(e,"/api/v1/ops/sync.import.apply",{...args,idempotency_key:"different-apply"});
+ assert.equal(differentKey.status,409);
+ const changed=await call(e,"/api/v1/ops/tasks.status.set",request("change-after-1",{task_id:f.task_id,status:"in_progress",expected_revision:1}));
+ assert.equal(changed.status,200);
+ const after=await call(e,"/api/v1/ops/sync.import.receipt.read",{workspace_id:"personal",event_id:f.event_id});
+ assert.equal(after.data.data.remote_revision,2);
+ assert.equal(after.data.data.remote_modified,true,"remote edits break initial convergence");
+});
+
+test("S2 rejects changed payload, bad schema, dependencies, expired preview and remote ID collisions",async()=>{
+ const e=env(),f=importFixture();
+ await pairFixture(e,f);
+ const preview=await previewFixture(e,f);
+ const proposal_id=preview.data.data.proposal_id;
+ const invalidHash=await call(e,"/api/v1/ops/sync.import.apply",request("wrong-hash-1",{
+  proposal_id,owner_approved:true,payload_json:f.payload_json+" "
+ }));
+ assert.equal(invalidHash.status,409);
+ const before=e.DB.db.prepare("SELECT * FROM sync_import_previews WHERE proposal_id=?").get(proposal_id);
+ assert.equal(before.used_at,null);
+ const badEnvelope={...f.envelope,depends_on:["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]};
+ const payload_json=JSON.stringify(badEnvelope);
+ const payload_sha256=createHash("sha256").update(payload_json).digest("hex");
+ const anotherPreview=await call(e,"/api/v1/ops/sync.import.preview",request("preview-changed-1",{
+  device_id:f.device_id,task_id:f.task_id,event_id:f.event_id,local_version:1,payload_sha256
+ }));
+ assert.equal(anotherPreview.status,200);
+ const bad=await call(e,"/api/v1/ops/sync.import.apply",request("apply-dependent-1",{
+   proposal_id:anotherPreview.data.data.proposal_id,payload_json,owner_approved:true
+ }));
+ assert.equal(bad.status,400);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM remote_tasks").get().n,0);
+ e.DB.db.prepare("UPDATE sync_import_previews SET expires_at=? WHERE proposal_id=?").run("2020-01-01T00:00:00Z",proposal_id);
+ const expired=await call(e,"/api/v1/ops/sync.import.apply",request("apply-expired-1",{
+  proposal_id,payload_json:f.payload_json,owner_approved:true
+ }));
+ assert.equal(expired.status,409);
+ // Task IDs are globally unique even across workspaces and soft deletes.
+ e.DB.db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?)")
+  .run(f.task_id,"different", "Existing historical task","2026-01-01Z","2026-01-01Z","2026-01-02Z");
+ const collision=await previewFixture(e,f,"preview-collision");
+ assert.equal(collision.status,409);
+ assert.equal(e.DB.db.prepare("SELECT title FROM remote_tasks WHERE id=?").get(f.task_id).title,"Existing historical task");
+});
+test("S2 receipt is scoped and read-only OAuth is not allowed to mutate pairing or import",async()=>{
+ const e=env(),f=importFixture();
+ assert.equal((await call(e,"/api/v1/ops/sync.import.receipt.read",{workspace_id:"personal",event_id:f.event_id})).status,404);
+ assert.equal((await call(e,"/api/v1/ops/sync.device.pair",request("invalid-ws-1",{
+  device_id:f.device_id,confirm_pairing:true,workspace_id:"other"
+ }))).status,403);
+ const manifest=await call(e,"/mcp",rpc("tools/list",{}));
+ for(const name of ["shiori_sync_device_pair","shiori_sync_import_preview","shiori_sync_import_apply","shiori_sync_import_receipt_read"])
+   assert(manifest.data.result.tools.some(t=>t.name===name));
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM sync_imports").get().n,0);
 });

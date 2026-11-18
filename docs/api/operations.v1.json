@@ -105,7 +105,7 @@
     {
       "id": "system.operations.list",
       "phase": "A",
-      "description": "List the complete 113-operation schema registry with pagination; planned operations are explicitly non-executable",
+      "description": "List the complete 120-operation schema registry with pagination; planned operations are explicitly non-executable",
       "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
@@ -1057,6 +1057,465 @@
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
       "release_evidence": "Read-only D1 fake-integration tests and authenticated live confirmation required. Cursor-ordered pages are explicitly not an atomic snapshot."
+    },
+    {
+      "id": "sync.device.pair",
+      "phase": "B",
+      "description": "Explicitly pair one local Rust device with this owner-authenticated workspace. Device IDs are not bearer credentials.",
+      "availability": "cloudflare_alpha",
+      "effect": "write",
+      "approval": "contextual",
+      "scope": "sync:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.device.pair"
+      },
+      "mcp_tool": "shiori_sync_device_pair",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "device_id",
+          "confirm_pairing",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "confirm_pairing": {
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.device.pair"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed",
+              "device_id",
+              "paired_at"
+            ],
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "device_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "paired_at": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "S2 first-import pilot with fixture-only D1 tests; owner pairing, consent, exact-hash receipt and collision rejection required. No automatic sync."
+    },
+    {
+      "id": "sync.import.preview",
+      "phase": "B",
+      "description": "Owner-authenticated content-free preview proposal for one unlinked local task at revision 1; no task data is uploaded.",
+      "availability": "cloudflare_alpha",
+      "effect": "write",
+      "approval": "contextual",
+      "scope": "sync:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.import.preview"
+      },
+      "mcp_tool": "shiori_sync_import_preview",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "device_id",
+          "task_id",
+          "event_id",
+          "local_version",
+          "payload_sha256",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 160
+          },
+          "local_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1
+          },
+          "payload_sha256": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.import.preview"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed",
+              "proposal_id",
+              "expires_at",
+              "task_id",
+              "local_version"
+            ],
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "proposal_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "expires_at": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "task_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "local_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "S2 first-import pilot with fixture-only D1 tests; owner pairing, consent, exact-hash receipt and collision rejection required. No automatic sync."
+    },
+    {
+      "id": "sync.import.apply",
+      "phase": "B",
+      "description": "Import exactly one reviewed, new, dependency-free Rust task from an unexpired preview; explicit approval required and existing task IDs cannot be replaced.",
+      "availability": "cloudflare_alpha",
+      "effect": "write",
+      "approval": "contextual",
+      "scope": "sync:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.import.apply"
+      },
+      "mcp_tool": "shiori_sync_import_apply",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "proposal_id",
+          "payload_json",
+          "owner_approved",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "proposal_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "payload_json": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 16000
+          },
+          "owner_approved": {
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.import.apply"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed",
+              "receipt_id",
+              "resource_id",
+              "revision",
+              "source_event_id",
+              "source_version",
+              "source_payload_sha256"
+            ],
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "receipt_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "resource_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1
+              },
+              "source_event_id": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 160
+              },
+              "source_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1
+              },
+              "source_payload_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "S2 first-import pilot with fixture-only D1 tests; owner pairing, consent, exact-hash receipt and collision rejection required. No automatic sync."
+    },
+    {
+      "id": "sync.import.receipt.read",
+      "phase": "B",
+      "description": "Read provenance and remote revision of an existing owner-approved import, without returning stored task content.",
+      "availability": "cloudflare_alpha",
+      "effect": "read",
+      "approval": "none",
+      "scope": "sync:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.import.receipt.read"
+      },
+      "mcp_tool": "shiori_sync_import_receipt_read",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "event_id"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 160
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.import.receipt.read"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "receipt_id",
+              "resource_id",
+              "source_event_id",
+              "source_version",
+              "remote_revision",
+              "source_payload_sha256",
+              "remote_modified"
+            ],
+            "properties": {
+              "receipt_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "resource_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "source_event_id": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 160
+              },
+              "source_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1
+              },
+              "remote_revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source_payload_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              },
+              "remote_modified": {
+                "type": "boolean"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "S2 first-import pilot with fixture-only D1 tests; owner pairing, consent, exact-hash receipt and collision rejection required. No automatic sync."
     },
     {
       "id": "tasks.dependencies.add",
@@ -10323,7 +10782,7 @@
       }
     }
   ],
-  "notes": "Registry describes all 116 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
+  "notes": "Registry describes all 120 operation contracts (27 isolated Cloudflare alpha tools, 93 planned); S2 allows only approved first import of a new dependency-free revision-1 Rust task. It is not bidirectional synchronization.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",
