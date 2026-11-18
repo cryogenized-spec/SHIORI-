@@ -130,6 +130,8 @@ def verify_receipt(receipt: dict, event_id: str, task_id: str, digest: str) -> N
 
 def acknowledge_local(cli: Path, canonical_db: Path, journal: Path,
                       event_id: str, task_id: str, revision: int) -> str:
+    if not canonical_db.is_file():
+        raise SyncPilotError("Canonical local database is missing; verified remote receipt remains recoverable")
     args = [
         str(cli), "--database", str(canonical_db),
         "sync-ack", event_id, "--remote-id", task_id,
