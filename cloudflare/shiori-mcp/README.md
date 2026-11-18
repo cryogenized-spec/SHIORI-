@@ -1,6 +1,6 @@
 # SHIORI Cloudflare MCP — single-owner alpha (18 November 2026)
 
-**Verified live 18 November 2026:** 29 runnable operations, 122 versioned contracts and 93 planned. S2 owner-reviewed initial import and S3 content-free D1 change feed and atomic bounded snapshot are deployed. No canonical Rust ↔ D1 task synchronization exists. Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
+**Verified live 18 November 2026:** 31 runnable operations, 124 versioned contracts and 93 planned. New owner-scoped device status/revoke methods are deployed; they prevent future S2 imports from revoked paired identities without deleting records or revoking user OAuth tokens. S2 owner-reviewed initial import and S3 content-free D1 change feed and atomic bounded snapshot are deployed. No canonical Rust ↔ D1 task synchronization exists. Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
 
 ## S2/S3 synchronization boundary
 
@@ -81,8 +81,8 @@ Tests use a disposable in-memory SQLite database and do not touch Cloudflare or 
 
 ## Complete operation schema discovery
 
-Shiori has **122 operation contracts** in `docs/api/operations.v1.json`.
-The Cloudflare MCP makes **all 122 full contracts discoverable** without
+Shiori has **124 operation contracts** in `docs/api/operations.v1.json`.
+The Cloudflare MCP makes **all 124 full contracts discoverable** without
 presenting unimplemented commands as runnable. The registry includes
 input and output JSON Schemas, operation ID, scope, effect, approval
 requirements, phase and actual availability.
@@ -96,7 +96,7 @@ requirements, phase and actual availability.
   access with `workspace_id`, `cursor`, `limit`, and optional
   `availability` or exact `operation_id` lookup. It returns full contracts,
   not merely names.
-- `tools/list` deliberately advertises **only the 29 runnable operations**:
+- `tools/list` deliberately advertises **only the 31 runnable operations**:
   the original operations plus guarded CRUD, graph and spatial operations. Unsupported operations
   are never executed; they cannot be called merely because their schema
   exists in the catalog.
