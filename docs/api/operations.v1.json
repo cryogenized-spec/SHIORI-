@@ -1672,6 +1672,148 @@
       "release_evidence": "Fixture-based trigger tests for all task and edge changes; bounded high-water pagination and primary session; old remote tasks require a baseline manifest. No actual client sync."
     },
     {
+      "id": "sync.baseline.read",
+      "phase": "B",
+      "description": "Read one bounded, atomically paired D1 metadata snapshot (task and edge identities, including tombstones) plus its exact append-only feed high-water sequence from a single primary SQLite SELECT. No task content or Rust writes.",
+      "availability": "cloudflare_alpha",
+      "effect": "read",
+      "approval": "none",
+      "scope": "sync:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.baseline.read"
+      },
+      "mcp_tool": "shiori_sync_baseline_read",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.baseline.read"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "items",
+              "edges",
+              "cutoff",
+              "task_count",
+              "edge_count",
+              "consistent_snapshot",
+              "local_rust_sync",
+              "automatic_apply"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "version",
+                    "status",
+                    "updated_at",
+                    "deleted_at"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "deleted_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "edges": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "task_id",
+                    "depends_on_id"
+                  ],
+                  "properties": {
+                    "task_id": {
+                      "type": "string"
+                    },
+                    "depends_on_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "cutoff": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "task_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "edge_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "consistent_snapshot": {
+                "const": true
+              },
+              "local_rust_sync": {
+                "const": false
+              },
+              "automatic_apply": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Single primary-pinned SQL SELECT with bounded snapshot and high-water cutoff; fake D1 race/cursor, deleted, overflow and cross-workspace tests. Local tasks remain untouched."
+    },
+    {
       "id": "tasks.dependencies.add",
       "phase": "A",
       "description": "Add one real prerequisite between two active remote tasks, with cycle protection and revision checks [isolated Cloudflare D1, not synced with Rust].",
@@ -10936,7 +11078,7 @@
       }
     }
   ],
-  "notes": "Registry describes all 121 contracts (28 implemented Cloudflare alpha, 93 planned). S3 adds a content-free bounded change feed; it is not a historical snapshot or bidirectional synchronization.",
+  "notes": "Registry describes 122 operation contracts (29 isolated D1 alpha tools, 93 planned). S3 adds an atomic bounded metadata baseline paired to a change-feed high water mark; neither task-content transfer nor automatic local Rust sync is enabled.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",

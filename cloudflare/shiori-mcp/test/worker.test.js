@@ -62,7 +62,7 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,28);
+  assert.equal(list.data.result.tools.length,29);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
@@ -124,7 +124,7 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
 test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,28);
+  assert.equal(available.length,29);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -240,7 +240,7 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
 test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
  const e=env();
  const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
- assert.equal(expected.operations.length,121);
+ assert.equal(expected.operations.length,122);
  const listed=await call(e,"/mcp",rpc("resources/list",{}));
  assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
  const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
@@ -264,8 +264,8 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
  const first=await callCatalog({limit:7});
  const a=first.data.result.structuredContent;
- assert.equal(a.registry_total,121);
- assert.equal(a.total,121);
+ assert.equal(a.registry_total,122);
+ assert.equal(a.total,122);
  assert.equal(a.items.length,7);
  assert.equal(a.next_cursor,"7");
  assert(a.items[0].inputSchema);
@@ -277,7 +277,7 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const planned=await callCatalog({availability:"planned",limit:500});
  assert.equal(planned.data.result.structuredContent.total,93);
  const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
- assert.equal(implemented.data.result.structuredContent.total,28);
+ assert.equal(implemented.data.result.structuredContent.total,29);
  const item=await callCatalog({operation_id:"comments.delete"});
  assert.equal(item.data.result.structuredContent.items.length,1);
  assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
@@ -291,7 +291,7 @@ test("planned operations are discoverable but never callable",async()=>{
  const e=env();
  const list=await call(e,"/mcp",rpc("tools/list",{}));
  const names=list.data.result.tools.map(x=>x.name);
- assert.equal(names.length,28);
+ assert.equal(names.length,29);
  assert(!names.includes("shiori_comments_delete"));
  const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_comments_delete",arguments:{
   workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
@@ -309,9 +309,9 @@ test("capabilities advertise catalog URI and actual callable tool count",async()
  const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
    arguments:{workspace_id:"personal"}}));
  const c=caps.data.result.structuredContent.capabilities;
- assert.equal(c.registry_total,121);
+ assert.equal(c.registry_total,122);
  assert.equal(c.planned_total,93);
- assert.equal(c.implemented_total,28);
+ assert.equal(c.implemented_total,29);
  assert.equal(c.registry_uri,"shiori://operations/v1");
 });
 
@@ -797,4 +797,96 @@ test("S3 scope boundary and non-task workspaces do not leak D1 changes",async()=
  assert.equal(rpcRead.status,200);
  assert.equal(rpcRead.data.result.isError,undefined);
  assert.equal(rpcRead.data.result.structuredContent.local_rust_sync,false);
+});
+
+
+test("S3 atomic baseline pairs task/tombstone/edge metadata with one exact feed cutoff",async()=>{
+ const e=env();
+ const empty=await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"personal"});
+ assert.equal(empty.status,200,JSON.stringify(empty.data));
+ assert.deepEqual(empty.data.data.items,[]);
+ assert.deepEqual(empty.data.data.edges,[]);
+ assert.equal(empty.data.data.cutoff,0);
+ assert.equal(empty.data.data.consistent_snapshot,true);
+ assert.equal(empty.data.data.automatic_apply,false);
+ assert.equal(empty.data.data.local_rust_sync,false);
+ const a=(await call(e,"/api/v1/ops/tasks.create",
+   request("baseline-create-a",{title:"SECRET private title",text:"SECRET private notes"}))).data.data.resource_id;
+ const b=(await call(e,"/api/v1/ops/tasks.create",
+   request("baseline-create-b",{title:"Another secret"}))).data.data.resource_id;
+ const edge=await call(e,"/api/v1/ops/tasks.dependencies.add",request("baseline-edge-b-a",{
+   task_id:b,depends_on_id:a,expected_revision:1
+ }));
+ assert.equal(edge.status,200,JSON.stringify(edge.data));
+ const deleted=await call(e,"/api/v1/ops/tasks.delete",request("baseline-del-a",{
+   task_id:a,expected_revision:1
+ }));
+ assert.equal(deleted.status,200);
+ const snap=await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"personal"});
+ assert.equal(snap.status,200,JSON.stringify(snap.data));
+ const data=snap.data.data;
+ assert.equal(data.task_count,2);
+ assert.equal(data.edge_count,1);
+ assert.equal(data.cutoff,5,"dependency creation also bumps the dependent task revision");
+ assert.deepEqual(data.items.map(x=>x.id),[a,b].sort());
+ assert.equal(data.items.find(x=>x.id===a).version,2);
+ assert(data.items.find(x=>x.id===a).deleted_at);
+ assert.deepEqual(data.edges,[{task_id:b,depends_on_id:a}]);
+ assert.deepEqual(Object.keys(data.items[0]).sort(),
+   ["id","version","status","updated_at","deleted_at"].sort());
+ assert(!JSON.stringify(data).includes("SECRET"),"No titles, notes or private task contents");
+ // A later event is covered by starting S3 delta reads AT the snapshot cutoff.
+ const changed=await call(e,"/api/v1/ops/tasks.status.set",request("baseline-change-b",{
+   task_id:b,status:"in_progress",expected_revision:2
+ }));
+ assert.equal(changed.status,200);
+ const delta=await call(e,"/api/v1/ops/sync.changes.read",{
+   workspace_id:"personal",cursor:data.cutoff,limit:100
+ });
+ assert.equal(delta.status,200);
+ assert.deepEqual(delta.data.data.changes.map(x=>x.seq),[6]);
+ assert.equal(delta.data.data.changes[0].task_id,b);
+ assert.equal(delta.data.data.changes[0].kind,"task.update");
+});
+
+test("S3 baseline fails closed for oversized or dangling graphs without truncation",async()=>{
+ const e=env();
+ const d=e.DB.db;
+ for(let i=0;i<101;i++){
+  d.prepare("INSERT INTO remote_tasks(id,workspace_id,title,created_at,updated_at) VALUES(?,?,?,?,?)")
+   .run("fixture-"+String(i).padStart(3,"0"),"personal","Private sample "+i,
+     "2026-11-18T00:00:00Z","2026-11-18T00:00:00Z");
+ }
+ const large=await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"personal"});
+ assert.equal(large.status,413);
+ assert.equal(large.data.error.code,"UNAVAILABLE");
+ d.prepare("DELETE FROM remote_tasks WHERE id=?").run("fixture-100");
+ const normal=await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"personal"});
+ assert.equal(normal.status,200);
+ assert.equal(normal.data.data.task_count,100);
+ const id="fixture-001";
+ d.prepare("INSERT INTO remote_dependencies(workspace_id,task_id,depends_on_id) VALUES(?,?,?)")
+  .run("personal",id,"missing-dependency");
+ const dangling=await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"personal"});
+ assert.equal(dangling.status,409);
+ assert.equal(dangling.data.error.code,"CONFLICT");
+ assert.equal(d.prepare("SELECT COUNT(*) AS n FROM remote_tasks WHERE workspace_id='personal'").get().n,100);
+});
+
+test("S3 baseline respects OAuth read-only scopes and cross-workspace isolation",async()=>{
+ const e=env();
+ e.DB.db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,created_at,updated_at) VALUES(?,?,?,?,?)")
+  .run("other-secret","another","SECRET other workspace",
+    "2026-11-18T00:00:00Z","2026-11-18T00:00:00Z");
+ e.SHIO_AUTH_MODE="oauth";e.SHIO_OAUTH_SCOPES=["mcp:read"];
+ const rpcCall=await call(e,"/mcp",rpc("tools/call",{
+   name:"shiori_sync_baseline_read",arguments:{workspace_id:"personal"}
+ }));
+ assert.equal(rpcCall.status,200,JSON.stringify(rpcCall.data));
+ assert.equal(rpcCall.data.result.structuredContent.consistent_snapshot,true);
+ assert.equal(rpcCall.data.result.structuredContent.task_count,0);
+ assert.equal((await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"another"})).status,403);
+ assert.equal((await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"personal"},{auth:null})).status,401);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency").get().n,0,
+   "Snapshot read must be entirely nonmutating");
 });

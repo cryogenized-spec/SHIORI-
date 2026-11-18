@@ -25,6 +25,18 @@ def page(events, cutoff, next_cursor=None):
             "next_cursor":next_cursor,"baseline_required":True,"local_rust_sync":False}
 
 
+def baseline_sample(cutoff=7):
+    return {"items":[
+        {"id":"task-a","version":2,"status":"todo",
+         "updated_at":"2026-11-18T08:00:00Z","deleted_at":None},
+        {"id":"task-b","version":3,"status":"done",
+         "updated_at":"2026-11-18T08:02:00Z",
+         "deleted_at":"2026-11-18T08:03:00Z"}],
+        "edges":[{"task_id":"task-b","depends_on_id":"task-a"}],
+        "cutoff":cutoff,"task_count":2,"edge_count":1,
+        "consistent_snapshot":True,"local_rust_sync":False,"automatic_apply":False}
+
+
 class PullJournalTests(unittest.TestCase):
     def setUp(self):
         self.folder=tempfile.TemporaryDirectory()
@@ -40,7 +52,7 @@ class PullJournalTests(unittest.TestCase):
         self.assertEqual(self.file.stat().st_mode & 0o077,0)
         self.assertEqual(pull.state(self.journal),(0,None,True,0))
         self.assertEqual(self.canonical.read_bytes(),b"CANONICAL USER DATA IS OFF LIMITS")
-        self.assertEqual(self.journal.execute("PRAGMA user_version").fetchone()[0],1)
+        self.assertEqual(self.journal.execute("PRAGMA user_version").fetchone()[0],2)
 
     def test_one_read_only_poll_persists_changelog_without_applying_tasks(self):
         feed=page([event(1,"task.insert"),event(2)],2)
@@ -143,6 +155,110 @@ class PullJournalTests(unittest.TestCase):
         with patch.object(pull,"urlopen") as opener:
             self.assertEqual(pull.state(self.journal),(0,None,True,0))
             opener.assert_not_called()
+
+
+    def test_atomic_baseline_sets_first_delta_cursor_without_importing_tasks(self):
+        snapshot=baseline_sample(7)
+        self.assertEqual(pull.persist_baseline(self.journal,snapshot),7)
+        self.assertEqual(pull.state(self.journal),(7,None,True,0))
+        self.assertEqual(pull.baseline_info(self.journal),(7,2,1))
+        self.assertEqual(self.journal.execute("SELECT COUNT(*) FROM pull_baseline_tasks").fetchone()[0],2)
+        self.assertEqual(self.journal.execute("SELECT COUNT(*) FROM pull_baseline_edges").fetchone()[0],1)
+        self.assertEqual(self.canonical.read_bytes(),b"CANONICAL USER DATA IS OFF LIMITS")
+        self.journal.close()
+        self.journal=pull.init_journal(self.file)
+        self.assertEqual(pull.baseline_info(self.journal),(7,2,1))
+        delta=page([event(8,"task.update","task-a")],8)
+        with patch.object(pull,"request_page",return_value=delta) as spy:
+            self.assertEqual(pull.poll(self.journal,"fake",5),(1,8,None))
+            spy.assert_called_once_with("fake",7,None)
+        self.assertEqual(pull.state(self.journal),(8,None,True,1))
+        self.assertEqual(self.canonical.read_bytes(),b"CANONICAL USER DATA IS OFF LIMITS")
+        with self.assertRaisesRegex(pull.PullError,"fresh, empty"):
+            pull.persist_baseline(self.journal,snapshot)
+
+    def test_bad_baseline_content_and_dangling_edges_are_rejected_before_checkpoint(self):
+        import copy
+        original=baseline_sample(12)
+        cases=[
+            ({"notes":"SENSITIVE TASK CONTENT"},"Unknown baseline fields"),
+            ({"consistent_snapshot":False},"unsupported"),
+            ({"automatic_apply":True},"unsupported"),
+            ({"task_count":3},"Incomplete"),
+        ]
+        for changes,error in cases:
+            payload=copy.deepcopy(original)
+            payload.update(changes)
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(pull.PullError,error):
+                    pull.persist_baseline(self.journal,payload)
+                self.assertEqual(pull.state(self.journal),(0,None,True,0))
+        badly_ordered=copy.deepcopy(original)
+        badly_ordered["items"].reverse()
+        with self.assertRaisesRegex(pull.PullError,"Unordered"):
+            pull.persist_baseline(self.journal,badly_ordered)
+        broken_edge=copy.deepcopy(original)
+        broken_edge["edges"][0]["depends_on_id"]="unknown"
+        with self.assertRaisesRegex(pull.PullError,"Dangling"):
+            pull.persist_baseline(self.journal,broken_edge)
+        dangerous=copy.deepcopy(original)
+        dangerous["items"][0]["body"]="NO CUSTOMER CONTENT"
+        with self.assertRaisesRegex(pull.PullError,"Unexpected baseline task fields"):
+            pull.persist_baseline(self.journal,dangerous)
+        self.assertEqual(self.journal.execute("SELECT COUNT(*) FROM pull_baseline_meta").fetchone()[0],0)
+
+    def test_existing_receiver_history_requires_fresh_journal_for_baseline(self):
+        with patch.object(pull,"request_page",return_value=page([event(1)],1)):
+            self.assertEqual(pull.poll(self.journal,"token",1),(1,1,None))
+        with self.assertRaisesRegex(pull.PullError,"fresh, empty"):
+            pull.persist_baseline(self.journal,baseline_sample())
+        self.assertEqual(pull.state(self.journal),(1,None,True,1))
+        self.assertEqual(self.journal.execute("SELECT COUNT(*) FROM pull_baseline_meta").fetchone()[0],0)
+
+    def test_schema_v1_upgrade_preserves_metadata_events_and_checkpoint(self):
+        old_file=self.root/"old-pull-v1.sqlite3"
+        con=sqlite3.connect(old_file)
+        con.executescript("""
+        CREATE TABLE pull_state(workspace_id TEXT PRIMARY KEY,cursor INTEGER,
+          cutoff INTEGER,baseline_required INTEGER);
+        CREATE TABLE pull_events(seq INTEGER PRIMARY KEY,kind TEXT,task_id TEXT,
+          depends_on_id TEXT,task_version INTEGER,occurred_at TEXT);
+        INSERT INTO pull_state VALUES('personal',3,NULL,1);
+        INSERT INTO pull_events VALUES(3,'task.update','test-old',NULL,2,'2026-11-18T00:00:00Z');
+        PRAGMA user_version=1;
+        """)
+        con.close()
+        os.chmod(old_file,0o600)
+        upgraded=pull.init_journal(old_file)
+        try:
+            self.assertEqual(upgraded.execute("PRAGMA user_version").fetchone()[0],2)
+            self.assertEqual(pull.state(upgraded),(3,None,True,1))
+            self.assertIsNone(pull.baseline_info(upgraded))
+            with self.assertRaisesRegex(pull.PullError,"fresh, empty"):
+                pull.persist_baseline(upgraded,baseline_sample())
+        finally:
+            upgraded.close()
+
+    def test_remote_baseline_request_is_metadata_only_and_token_private(self):
+        seen=[]
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self,*args): return None
+            def read(self,size=-1):
+                return json.dumps({"ok":True,"operation_id":"sync.baseline.read",
+                                   "data":baseline_sample()}).encode()
+        def network(req,timeout):
+            seen.append(req)
+            return FakeResponse()
+        with patch.object(pull,"urlopen",side_effect=network):
+            result=pull.request_baseline("synthetic-private-token")
+        self.assertEqual(result["cutoff"],7)
+        self.assertEqual(len(seen),1)
+        self.assertEqual(json.loads(seen[0].data),{"workspace_id":"personal"})
+        self.assertEqual(seen[0].get_method(),"POST")
+        self.assertTrue(seen[0].full_url.endswith("sync.baseline.read"))
+        self.assertEqual(seen[0].get_header("Authorization"),"Bearer synthetic-private-token")
+
 
     def test_request_only_sends_cursor_and_owner_workspace(self):
         reqs=[]
