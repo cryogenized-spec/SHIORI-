@@ -1155,6 +1155,179 @@
       "release_evidence": "S2 first-import pilot with fixture-only D1 tests; owner pairing, consent, exact-hash receipt and collision rejection required. No automatic sync."
     },
     {
+      "id": "sync.device.status.read",
+      "phase": "B",
+      "description": "Read an already paired owner device's active/revoked status without exposing tokens. A device UUID is not a credential.",
+      "availability": "cloudflare_alpha",
+      "effect": "read",
+      "approval": "none",
+      "scope": "sync:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.device.status.read"
+      },
+      "mcp_tool": "shiori_sync_device_status_read",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "device_id"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.device.status.read"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "device_id",
+              "paired_at",
+              "revoked_at",
+              "can_import"
+            ],
+            "properties": {
+              "device_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "paired_at": {
+                "type": "string"
+              },
+              "revoked_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "can_import": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Fake-D1 owner-scope, no-resurrection, idempotent and preview/apply revocation tests plus live verification."
+    },
+    {
+      "id": "sync.device.revoke",
+      "phase": "B",
+      "description": "Permanently revoke an owner-paired sync device. Blocks future previews/applies from that device; never deletes tasks, outbox records, receipts, or OAuth credentials.",
+      "availability": "cloudflare_alpha",
+      "effect": "write",
+      "approval": "contextual",
+      "scope": "sync:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.device.revoke"
+      },
+      "mcp_tool": "shiori_sync_device_revoke",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "device_id",
+          "confirm_revocation",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "confirm_revocation": {
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.device.revoke"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed",
+              "device_id",
+              "revoked_at"
+            ],
+            "properties": {
+              "changed": {
+                "const": true
+              },
+              "device_id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "revoked_at": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Fake-D1 owner-scope, no-resurrection, idempotent and preview/apply revocation tests plus live verification."
+    },
+    {
       "id": "sync.import.preview",
       "phase": "B",
       "description": "Owner-authenticated content-free preview proposal for one unlinked local task at revision 1; no task data is uploaded.",
@@ -11078,7 +11251,7 @@
       }
     }
   ],
-  "notes": "Registry describes 122 operation contracts (29 isolated D1 alpha tools, 93 planned). S3 adds an atomic bounded metadata baseline paired to a change-feed high water mark; neither task-content transfer nor automatic local Rust sync is enabled.",
+  "notes": "Registry describes 124 operation contracts (31 isolated D1 alpha tools, 93 planned). S3 pairing control adds permanent device revocation and a read-only status check; no automatic local Rust sync or OAuth token revocation.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",

@@ -55,6 +55,16 @@ python3 "$PILOT" --journal "$JOURNAL" \
 
 The final step uses HTTPS, re-verifies the remote receipt's task ID/event ID/hash and expected revision, then runs the Rust local `sync-ack` command. If the remote committed but local acknowledgement failed, **retry the exact same apply with the same proposal ID**; do not generate a second proposal and risk a duplicate. If a remote edit has occurred in the meantime, verification refuses acknowledgement and preserves the pending local snapshot.
 
+## Paired-device revocation (S3 owner control)
+
+`sync.device.status.read` (`shiori_sync_device_status_read`) returns a device's pairing and revocation timestamps plus whether it can stage new imports. This is an authenticated metadata read, available to OAuth `mcp:read` clients.
+
+`sync.device.revoke` (`shiori_sync_device_revoke`) requires the owner credential, `mcp:write` for OAuth clients, an exact paired device UUID, an idempotency key and **`confirm_revocation: true`**. Revocation is permanent for that device identity: the old UUID cannot be paired again. The server refuses subsequent import previews and applies even when an old, unexpired preview ID exists. Both mutation paths verify active pairing **inside their D1 write transactions**, not just in the earlier read.
+
+Revocation does **not** delete any task, original native payload, import receipt, or local Rust journal. It does **not** revoke the OAuth user access token or legacy owner bearer token. To revoke a compromised authorization credential, also use the appropriate **separate credential-revocation/rotation workflow**. Revoking a device does not make an infected device safe, and device UUIDs alone are never cryptographic device authentication.
+
+This is a single-owner alpha control, not secure multiple-user pairing. No background import or automatic synchronization is enabled.
+
 ## Security and recovery invariants
 
 - Pairing requires the owner bearer credential and an explicit confirmation; a device UUID by itself is **not** an authentication secret.
