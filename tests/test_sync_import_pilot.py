@@ -45,6 +45,10 @@ def fixture(directory:Path,depends_on=None,revision=1):
     con.execute("INSERT INTO sync_meta VALUES('device_id',?)",(DEVICE,))
     con.execute("INSERT INTO sync_outbox VALUES(?,?,?,?,?)",(EVENT,TASK,revision,payload,"pending"))
     con.commit();con.close()
+    original=sqlite3.connect(canonical)
+    original.execute("CREATE TABLE tasks(id TEXT PRIMARY KEY, version INTEGER NOT NULL, deleted_at TEXT)")
+    original.execute("INSERT INTO tasks VALUES(?,?,NULL)",(TASK,revision))
+    original.commit();original.close()
     token.write_text("SYNTHETIC_TEST_BEARER_ONLY",encoding="utf8")
     os.chmod(journal,0o600);os.chmod(token,0o600)
     return journal,canonical,token,payload
@@ -165,6 +169,17 @@ class ImportPilotTests(unittest.TestCase):
         with self.assertRaises(OSError):
             pilot.journal_state(missing)
         self.assertFalse(missing.exists())
+
+    def test_changed_canonical_revision_stops_preview_and_apply_before_network(self):
+        with sqlite3.connect(self.canonical) as con:
+            con.execute("UPDATE tasks SET version=2 WHERE id=?",(TASK,))
+        for action in ("preview","apply"):
+            opts=self.opts(action)
+            if action=="apply": opts.confirm_import=True
+            with patch.object(pilot,"api_call") as api:
+                with self.assertRaisesRegex(pilot.SyncPilotError,"changed since staging"):
+                    pilot.run(opts)
+                api.assert_not_called()
 
     def test_unexpected_local_version_and_tombstones_fail_closed(self):
         with sqlite3.connect(self.journal) as con:
