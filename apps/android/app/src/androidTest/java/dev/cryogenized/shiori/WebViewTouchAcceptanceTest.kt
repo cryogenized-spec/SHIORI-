@@ -157,9 +157,9 @@ class WebViewTouchAcceptanceTest {
         if (!waitForFocus(6_000L)) {
             var diagnostic = "unknown"
             scenario.onActivity {
-                diagnostic = "windowFocus=\${it.window.decorView.hasWindowFocus()}, " +
-                    "webViewFocus=\${webView.hasWindowFocus()}, " +
-                    "shown=\${webView.isShown}, attached=\${webView.windowToken != null}"
+                diagnostic = "windowFocus=${it.window.decorView.hasWindowFocus()}, " +
+                    "webViewFocus=${webView.hasWindowFocus()}, " +
+                    "shown=${webView.isShown}, attached=${webView.windowToken != null}"
             }
             throw AssertionError("Real SHIORI input focus remains absent: " +
                 diagnostic + "; first=$first; second=$second")
