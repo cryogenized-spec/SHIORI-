@@ -950,7 +950,10 @@ test("S3 read-only OAuth may inspect device status but cannot revoke it",async()
    name:"shiori_sync_device_revoke",
    arguments:request("oauth-revoke-denied-1",{device_id:f.device_id,confirm_revocation:true})
  }));
- assert.equal(other.status,403,"OAuth scope gate must block revoke");
+ assert.equal(other.status,200,"MCP tool errors are JSON-RPC results");
+ assert.equal(other.data.result.isError,true);
+ assert.equal(other.data.result.structuredContent.error.http_status,403,
+   "Read-only OAuth cannot execute the revocation operation");
  const checked=await call(e,"/api/v1/ops/sync.device.status.read",{
    workspace_id:"personal",device_id:f.device_id
  });
