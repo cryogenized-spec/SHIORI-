@@ -111,7 +111,7 @@ fn same_revision_with_different_edges_fails_instead_of_last_write_wins() {
         Err(SyncJournalError::InvalidSnapshot)
     ));
     assert!(matches!(
-        journal.stage(&task, &[task.id.clone()]),
+        journal.stage(&task, std::slice::from_ref(&task.id)),
         Err(SyncJournalError::InvalidSnapshot)
     ));
 }
