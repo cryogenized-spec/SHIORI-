@@ -92,6 +92,31 @@ def pending_event(db: sqlite3.Connection, device_id: str, event_id: str) -> tupl
     return payload, envelope, hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def canonical_database(args: argparse.Namespace) -> Path:
+    if args.database is not None:
+        return args.database.expanduser()
+    if not args.journal.name.endswith(".sync.sqlite3"):
+        raise SyncPilotError("Use --database to identify the canonical task database")
+    return args.journal.with_name(
+        args.journal.name.removesuffix(".sync.sqlite3") + ".sqlite3"
+    )
+
+
+def require_unchanged_canonical(db_path: Path, task_id: str, version: int) -> None:
+    """Do not upload a stale snapshot after another local edit or deletion."""
+    if not db_path.is_file():
+        raise SyncPilotError("Canonical task database is missing; refusing to import")
+    db = sqlite3.connect(f"file:{db_path.resolve().as_posix()}?mode=ro", uri=True)
+    try:
+        row = db.execute(
+            "SELECT version,deleted_at FROM tasks WHERE id=?", (task_id,),
+        ).fetchone()
+        if not row or row[0] != version or row[1] is not None:
+            raise SyncPilotError("Canonical task changed since staging; no import attempted")
+    finally:
+        db.close()
+
+
 def api_call(operation: str, token: str, args: dict) -> dict:
     body = json.dumps({"workspace_id": "personal", **args}, separators=(",", ":")).encode("utf-8")
     req = Request(
@@ -175,6 +200,8 @@ def run(args: argparse.Namespace) -> int:
 
         payload, envelope, digest = pending_event(db, device_id, args.event_id)
         task_id = envelope["task"]["id"]
+        canonical_db = canonical_database(args)
+        require_unchanged_canonical(canonical_db, task_id, 1)
         if args.action == "preview":
             data = api_call("sync.import.preview", token, {
                 "device_id": device_id, "task_id": task_id,
@@ -209,15 +236,7 @@ def run(args: argparse.Namespace) -> int:
                 raise SyncPilotError("Apply response did not match the staged event")
             receipt = api_call("sync.import.receipt.read", token, {"event_id": args.event_id})
             verify_receipt(receipt, args.event_id, task_id, digest)
-            canonical_db = args.database
-            if canonical_db is None:
-                if not args.journal.name.endswith(".sync.sqlite3"):
-                    raise SyncPilotError(
-                        "Remote receipt verified; specify --database for custom journal location"
-                    )
-                canonical_db = args.journal.with_name(
-                    args.journal.name.removesuffix(".sync.sqlite3") + ".sqlite3"
-                )
+            require_unchanged_canonical(canonical_db, task_id, 1)
             result = acknowledge_local(args.cli, canonical_db, args.journal,
                                        args.event_id, task_id, 1)
             print(result)
