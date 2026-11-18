@@ -31,7 +31,7 @@ pub enum SyncJournalError {
 
 /// A lossless copy of a native Task. User notes and other fields are stored
 /// locally in this journal, not automatically uploaded or printed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncEnvelope {
     pub schema_version: u32,
     pub event_id: String,
@@ -127,7 +127,7 @@ impl SyncJournal {
         if task.deleted_at.is_some() && !dependencies.is_empty() {
             return Err(SyncJournalError::InvalidSnapshot);
         }
-        let event_id = format!("sync1:{}:{}", task.id, task.version);
+        let event_id = format!("sync1:{}:{}:{}", self.device_id, task.id, task.version);
         let envelope = SyncEnvelope {
             schema_version: 1,
             event_id: event_id.clone(),
