@@ -445,10 +445,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
             println!("Prerequisites: {}", store.get_dependencies(&id)?.join(", "));
         }
-        Command::SyncStage { id, if_version, journal } => {
+        Command::SyncStage {
+            id,
+            if_version,
+            journal,
+        } => {
             let task = store.get_including_deleted(&id)?;
             if task.version != if_version {
-                return Err(format!("Task changed: expected revision {if_version}, current revision {}", task.version).into());
+                return Err(format!(
+                    "Task changed: expected revision {if_version}, current revision {}",
+                    task.version
+                )
+                .into());
             }
             let depends_on = if task.deleted_at.is_none() {
                 store.get_dependencies(&id)?
@@ -460,16 +468,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!(
                 "{} local event {} (task {}, revision {}). No network request or upload was made.",
                 if created { "Staged" } else { "Already staged" },
-                item.event_id, item.task_id, item.local_version
+                item.event_id,
+                item.task_id,
+                item.local_version
             );
         }
         Command::SyncQueue { journal } => {
             let outbox = SyncJournal::open(journal.unwrap_or(default_journal_path))?;
             let items = outbox.list(500)?;
-            println!("Local device {}, {} queue entries. Nothing uploaded.", outbox.device_id(), items.len());
+            println!(
+                "Local device {}, {} queue entries. Nothing uploaded.",
+                outbox.device_id(),
+                items.len()
+            );
             for item in items {
-                println!("{} {} revision {} status {}",
-                    item.event_id,item.task_id,item.local_version,item.state);
+                println!(
+                    "{} {} revision {} status {}",
+                    item.event_id, item.task_id, item.local_version, item.state
+                );
             }
         }
         Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
