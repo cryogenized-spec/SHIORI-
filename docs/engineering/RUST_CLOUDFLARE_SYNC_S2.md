@@ -1,6 +1,6 @@
 # SHIORI S2 — Owner-reviewed first-import pilot
 
-**Development status — 18 November 2026:** This pilot is subject to PR #68 CI and deployment. It is **not** bidirectional synchronization. Do not try it with production or customer records until the release gate and synthetic-device trial are verified.
+**Deployed single-owner alpha — 18 November 2026:** S2 first-import and the S3 paired-device status/revocation controls are live, with 31 remote MCP operations verified. This pilot is **not** bidirectional synchronization and is suitable only for owner-reviewed, disposable synthetic tasks; do not use production or customer data until full sync acceptance is verified.
 
 ## Narrow scope
 
@@ -73,6 +73,6 @@ This is a single-owner alpha control, not secure multiple-user pairing. No backg
 - The local journal is crash-durable, owner-private and unaffected by cloud retries; the canonical local SQLite file is not rewritten by S2.
 - Authenticated OAuth `mcp:read` may read a content-free receipt but **cannot** pair or apply an import; `mcp:write` is required for mutations.
 - A matching UUID or title never proves a shared provenance for a pre-existing cloud record. A 409 conflict is **not** permission to overwrite.
-- Real deletions, dependency reconstruction, task revisions above 1, automatic conflict merging, device revocation, attachment upload and true two-way convergence are deferred to **S3**.
+- Real deletion propagation, dependency reconstruction, task revisions above 1, automatic conflict merging, attachment upload and true two-way convergence remain **not implemented**. The separate S3 device-revocation control is now live but does not authenticate a device cryptographically or rotate access tokens.
 
 **Beta acceptance remains blocked** until two independent real clients demonstrate offline edit/reconnect conflict handling, tombstone safety, verified rollback and consistent canonical IDs. See [S1 foundation](RUST_CLOUDFLARE_SYNC_S1.md) and [ADR 0005](../adr/0005-rust-cloudflare-sync.md).
