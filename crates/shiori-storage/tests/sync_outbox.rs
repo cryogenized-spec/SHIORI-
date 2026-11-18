@@ -123,6 +123,11 @@ fn unknown_schema_and_existing_canonical_database_are_rejected() {
     let native = SqliteStore::open(&primary).unwrap();
     let task = Task::new("Keep me", "Inbox", Priority::Medium, None).unwrap();
     native.insert(&task).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&primary, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     assert!(matches!(
         SyncJournal::open(&primary),
         Err(SyncJournalError::UnsupportedSchema(3))
