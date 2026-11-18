@@ -220,6 +220,113 @@ async function run(id,arg,env){
   const scopes=oauth&&Array.isArray(env.SHIO_OAUTH_SCOPES)?env.SHIO_OAUTH_SCOPES:[];
   return {capabilities:{server:SERVER,version:VERSION,workspace_id:w,backend:"isolated-cloudflare-d1",local_rust_sync:false,oauth,authentication:oauth?"oauth2.1-pkce":"single-user-bearer",granted_scopes:scopes,write_access:oauth?scopes.includes("mcp:write"):true,registry_total:CATALOG_OPERATIONS.length,implemented_total:OPERATIONS.length,registry_uri:SCHEMA_URI,planned_total:CATALOG_OPERATIONS.length-OPERATIONS.length},operations:OPERATIONS.map(o=>o.id)};
  }
+
+ if(id==="sync.device.pair"){
+  if(a.confirm_pairing!==true)E(412,"PRECONDITION_REQUIRED","Owner must explicitly approve this device");
+  requireUuid(a.device_id,"device_id");
+  const fingerprint=await requestFingerprint(id,a);
+  const old=await duplicate(db,w,id,a.idempotency_key,fingerprint);
+  if(old)return old;
+  const existing=await db.prepare(
+   "SELECT device_id,revoked_at FROM sync_devices WHERE workspace_id=? AND device_id=?"
+  ).bind(w,a.device_id).first();
+  if(existing)E(409,"CONFLICT","Device identity already paired or revoked; review pairing");
+  const now=new Date().toISOString();
+  const result={changed:true,device_id:a.device_id,paired_at:now};
+  try{return await writeOnce(env,w,id,a.idempotency_key,fingerprint,result,
+   db.prepare("INSERT INTO sync_devices(workspace_id,device_id,paired_at) VALUES(?,?,?)")
+    .bind(w,a.device_id,now));}
+  catch(err){
+   const retry=await duplicate(db,w,id,a.idempotency_key,fingerprint);
+   if(retry)return retry;
+   E(409,"CONFLICT","Device pairing could not be committed");
+  }
+ }
+ if(id==="sync.import.preview"){
+  requireUuid(a.device_id,"device_id");
+  requireUuid(a.task_id,"task_id");
+  if(a.local_version!==1 ||
+     a.event_id!=="sync1:"+a.device_id+":"+a.task_id+":1" ||
+     !DIGEST_RE.test(a.payload_sha256))
+    E(400,"VALIDATION_FAILED","Initial import accepts only a new revision-1 event and exact SHA-256");
+  const fingerprint=await requestFingerprint(id,a);
+  const cached=await duplicate(db,w,id,a.idempotency_key,fingerprint);
+  if(cached)return cached;
+  const paired=await db.prepare("SELECT 1 AS paired FROM sync_devices WHERE workspace_id=? AND device_id=? AND revoked_at IS NULL")
+    .bind(w,a.device_id).first();
+  if(!paired)E(403,"FORBIDDEN","Device must be explicitly paired by owner");
+  const collision=await db.prepare("SELECT id FROM remote_tasks WHERE id=?").bind(a.task_id).first();
+  if(collision)E(409,"CONFLICT","Remote task ID already exists (including tombstones)");
+  const imported=await db.prepare("SELECT 1 AS imported FROM sync_imports WHERE workspace_id=? AND event_id=?")
+    .bind(w,a.event_id).first();
+  if(imported)E(409,"CONFLICT","Source event already imported");
+  const proposal_id=crypto.randomUUID();
+  const expires_at=new Date(Date.now()+15*60*1000).toISOString();
+  const result={changed:true,proposal_id,expires_at,task_id:a.task_id,local_version:1};
+  try{return await writeOnce(env,w,id,a.idempotency_key,fingerprint,result,
+   db.prepare("INSERT INTO sync_import_previews(proposal_id,workspace_id,device_id,event_id,task_id,local_version,payload_sha256,expires_at) VALUES(?,?,?,?,?,?,?,?)")
+    .bind(proposal_id,w,a.device_id,a.event_id,a.task_id,1,a.payload_sha256,expires_at));}
+  catch(err){
+   const replay=await duplicate(db,w,id,a.idempotency_key,fingerprint);
+   if(replay)return replay;
+   E(409,"CONFLICT","Unable to create an import proposal");
+  }
+ }
+ if(id==="sync.import.apply"){
+  if(a.owner_approved!==true)E(412,"PRECONDITION_REQUIRED","Owner must explicitly approve the exact proposed import");
+  requireUuid(a.proposal_id,"proposal_id");
+  const fingerprint=await requestFingerprint(id,a);
+  const cached=await duplicate(db,w,id,a.idempotency_key,fingerprint);
+  if(cached)return cached;
+  const now=new Date().toISOString();
+  const p=await db.prepare("SELECT * FROM sync_import_previews WHERE workspace_id=? AND proposal_id=?")
+    .bind(w,a.proposal_id).first();
+  if(!p)E(404,"NOT_FOUND","Unknown import proposal");
+  if(p.used_at!==null || p.expires_at<=now)E(409,"CONFLICT","Import proposal already used or expired");
+  const device=await db.prepare("SELECT 1 AS active FROM sync_devices WHERE workspace_id=? AND device_id=? AND revoked_at IS NULL")
+    .bind(w,p.device_id).first();
+  if(!device)E(403,"FORBIDDEN","Importing device is no longer paired");
+  if(await sha256hex(a.payload_json)!==p.payload_sha256)
+    E(409,"CONFLICT","Payload differs from the content-free preview digest");
+  const t=parseNativeTask(a.payload_json,p,w);
+  if(await db.prepare("SELECT id FROM remote_tasks WHERE id=?").bind(t.id).first())
+    E(409,"CONFLICT","Remote ID collision: existing tasks or tombstones are never overwritten");
+  const receipt_id=crypto.randomUUID();
+  const result={changed:true,receipt_id,resource_id:t.id,revision:1,
+    source_event_id:p.event_id,source_version:1,source_payload_sha256:p.payload_sha256};
+  let out;
+  try{
+   out=await db.batch([
+    db.prepare("UPDATE sync_import_previews SET used_at=? WHERE proposal_id=? AND workspace_id=? AND used_at IS NULL AND expires_at>?")
+      .bind(now,a.proposal_id,w,now),
+    db.prepare("INSERT INTO remote_tasks(id,workspace_id,title,notes,project,priority,status,version,created_at,updated_at,deleted_at) SELECT ?,?,?,?,?,?,?,1,?,?,NULL WHERE changes()=1")
+      .bind(t.id,w,t.title,t.notes,t.project,t.priority,t.status,t.created_at,t.updated_at),
+    db.prepare("INSERT INTO sync_imports(workspace_id,task_id,device_id,event_id,source_version,payload_sha256,payload_json,receipt_id,imported_at) SELECT ?,?,?,?,1,?,?,?,? WHERE changes()=1")
+      .bind(w,t.id,p.device_id,p.event_id,p.payload_sha256,a.payload_json,receipt_id,now),
+    db.prepare("INSERT INTO idempotency(workspace_id,operation_id,token,request_hash,result_json,created_at) SELECT ?,?,?,?,?,? WHERE changes()=1")
+      .bind(w,id,a.idempotency_key,fingerprint,JSON.stringify(result),now)
+   ]);
+  }catch(err){
+   const retry=await duplicate(db,w,id,a.idempotency_key,fingerprint);
+   if(retry)return retry;
+   E(409,"CONFLICT","Import transaction rejected; no existing task was overwritten");
+  }
+  if(out.some(r=>r.meta.changes!==1))
+    E(409,"CONFLICT","Import proposal changed concurrently or could not be committed");
+  return result;
+ }
+ if(id==="sync.import.receipt.read"){
+  const receipt=await db.prepare(
+   "SELECT i.receipt_id,i.task_id,i.event_id,i.source_version,i.payload_sha256,t.version "+
+   "FROM sync_imports i JOIN remote_tasks t ON t.id=i.task_id AND t.workspace_id=i.workspace_id "+
+   "WHERE i.workspace_id=? AND i.event_id=?"
+  ).bind(w,a.event_id).first();
+  if(!receipt)E(404,"NOT_FOUND","Source import receipt not found");
+  return {receipt_id:receipt.receipt_id,resource_id:receipt.task_id,
+    source_event_id:receipt.event_id,source_version:receipt.source_version,
+    remote_revision:receipt.version,source_payload_sha256:receipt.payload_sha256,
+    remote_modified:receipt.version!==receipt.source_version};
+ }
  if(id==="sync.manifest.read"){
   // S1 read-only reconciliation. Includes tombstones but never returns
   // customer titles, notes or attachments. ID cursor is stable; a multi-page
