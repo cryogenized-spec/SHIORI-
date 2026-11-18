@@ -38,7 +38,7 @@ class DeviceRevocationContract(unittest.TestCase):
         self.assertEqual(set(revoke), {"changed", "device_id", "revoked_at"})
         self.assertNotIn("token", json.dumps(status).lower())
         self.assertNotIn("token", json.dumps(revoke).lower())
-        self.assertEqual(len(operations), 125)
+        self.assertEqual(len(operations), 126)
 
 
 if __name__ == "__main__":
