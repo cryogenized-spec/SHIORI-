@@ -678,3 +678,123 @@ test("S2 receipt is scoped and read-only OAuth is not allowed to mutate pairing 
    assert(manifest.data.result.tools.some(t=>t.name===name));
  assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM sync_imports").get().n,0);
 });
+
+
+test("S3 change log captures task revisions/tombstones and dependency edges without content",async()=>{
+ const e=env();
+ const empty=await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"personal"});
+ assert.equal(empty.status,200);
+ assert.deepEqual(empty.data.data.changes,[]);
+ assert.equal(empty.data.data.baseline_required,true);
+ assert.equal(empty.data.data.local_rust_sync,false);
+ const first=await call(e,"/api/v1/ops/tasks.create",request("feed-create-1",{
+  title:"SECRET TASK TITLE",text:"SECRET PRIVATE NOTES"
+ }));
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ const id=first.data.data.resource_id;
+ const updated=await call(e,"/api/v1/ops/tasks.status.set",request("feed-status-1",{
+  task_id:id,status:"in_progress",expected_revision:1
+ }));
+ assert.equal(updated.status,200);
+ const dependency="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+ e.DB.db.prepare("INSERT INTO remote_dependencies(workspace_id,task_id,depends_on_id) VALUES(?,?,?)")
+  .run("personal",id,dependency);
+ e.DB.db.prepare("DELETE FROM remote_dependencies WHERE workspace_id=? AND task_id=? AND depends_on_id=?")
+  .run("personal",id,dependency);
+ const del=await call(e,"/api/v1/ops/tasks.delete",request("feed-delete-1",{
+  task_id:id,expected_revision:2
+ }));
+ assert.equal(del.status,200,JSON.stringify(del.data));
+ const page=await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"personal",limit:100});
+ assert.equal(page.status,200,JSON.stringify(page.data));
+ const feed=page.data.data;
+ assert.deepEqual(feed.changes.map(x=>x.kind),
+  ["task.insert","task.update","edge.add","edge.remove","task.delete"]);
+ assert.deepEqual(feed.changes.map(x=>x.task_id),[id,id,id,id,id]);
+ assert.equal(feed.changes[0].task_version,1);
+ assert.equal(feed.changes[1].task_version,2);
+ assert.equal(feed.changes[4].task_version,3);
+ assert.equal(feed.changes[2].depends_on_id,dependency);
+ assert.equal(feed.changes[3].depends_on_id,dependency);
+ assert.equal(feed.changes[0].depends_on_id,null);
+ assert.equal(feed.changes[2].task_version,null);
+ assert.equal(feed.next_cursor,null);
+ assert.equal(feed.checkpoint_cursor,feed.cutoff);
+ assert.equal(feed.cutoff,5);
+ assert.deepEqual(feed.changes.map(x=>x.seq),[1,2,3,4,5]);
+ assert(!JSON.stringify(feed).includes("SECRET TASK TITLE"));
+ assert(!JSON.stringify(feed).includes("SECRET PRIVATE NOTES"));
+});
+test("S3 fixed high-watermark pagination never skips or includes new events mid-stream",async()=>{
+ const e=env();
+ for(let i=0;i<5;i++){
+  const created=await call(e,"/api/v1/ops/tasks.create",request("feed-item-"+i,{
+   title:"[DUMMY] Remote feed item "+i
+  }));
+  assert.equal(created.status,200);
+ }
+ const first=await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"personal",cursor:0,limit:2});
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ const p1=first.data.data;
+ assert.equal(p1.cutoff,5);
+ assert.deepEqual(p1.changes.map(x=>x.seq),[1,2]);
+ assert.equal(p1.next_cursor,2);
+ assert.equal(p1.checkpoint_cursor,2);
+ const future=await call(e,"/api/v1/ops/tasks.create",request("feed-new-after-cutoff",{
+  title:"[DUMMY] New event after read"
+ }));
+ assert.equal(future.status,200);
+ const second=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:p1.next_cursor,cutoff:p1.cutoff,limit:2
+ });
+ assert.equal(second.status,200);
+ assert.deepEqual(second.data.data.changes.map(x=>x.seq),[3,4]);
+ const third=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:second.data.data.next_cursor,cutoff:p1.cutoff,limit:2
+ });
+ assert.equal(third.status,200);
+ assert.deepEqual(third.data.data.changes.map(x=>x.seq),[5]);
+ assert.equal(third.data.data.next_cursor,null);
+ assert.equal(third.data.data.checkpoint_cursor,5);
+ const next=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:third.data.data.checkpoint_cursor,limit:100
+ });
+ assert.equal(next.status,200);
+ assert.deepEqual(next.data.data.changes.map(x=>x.seq),[6]);
+ assert.equal(next.data.data.checkpoint_cursor,6);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:3,cutoff:2
+ })).status,400);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:0,cutoff:999999
+ })).status,400);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",limit:101
+ })).status,400);
+});
+test("S3 scope boundary and non-task workspaces do not leak D1 changes",async()=>{
+ const e=env();
+ e.DB.db.prepare(
+  "INSERT INTO remote_tasks(id,workspace_id,title,created_at,updated_at) VALUES(?,?,?,?,?)"
+ ).run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","other",
+  "Unrelated workspace secret","2026-11-18T00:00:00Z","2026-11-18T00:00:00Z");
+ const read=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:0,limit:3
+ });
+ assert.equal(read.status,200);
+ assert.deepEqual(read.data.data.changes,[]);
+ assert.equal(read.data.data.cutoff,1,"global sequence does not expose other workspaces' task IDs");
+ assert.equal(read.data.data.checkpoint_cursor,1);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"other"})).status,403);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal"
+ },{auth:null})).status,401);
+ e.SHIO_AUTH_MODE="oauth";
+ e.SHIO_OAUTH_SCOPES=["mcp:read"];
+ const rpcRead=await call(e,"/mcp",rpc("tools/call",{
+  name:"shiori_sync_changes_read",arguments:{workspace_id:"personal",cursor:1}
+ }));
+ assert.equal(rpcRead.status,200);
+ assert.equal(rpcRead.data.result.isError,undefined);
+ assert.equal(rpcRead.data.result.structuredContent.local_rust_sync,false);
+});
