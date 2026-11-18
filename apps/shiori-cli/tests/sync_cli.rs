@@ -70,8 +70,8 @@ fn only_matching_remote_receipt_can_acknowledge_a_staged_local_event() {
         .rsplit_once('[')
         .unwrap()
         .1
-        .trim_end_matches(']')
-        .trim();
+        .trim()
+        .trim_end_matches(']');
     let staged = stdout(&cli(&db, &["sync-stage", id, "--if-version", "1"]));
     let event = staged
         .split("local event ")
@@ -129,8 +129,8 @@ fn concurrent_canonical_edit_cannot_be_acknowledged_as_synced() {
         .rsplit_once('[')
         .unwrap()
         .1
-        .trim_end_matches(']')
-        .trim();
+        .trim()
+        .trim_end_matches(']');
     let staged = stdout(&cli(&db, &["sync-stage", id, "--if-version", "1"]));
     let event = staged
         .split("local event ")
