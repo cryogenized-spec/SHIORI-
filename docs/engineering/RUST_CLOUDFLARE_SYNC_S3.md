@@ -34,7 +34,9 @@ python3 cloudflare/shiori-mcp/scripts/sync_pull_journal.py \
 
 **Critical distinction:** A baseline here is **remote metadata staged for review**, not a trusted Rust task import and not an identity pairing. The receiver deliberately keeps its `baseline_required` review flag set. A read-only snapshot from Cloudflare cannot authorize copying or overwriting Rust task contents, even if local and remote UUIDs happen to match. A future S3 approved apply flow must verify provenance, content and device identity and reconcile conflicts explicitly.
 
-The separately deployed S3 paired-device controls now expose `sync.device.status.read` and `sync.device.revoke` through the owner-scoped MCP. They prevent new previews and applies from a revoked device identity, but do not revoke OAuth credentials or grant multi-user device authentication. A merged **offline counts-only review** can compare a private Rust `bridge-manifest` export with the staged D1 baseline and classify later checkpointed task/edge events without applying changes; see [S3 review](RUST_CLOUDFLARE_SYNC_S3_REVIEW.md).\n\n## Known limitations and next gates
+The separately deployed S3 paired-device controls now expose `sync.device.status.read` and `sync.device.revoke` through the owner-scoped MCP. They prevent new previews and applies from a revoked device identity, but do not revoke OAuth credentials or grant multi-user device authentication. A merged **offline counts-only review** can compare a private Rust `bridge-manifest` export with the staged D1 baseline and classify later checkpointed task/edge events without applying changes; see [S3 review](RUST_CLOUDFLARE_SYNC_S3_REVIEW.md).
+
+## Known limitations and next gates
 
 - A change event describes *that* something changed, not the full task data. Fetching current state later may yield a newer revision, so compare versions and preserve both sides before applying any write.
 - The feed includes each *committed* D1 task/edge transition captured **after trigger installation**. The log is not a source of historical remote state.
