@@ -11,7 +11,9 @@ use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
 mod spatial;
+mod sync;
 pub use spatial::SpatialViewStore;
+pub use sync::{SyncEnvelope, SyncJournal, SyncJournalError, SyncQueueItem};
 
 const SCHEMA_VERSION: i64 = 3;
 
