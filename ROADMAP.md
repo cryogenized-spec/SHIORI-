@@ -201,7 +201,7 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** offline edits converge safely after reconnect; conflicts and deletes are not lost; a documented export/restore migration succeeds between two independently operated environments.
 
 ### M5 — MCP interoperability and compact UI
-**2026-11-18 checkpoint:** Owner OAuth 2.1/PKCE authorization is completed and verified with ChatGPT. There are **29 live scoped D1 operations** (122 contracts; 93 still planned). Real remote task creation and native dependency links have been demonstrated. The cloud backend remains separate from Rust/SQLite and this is **not** production multi-user MCP or completed M4 sync.
+**2026-11-18 checkpoint:** Owner OAuth 2.1/PKCE authorization is completed and verified with ChatGPT. There are **31 live scoped D1 operations** (124 contracts; 93 still planned). Real remote task creation and native dependency links have been demonstrated. The cloud backend remains separate from Rust/SQLite and this is **not** production multi-user MCP or completed M4 sync.
 
 **SH-008 groundwork:** define model-provider capability contracts, account/secret setup boundary and a strictly optional local companion UI prototype. Its chat state must not become another task store or bypass application permissions.
 
