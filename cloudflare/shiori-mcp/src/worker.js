@@ -182,6 +182,7 @@ function parseNativeTask(raw,preview,workspace){
     E(400,"VALIDATION_FAILED","Unsupported initial-import task field or revision");
  if(t.due_on!==null){
   if(typeof t.due_on!=="string"||!/^\d{4}-\d\d-\d\d$/.test(t.due_on)||
+     !Number.isFinite(Date.parse(t.due_on+"T00:00:00Z"))||
      new Date(t.due_on+"T00:00:00Z").toISOString().slice(0,10)!==t.due_on)
     E(400,"VALIDATION_FAILED","Invalid calendar-only due date");
  }
