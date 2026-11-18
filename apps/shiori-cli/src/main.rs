@@ -512,11 +512,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             journal,
         } => {
             if remote_id != local_task_id || remote_revision != 1 || local_revision != 1 {
-                return Err("S2 pilot requires identical canonical IDs and initial revision 1".into());
+                return Err(
+                    "S2 pilot requires identical canonical IDs and initial revision 1".into(),
+                );
             }
-            let current=store.get_including_deleted(&local_task_id)?;
+            let current = store.get_including_deleted(&local_task_id)?;
             if current.deleted_at.is_some() || current.version != local_revision {
-                return Err("Canonical local task changed after staging; keep the event pending for review".into());
+                return Err(
+                    "Canonical local task changed after staging; keep the event pending for review"
+                        .into(),
+                );
             }
             let mut outbox = SyncJournal::open(journal.unwrap_or(default_journal_path))?;
             let changed = outbox.acknowledge(
