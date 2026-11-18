@@ -105,7 +105,7 @@
     {
       "id": "system.operations.list",
       "phase": "A",
-      "description": "List the complete 113-operation schema registry with pagination; planned operations are explicitly non-executable",
+      "description": "List the complete 120-operation schema registry with pagination; planned operations are explicitly non-executable",
       "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
