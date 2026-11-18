@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read-only local Rust <-> Cloudflare D1 comparison.
 
-NO local or remote task writes, imports, or token logging. OAuth pairing,
-bidirectional sync, conflict resolution and tombstones are separate work.
+NO local or remote task writes, imports, or token logging. S1 compares
+local/cloud tombstones and revisions; cursor pages are not atomic snapshots.
 """
 from __future__ import annotations
 import argparse
@@ -83,31 +83,33 @@ def load_local_manifest(cli: Path, database: Path | None) -> list[dict]:
 
 
 def compare_manifest(local: list[dict], remote: list[dict]) -> dict:
-    """Compare identity/version only; titles are never trusted as shared IDs."""
-    active = {task["id"]: task for task in local if not task["deleted"]}
-    tombstones = {task["id"] for task in local if task["deleted"]}
-    remote_by_id = {task["id"]: task for task in remote}
-    overlap = active.keys() & remote_by_id.keys()
+    """Compare identity/version/tombstones only. Never infer provenance."""
+    la={x["id"]:x for x in local if not x["deleted"]}
+    ld={x["id"]:x for x in local if x["deleted"]}
+    ra={x["id"]:x for x in remote if not x.get("deleted_at")}
+    rd={x["id"]:x for x in remote if x.get("deleted_at")}
+    overlap=la.keys() & ra.keys()
     return {
-        "mode": "s1_read_only_manifest_no_sync",
-        "data_boundary": "local Rust SQLite is authoritative locally; cloud D1 remains isolated",
-        "counts": {
-            "local_active": len(active),
-            "local_tombstones": len(tombstones),
-            "local_dependency_edges": sum(len(task["depends_on"]) for task in local if not task["deleted"]),
-            "remote_active": len(remote),
-            "matching_active_ids_unverified": len(overlap),
-            "matching_id_revision_differences": sum(
-                active[key]["version"] != remote_by_id[key].get("version") for key in overlap
-            ),
-            "local_active_only": len(active.keys() - remote_by_id.keys()),
-            "remote_active_only": len(remote_by_id.keys() - active.keys()),
+        "mode":"s1_read_only_manifest_no_sync",
+        "data_boundary":"local Rust SQLite and cloud D1 remain independent",
+        "counts":{
+            "local_active":len(la),"local_tombstones":len(ld),
+            "local_dependency_edges":sum(len(x["depends_on"]) for x in la.values()),
+            "remote_active":len(ra),"remote_tombstones":len(rd),
+            "matching_active_ids_unverified":len(overlap),
+            "matching_id_revision_differences":sum(la[k]["version"]!=ra[k]["version"] for k in overlap),
+            "local_active_only":len(la.keys() - (ra.keys() | rd.keys())),
+            "remote_active_only":len(ra.keys() - la.keys()),
+            "local_deleted_remote_active":len(ld.keys() & ra.keys()),
+            "local_active_remote_deleted":len(la.keys() & rd.keys()),
+            "matching_deleted_ids_unverified":len(ld.keys() & rd.keys()),
         },
-        "warnings": [
-            "Matching identifiers do not prove shared origin without a provenance mapping.",
-            "Remote tombstones and edge versions are not exposed by the cloud alpha task list.",
-            "No local task content or manifest IDs were transmitted to the cloud.",
-            "No local or remote record was changed.",
+        "warnings":[
+            "Same IDs are not verified provenance or permission to merge.",
+            "Remote manifest ID pages are not an atomic snapshot.",
+            "Active/deleted differences need explicit conflict review.",
+            "No local task contents or identifiers were sent to Cloudflare.",
+            "Neither local nor remote database was modified.",
         ],
     }
 
@@ -139,6 +141,51 @@ def load_remote(base:str,token:str) -> list[dict]:
         if next_cursor in seen:raise ValueError("Remote pagination loop")
         seen.add(next_cursor)
         cursor=next_cursor
+
+def remote_manifest_request(base: str, token: str, cursor: str | None) -> dict:
+    data={"workspace_id":"personal","limit":100}
+    if cursor:data["cursor"]=cursor
+    req=Request(base.rstrip("/")+"/api/v1/ops/sync.manifest.read",
+        data=json.dumps(data).encode("utf-8"),method="POST",
+        headers={"Content-Type":"application/json","User-Agent":USER_AGENT,
+                 "Authorization":"Bearer "+token})
+    with urlopen(req,timeout=25) as response:payload=json.load(response)
+    if not payload.get("ok") or payload.get("operation_id")!="sync.manifest.read":
+        raise ValueError("Remote manifest request failed")
+    result=payload.get("data")
+    if not isinstance(result,dict) or result.get("consistent_snapshot") is not False or result.get("local_rust_sync") is not False:
+        raise ValueError("Untrusted remote manifest")
+    items=result.get("items")
+    if not isinstance(items,list) or len(items)>100:raise ValueError("Invalid remote page")
+    for row in items:
+        if not isinstance(row,dict) or set(row)!={"id","version","status","updated_at","deleted_at"}:
+            raise ValueError("Unexpected remote manifest fields")
+        if (not isinstance(row["id"],str) or not row["id"] or
+            type(row["version"]) is not int or row["version"]<1 or
+            row["status"] not in ("todo","in_progress","done") or
+            not isinstance(row["updated_at"],str) or
+            row["deleted_at"] is not None and not isinstance(row["deleted_at"],str)):
+            raise ValueError("Malformed manifest task")
+    return result
+
+
+def load_remote_manifest(base:str,token:str)->list[dict]:
+    rows=[]
+    cursor=None
+    seen=set()
+    while True:
+        page=remote_manifest_request(base,token,cursor)
+        for row in page["items"]:
+            if cursor is not None and row["id"]<=cursor:
+                raise ValueError("Manifest not strictly ordered")
+            cursor=row["id"]
+            rows.append(row)
+        if len(rows)>MAX_TASKS:raise ValueError("Remote manifest exceeds safe budget")
+        nxt=page.get("next_cursor")
+        if nxt is None:return rows
+        if not isinstance(nxt,str) or nxt!=cursor or nxt in seen:
+            raise ValueError("Invalid manifest cursor")
+        seen.add(nxt)
 
 def normalize(title:str)->str:
     return " ".join(title.casefold().split())
@@ -199,7 +246,7 @@ def main():
     token=read_secret(args)
     local=load_local_manifest(Path(args.cli),args.database) if args.manifest else load_local(Path(args.cli),args.database)
     if len(local)>MAX_TASKS:raise ValueError("Local result exceeds safe budget")
-    remote=load_remote(args.base,token)
+    remote=load_remote_manifest(args.base,token) if args.manifest else load_remote(args.base,token)
     report=compare_manifest(local,remote) if args.manifest else compare(local,remote)
     print(json.dumps(report,indent=2))
     if args.report_file:
