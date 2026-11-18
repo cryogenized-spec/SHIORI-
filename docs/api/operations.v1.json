@@ -941,7 +941,7 @@
       "availability": "cloudflare_alpha",
       "effect": "read",
       "approval": "none",
-      "scope": "tasks:read",
+      "scope": "sync:read",
       "http": {
         "method": "POST",
         "path": "/api/v1/ops/sync.manifest.read"
