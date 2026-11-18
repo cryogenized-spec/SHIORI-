@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="Fail if the embedded registry is out of date")
     args = parser.parse_args()
     registry = json.loads(SOURCE.read_text(encoding="utf-8"))
-    if len(registry.get("operations", [])) != 115:
+    if len(registry.get("operations", [])) != 116:
         raise SystemExit("Unexpected catalog size; review operation registry changes before regenerating")
     text = TARGET.read_text(encoding="utf-8")
     match = PATTERN.search(text)
@@ -33,7 +33,7 @@ def main() -> int:
     if args.check:
         if current != registry:
             raise SystemExit("Schema catalog drift: run sync_operation_catalog.py")
-        print("PASS: Cloudflare MCP schema snapshot matches canonical 115-operation registry")
+        print("PASS: Cloudflare MCP schema snapshot matches canonical 116-operation registry")
         return 0
     if current == registry:
         print("Schema catalog already up to date")
