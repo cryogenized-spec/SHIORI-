@@ -1,6 +1,12 @@
 import unittest
 import struct
-from sync_preview import compare, fingerprint, decode_manifest, compare_manifest
+import io
+import json
+from unittest.mock import patch
+from sync_preview import (
+    compare, fingerprint, decode_manifest, compare_manifest, load_remote_manifest,
+    remote_manifest_request,
+)
 
 
 class SyncPreviewTests(unittest.TestCase):
@@ -78,6 +84,63 @@ class NativeManifestTests(unittest.TestCase):
             with self.subTest(data=data[:30]):
                 with self.assertRaises(ValueError):
                     decode_manifest(data)
+
+class RemoteManifestTests(unittest.TestCase):
+    def test_paged_private_manifest_uses_only_read_operations(self):
+        seen = []
+        def fake_urlopen(request, timeout):
+            self.assertEqual(request.get_method(), "POST")
+            self.assertTrue(request.full_url.endswith("/api/v1/ops/sync.manifest.read"))
+            payload=json.loads(request.data)
+            self.assertEqual(set(payload), {"workspace_id","limit"} if len(seen)==0 else {"workspace_id","limit","cursor"})
+            self.assertEqual(payload["workspace_id"],"personal")
+            self.assertEqual(payload["limit"],100)
+            self.assertNotIn("Secret customer",str(payload))
+            seen.append(payload)
+            sample={"id":"native-a","version":3,"status":"todo",
+                    "updated_at":"2026-11-18T05:00:00Z","deleted_at":None}
+            data={"ok":True,"operation_id":"sync.manifest.read","data":{
+                "items":[sample] if len(seen)==1 else [],
+                "next_cursor":"native-a" if len(seen)==1 else None,
+                "consistent_snapshot":False,"local_rust_sync":False}}
+            return io.BytesIO(json.dumps(data).encode("utf-8"))
+        with patch("sync_preview.urlopen",side_effect=fake_urlopen):
+            remote=load_remote_manifest("https://example.invalid","fake-private-token")
+        self.assertEqual(len(remote),1)
+        self.assertEqual(len(seen),2)
+        self.assertEqual(seen[1]["cursor"],"native-a")
+
+    def test_remote_manifest_refuses_task_content_or_false_sync_claims(self):
+        bad={"ok":True,"operation_id":"sync.manifest.read","data":{
+            "items":[{"id":"a","version":1,"status":"todo",
+                      "updated_at":"now","deleted_at":None,"notes":"SHOULD NOT BE HERE"}],
+            "next_cursor":None,"consistent_snapshot":False,"local_rust_sync":False}}
+        with patch("sync_preview.urlopen",return_value=io.BytesIO(json.dumps(bad).encode())):
+            with self.assertRaises(ValueError):
+                remote_manifest_request("https://example.invalid","private",None)
+        bad["data"]["items"]=[]
+        bad["data"]["local_rust_sync"]=True
+        with patch("sync_preview.urlopen",return_value=io.BytesIO(json.dumps(bad).encode())):
+            with self.assertRaises(ValueError):
+                remote_manifest_request("https://example.invalid","private",None)
+
+    def test_tombstone_conflicts_are_counted_without_leaking_identifiers(self):
+        local=[
+            {"id":"x","version":4,"deleted":True,"depends_on":[]},
+            {"id":"y","version":2,"deleted":False,"depends_on":[]},
+            {"id":"z","version":2,"deleted":False,"depends_on":[]},
+        ]
+        remote=[
+            {"id":"x","version":2,"deleted_at":None},
+            {"id":"y","version":3,"deleted_at":"2026-11-18T05:00:00Z"},
+            {"id":"z","version":2,"deleted_at":None},
+        ]
+        report=compare_manifest(local,remote)
+        self.assertEqual(report["counts"]["local_deleted_remote_active"],1)
+        self.assertEqual(report["counts"]["local_active_remote_deleted"],1)
+        self.assertEqual(report["counts"]["remote_tombstones"],1)
+        self.assertNotIn("'x'",str(report))
+        self.assertNotIn("'y'",str(report))
 
 if __name__=="__main__":
     unittest.main()

@@ -61,7 +61,7 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,22);
+  assert.equal(list.data.result.tools.length,23);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
@@ -123,7 +123,7 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
 test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,22);
+  assert.equal(available.length,23);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -239,7 +239,7 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
 test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
  const e=env();
  const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
- assert.equal(expected.operations.length,115);
+ assert.equal(expected.operations.length,116);
  const listed=await call(e,"/mcp",rpc("resources/list",{}));
  assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
  const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
@@ -263,8 +263,8 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
  const first=await callCatalog({limit:7});
  const a=first.data.result.structuredContent;
- assert.equal(a.registry_total,115);
- assert.equal(a.total,115);
+ assert.equal(a.registry_total,116);
+ assert.equal(a.total,116);
  assert.equal(a.items.length,7);
  assert.equal(a.next_cursor,"7");
  assert(a.items[0].inputSchema);
@@ -276,7 +276,7 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const planned=await callCatalog({availability:"planned",limit:500});
  assert.equal(planned.data.result.structuredContent.total,93);
  const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
- assert.equal(implemented.data.result.structuredContent.total,22);
+ assert.equal(implemented.data.result.structuredContent.total,23);
  const item=await callCatalog({operation_id:"comments.delete"});
  assert.equal(item.data.result.structuredContent.items.length,1);
  assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
@@ -290,7 +290,7 @@ test("planned operations are discoverable but never callable",async()=>{
  const e=env();
  const list=await call(e,"/mcp",rpc("tools/list",{}));
  const names=list.data.result.tools.map(x=>x.name);
- assert.equal(names.length,22);
+ assert.equal(names.length,23);
  assert(!names.includes("shiori_comments_delete"));
  const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_comments_delete",arguments:{
   workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
@@ -308,9 +308,9 @@ test("capabilities advertise catalog URI and actual callable tool count",async()
  const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
    arguments:{workspace_id:"personal"}}));
  const c=caps.data.result.structuredContent.capabilities;
- assert.equal(c.registry_total,115);
- assert.equal(c.planned_total,115);
- assert.equal(c.implemented_total,22);
+ assert.equal(c.registry_total,116);
+ assert.equal(c.planned_total,93);
+ assert.equal(c.implemented_total,23);
  assert.equal(c.registry_uri,"shiori://operations/v1");
 });
 
@@ -491,4 +491,49 @@ test("spatial read, viewport save, layout lock and bounded scene export",async()
  assert.equal(scene.data.data.scene.nodes[0].x,150);
  const denied=await call(e,"/api/v1/ops/spatial.scene.export",{workspace_id:"personal",scene_id:"other"});
  assert.equal(denied.status,404);
+});
+
+
+test("S1 manifest returns paged identities and tombstones without exposing task contents",async()=>{
+ const e=env();
+ const create=async(key,title,text)=>(
+  await call(e,"/api/v1/ops/tasks.create",request(key,{title,text}))
+ ).data.data.resource_id;
+ const a=await create("manifest-create-01","Private supplier quote","SECRET NOTES SHOULD NEVER LEAK");
+ const b=await create("manifest-create-02","Confidential customer","NONPUBLIC NOTES");
+ const deleted=await call(e,"/api/v1/ops/tasks.delete",request("manifest-delete-01",{task_id:b,expected_revision:1}));
+ assert.equal(deleted.status,200);
+ const all=await call(e,"/api/v1/ops/sync.manifest.read",{workspace_id:"personal",limit:1});
+ assert.equal(all.status,200,JSON.stringify(all.data));
+ const page=all.data.data;
+ assert.equal(page.items.length,1);
+ assert.equal(page.consistent_snapshot,false,"cursor pages are never advertised as atomic snapshots");
+ assert.equal(page.local_rust_sync,false);
+ assert(page.next_cursor);
+ const second=await call(e,"/api/v1/ops/sync.manifest.read",{workspace_id:"personal",limit:1,cursor:page.next_cursor});
+ assert.equal(second.status,200);
+ const items=page.items.concat(second.data.data.items);
+ assert.deepEqual(items.map(x=>x.id).sort(),[a,b].sort());
+ assert.equal(items.find(x=>x.id===b).version,2);
+ assert(items.find(x=>x.id===b).deleted_at);
+ const serial=JSON.stringify(items);
+ assert(!serial.includes("SECRET NOTES")&&!serial.includes("NONPUBLIC")&&!serial.includes("Private supplier quote"));
+ for(const item of items){
+  assert.deepEqual(Object.keys(item).sort(),["deleted_at","id","status","updated_at","version"].sort());
+ }
+ const end=await call(e,"/api/v1/ops/sync.manifest.read",{workspace_id:"personal",limit:2,cursor:second.data.data.next_cursor??"ffffffff-ffffffff"});
+ assert.equal(end.status,200);
+ assert.equal(end.data.data.items.length,0);
+});
+test("S1 manifest is private and its pagination rejects invalid inputs",async()=>{
+ const e=env();
+ assert.equal((await call(e,"/api/v1/ops/sync.manifest.read",{workspace_id:"personal"},{auth:null})).status,401);
+ assert.equal((await call(e,"/api/v1/ops/sync.manifest.read",{workspace_id:"other"})).status,403);
+ assert.equal((await call(e,"/api/v1/ops/sync.manifest.read",{workspace_id:"personal",cursor:"a' OR 1=1"})).status,400);
+ assert.equal((await call(e,"/api/v1/ops/sync.manifest.read",{workspace_id:"personal",limit:101})).status,400);
+ e.SHIO_AUTH_MODE="oauth"; e.SHIO_OAUTH_SCOPES=["mcp:read"];
+ const result=await call(e,"/mcp",rpc("tools/call",{name:"shiori_sync_manifest_read",arguments:{workspace_id:"personal"}}));
+ assert.equal(result.data.result.isError,undefined);
+ assert.equal(result.data.result.structuredContent.local_rust_sync,false);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency").get().n,0,"read must not create mutations");
 });

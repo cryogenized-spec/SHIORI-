@@ -11,7 +11,9 @@ use std::{path::Path, str::FromStr};
 use thiserror::Error;
 
 mod spatial;
+mod sync;
 pub use spatial::SpatialViewStore;
+pub use sync::{SyncEnvelope, SyncJournal, SyncJournalError, SyncQueueItem};
 
 const SCHEMA_VERSION: i64 = 3;
 
@@ -259,6 +261,15 @@ impl SqliteStore {
                 |row| row.get(0),
             )
             .optional()?)
+    }
+
+    /// Read a task including its deleted tombstone for explicit sync staging.
+    /// Ordinary get() retains its active-only semantics.
+    pub fn get_including_deleted(&self, id: &str) -> Result<Task, StorageError> {
+        self.db
+            .query_row(&format!("{SELECT} WHERE id=?1"), params![id], task_from_row)
+            .optional()?
+            .ok_or(StorageError::NotFound)
     }
 
     pub fn get(&self, id: &str) -> Result<Task, StorageError> {

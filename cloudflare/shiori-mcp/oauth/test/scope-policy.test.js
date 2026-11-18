@@ -9,7 +9,8 @@ test("read methods retain mcp:read only",()=>{
  for(const name of ["shiori_tasks_list","shiori_system_capabilities_read","shiori_tasks_get",
                      "shiori_tasks_dependencies_list","shiori_spatial_scene_read","shiori_system_operations_list",
                      "shiori_spatial_node_position_read","shiori_spatial_viewport_read",
-                     "shiori_spatial_node_inspect","shiori_spatial_scene_export"]){
+                     "shiori_spatial_node_inspect","shiori_spatial_scene_export",
+                     "shiori_sync_manifest_read"]){
   assert.deepEqual(requiredScopesForRpc({method:"tools/call",params:{name}}),["mcp:read"]);
  }
 });

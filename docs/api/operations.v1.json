@@ -1,6 +1,6 @@
 {
   "registry_version": "1.0.0-draft",
-  "date": "2026-11-17",
+  "date": "2026-11-18",
   "status": "mixed; cloudflare_alpha only for implemented operations",
   "http": {
     "base": "/api/v1/ops",
@@ -933,6 +933,130 @@
       "implementation": "cloudflare/shiori-mcp/src/worker.js",
       "data_source": "isolated_remote_d1_not_synced_with_local_rust",
       "release_evidence": "Cloudflare API confirms deployed Worker, D1 binding and secret. CI Node MCP/D1 tests pass. External GitHub Actions verified GET /health (200) and unauthenticated POST /mcp (401) using descriptive User-Agent. Authenticated live tool calls and OAuth remain pending."
+    },
+    {
+      "id": "sync.manifest.read",
+      "phase": "B",
+      "description": "Read content-free remote D1 task identities, versions, statuses and tombstones by stable ID cursor; NOT an atomic snapshot and NOT local Rust synchronization.",
+      "availability": "cloudflare_alpha",
+      "effect": "read",
+      "approval": "none",
+      "scope": "sync:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.manifest.read"
+      },
+      "mcp_tool": "shiori_sync_manifest_read",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.manifest.read"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "items",
+              "next_cursor",
+              "consistent_snapshot",
+              "local_rust_sync"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "version",
+                    "status",
+                    "updated_at",
+                    "deleted_at"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "deleted_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "consistent_snapshot": {
+                "const": false
+              },
+              "local_rust_sync": {
+                "const": false
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Read-only D1 fake-integration tests and authenticated live confirmation required. Cursor-ordered pages are explicitly not an atomic snapshot."
     },
     {
       "id": "tasks.dependencies.add",
@@ -10199,7 +10323,7 @@
       }
     }
   ],
-  "notes": "Registry describes all 115 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
+  "notes": "Registry describes all 116 operation contracts; availability distinguishes deployed Cloudflare functionality from future planned operations. Local Rust support alone does not establish remote availability.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",

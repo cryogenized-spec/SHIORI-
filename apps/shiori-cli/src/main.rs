@@ -11,7 +11,7 @@ use shiori_core::scheduling::{Interval, PlanRequest, PlanningTask, UnscheduledRe
 use shiori_core::{
     Priority, Task, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id, validate_estimate,
 };
-use shiori_storage::{SpatialViewStore, SqliteStore, TaskFilter};
+use shiori_storage::{SpatialViewStore, SqliteStore, SyncJournal, TaskFilter};
 use std::{
     error::Error,
     io::{self, Write},
@@ -112,6 +112,22 @@ enum Command {
     /// Read-only, content-free native task and dependency identity manifest.
     #[command(hide = true)]
     BridgeManifest,
+    /// Stage an exact native task revision into a durable local sync journal.
+    /// This command NEVER calls Cloudflare or uploads task contents.
+    SyncStage {
+        id: String,
+        /// Required optimistic revision from `show` or a previous edit.
+        #[arg(long)]
+        if_version: i64,
+        /// Optional isolated journal database (defaults beside canonical tasks).
+        #[arg(long)]
+        journal: Option<PathBuf>,
+    },
+    /// Inspect the local sync queue without printing task contents or notes.
+    SyncQueue {
+        #[arg(long)]
+        journal: Option<PathBuf>,
+    },
     /// Update only a task's visual placement, guarded by its view revision.
     #[command(hide = true)]
     SpatialSet {
@@ -273,6 +289,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::fs::create_dir_all(parent)?;
     }
     let spatial_path = path.with_extension("isw.sqlite3");
+    let default_journal_path = path.with_extension("sync.sqlite3");
     let mut store = SqliteStore::open(path)?;
     match args.command {
         Command::Add {
@@ -427,6 +444,49 @@ fn main() -> Result<(), Box<dyn Error>> {
                 updated.title, updated.version
             );
             println!("Prerequisites: {}", store.get_dependencies(&id)?.join(", "));
+        }
+        Command::SyncStage {
+            id,
+            if_version,
+            journal,
+        } => {
+            let task = store.get_including_deleted(&id)?;
+            if task.version != if_version {
+                return Err(format!(
+                    "Task changed: expected revision {if_version}, current revision {}",
+                    task.version
+                )
+                .into());
+            }
+            let depends_on = if task.deleted_at.is_none() {
+                store.get_dependencies(&id)?
+            } else {
+                Vec::new()
+            };
+            let mut outbox = SyncJournal::open(journal.unwrap_or(default_journal_path))?;
+            let (item, created) = outbox.stage(&task, &depends_on)?;
+            println!(
+                "{} local event {} (task {}, revision {}). No network request or upload was made.",
+                if created { "Staged" } else { "Already staged" },
+                item.event_id,
+                item.task_id,
+                item.local_version
+            );
+        }
+        Command::SyncQueue { journal } => {
+            let outbox = SyncJournal::open(journal.unwrap_or(default_journal_path))?;
+            let items = outbox.list(500)?;
+            println!(
+                "Local device {}, {} queue entries. Nothing uploaded.",
+                outbox.device_id(),
+                items.len()
+            );
+            for item in items {
+                println!(
+                    "{} {} revision {} status {}",
+                    item.event_id, item.task_id, item.local_version, item.state
+                );
+            }
         }
         Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
         Command::BridgeAttention => {

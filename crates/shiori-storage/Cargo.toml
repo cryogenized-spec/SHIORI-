@@ -10,6 +10,9 @@ shiori-core = { path = "../shiori-core" }
 jiff.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+serde_json = "1"
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
