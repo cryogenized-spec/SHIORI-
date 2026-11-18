@@ -38,8 +38,8 @@ fn stages_one_revision_without_creating_a_remote_connection() {
         .rsplit_once('[')
         .unwrap()
         .1
-        .trim_end_matches(']')
-        .trim();
+        .trim()
+        .trim_end_matches(']');
     let stale = cli(&db, &["sync-stage", id, "--if-version", "99"]);
     assert!(!stale.status.success(), "stale version must fail");
     assert!(
