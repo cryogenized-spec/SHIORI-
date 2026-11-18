@@ -23,9 +23,9 @@ pub enum SyncJournalError {
     UnsupportedSchema(i64),
     #[error("invalid task identity, revision or prerequisite set")]
     InvalidSnapshot,
-    #[error("sync outbox must be a private, regular local file (not a symlink)")] 
+    #[error("sync outbox must be a private, regular local file (not a symlink)")]
     UnsafeJournalFile,
-    #[error("version-zero file contains other application tables; refusing to modify it")] 
+    #[error("version-zero file contains other application tables; refusing to modify it")]
     WrongDatabase,
     #[error("same task identity/revision was already staged with different contents")]
     SnapshotConflict,
@@ -74,15 +74,19 @@ impl SyncJournal {
             use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
             match symlink_metadata(path) {
                 Ok(info) => {
-                    if !info.is_file() || info.file_type().is_symlink()
+                    if !info.is_file()
+                        || info.file_type().is_symlink()
                         || info.permissions().mode() & 0o077 != 0
                     {
                         return Err(SyncJournalError::UnsafeJournalFile);
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    let _file = OpenOptions::new().write(true).create_new(true)
-                        .mode(0o600).open(path)?;
+                    let _file = OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(path)?;
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -97,7 +101,8 @@ impl SyncJournal {
             let other_tables: i64 = db.query_row(
                 "SELECT COUNT(*) FROM sqlite_master
                  WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-                [], |r| r.get(0),
+                [],
+                |r| r.get(0),
             )?;
             if other_tables != 0 {
                 return Err(SyncJournalError::WrongDatabase);
@@ -121,7 +126,7 @@ impl SyncJournal {
                     updated_at TEXT NOT NULL,
                     UNIQUE(task_id,local_version)
                 );
-                CREATE INDEX idx_sync_outbox_state ON sync_outbox(state,created_at,event_id);"
+                CREATE INDEX idx_sync_outbox_state ON sync_outbox(state,created_at,event_id);",
             )?;
             tx.execute(
                 "INSERT INTO sync_meta(key,value) VALUES('device_id',?)",
@@ -131,7 +136,9 @@ impl SyncJournal {
             tx.commit()?;
         }
         let device_id: String = db.query_row(
-            "SELECT value FROM sync_meta WHERE key='device_id'", [], |r| r.get(0)
+            "SELECT value FROM sync_meta WHERE key='device_id'",
+            [],
+            |r| r.get(0),
         )?;
         if Uuid::parse_str(&device_id).is_err() {
             return Err(SyncJournalError::InvalidSnapshot);
@@ -146,9 +153,11 @@ impl SyncJournal {
     /// Explicitly stage a native snapshot. Repeated staging of *identical*
     /// task version and dependencies returns the original event without
     /// creating another queue record. Divergent same-version snapshots fail.
-    pub fn stage(&mut self, task: &Task, dependencies: &[String])
-        -> Result<(SyncQueueItem, bool), SyncJournalError>
-    {
+    pub fn stage(
+        &mut self,
+        task: &Task,
+        dependencies: &[String],
+    ) -> Result<(SyncQueueItem, bool), SyncJournalError> {
         if task.id.is_empty() || task.id.len() > 160 || task.version < 1 {
             return Err(SyncJournalError::InvalidSnapshot);
         }
@@ -172,11 +181,16 @@ impl SyncJournal {
         };
         let payload = serde_json::to_string(&envelope)?;
         let now = utc_rfc3339(Timestamp::now());
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing: Option<String> = tx.query_row(
-            "SELECT payload_json FROM sync_outbox WHERE task_id=? AND local_version=?",
-            params![task.id,task.version], |r| r.get(0),
-        ).optional()?;
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT payload_json FROM sync_outbox WHERE task_id=? AND local_version=?",
+                params![task.id, task.version],
+                |r| r.get(0),
+            )
+            .optional()?;
         let changed = match existing {
             Some(old) if old == payload => false,
             Some(_) => return Err(SyncJournalError::SnapshotConflict),
@@ -191,83 +205,121 @@ impl SyncJournal {
         };
         let item = Self::read_item(&tx, &event_id)?.ok_or(SyncJournalError::EventConflict)?;
         tx.commit()?;
-        Ok((item,changed))
+        Ok((item, changed))
     }
 
-    fn read_item(db: &Connection, event_id: &str)
-        -> Result<Option<SyncQueueItem>, rusqlite::Error>
-    {
+    fn read_item(
+        db: &Connection,
+        event_id: &str,
+    ) -> Result<Option<SyncQueueItem>, rusqlite::Error> {
         db.query_row(
             "SELECT event_id,task_id,local_version,state,remote_version,created_at
              FROM sync_outbox WHERE event_id=?",
             [event_id],
-            |r| Ok(SyncQueueItem {
-                event_id:r.get(0)?,task_id:r.get(1)?,local_version:r.get(2)?,
-                state:r.get(3)?,remote_version:r.get(4)?,created_at:r.get(5)?,
-            }),
-        ).optional()
+            |r| {
+                Ok(SyncQueueItem {
+                    event_id: r.get(0)?,
+                    task_id: r.get(1)?,
+                    local_version: r.get(2)?,
+                    state: r.get(3)?,
+                    remote_version: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            },
+        )
+        .optional()
     }
 
     pub fn list(&self, limit: usize) -> Result<Vec<SyncQueueItem>, SyncJournalError> {
-        let mut stmt=self.db.prepare(
+        let mut stmt = self.db.prepare(
             "SELECT event_id,task_id,local_version,state,remote_version,created_at
-             FROM sync_outbox ORDER BY created_at,event_id LIMIT ?"
+             FROM sync_outbox ORDER BY created_at,event_id LIMIT ?",
         )?;
-        let rows=stmt.query_map([limit.min(500) as i64], |r| Ok(SyncQueueItem {
-            event_id:r.get(0)?,task_id:r.get(1)?,local_version:r.get(2)?,
-            state:r.get(3)?,remote_version:r.get(4)?,created_at:r.get(5)?,
-        }))?;
-        Ok(rows.collect::<Result<Vec<_>,_>>()?)
+        let rows = stmt.query_map([limit.min(500) as i64], |r| {
+            Ok(SyncQueueItem {
+                event_id: r.get(0)?,
+                task_id: r.get(1)?,
+                local_version: r.get(2)?,
+                state: r.get(3)?,
+                remote_version: r.get(4)?,
+                created_at: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     /// Content-bearing read for a future *opt-in* authenticated upload client.
     /// Never call it during read-only reconciliation or print it by default.
-    pub fn staged_envelope(&self,event_id:&str)->Result<SyncEnvelope,SyncJournalError>{
-        let value: String = self.db.query_row(
-            "SELECT payload_json FROM sync_outbox WHERE event_id=? AND state='pending'",
-            [event_id], |r| r.get(0),
-        ).optional()?.ok_or(SyncJournalError::EventConflict)?;
+    pub fn staged_envelope(&self, event_id: &str) -> Result<SyncEnvelope, SyncJournalError> {
+        let value: String = self
+            .db
+            .query_row(
+                "SELECT payload_json FROM sync_outbox WHERE event_id=? AND state='pending'",
+                [event_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or(SyncJournalError::EventConflict)?;
         Ok(serde_json::from_str(&value)?)
     }
 
     /// Called *only after* a client verifies an authenticated remote receipt.
     /// The canonical task and pending newer events are never changed.
-    pub fn acknowledge(&mut self,event_id:&str,remote_id:&str,remote_version:i64,
-        received_task_id:&str,received_local_version:i64) -> Result<bool,SyncJournalError> {
+    pub fn acknowledge(
+        &mut self,
+        event_id: &str,
+        remote_id: &str,
+        remote_version: i64,
+        received_task_id: &str,
+        received_local_version: i64,
+    ) -> Result<bool, SyncJournalError> {
         if remote_id.is_empty() || remote_version < 1 {
             return Err(SyncJournalError::ReceiptMismatch);
         }
-        let tx=self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let old=Self::read_item(&tx,event_id)?.ok_or(SyncJournalError::EventConflict)?;
-        if old.task_id!=received_task_id || old.local_version!=received_local_version {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let old = Self::read_item(&tx, event_id)?.ok_or(SyncJournalError::EventConflict)?;
+        if old.task_id != received_task_id || old.local_version != received_local_version {
             return Err(SyncJournalError::ReceiptMismatch);
         }
         let existing: Option<(String,i64)> = tx.query_row(
             "SELECT remote_id,remote_version FROM sync_outbox WHERE event_id=? AND state='acknowledged'",
             [event_id], |r| Ok((r.get(0)?,r.get(1)?)),
         ).optional()?;
-        if let Some((id,version))=existing {
-            if id==remote_id && version==remote_version {return Ok(false);}
+        if let Some((id, version)) = existing {
+            if id == remote_id && version == remote_version {
+                return Ok(false);
+            }
             return Err(SyncJournalError::ReceiptMismatch);
         }
-        let changed=tx.execute(
+        let changed = tx.execute(
             "UPDATE sync_outbox SET state='acknowledged',remote_id=?,remote_version=?,updated_at=?
              WHERE event_id=? AND state='pending'",
-            params![remote_id,remote_version,utc_rfc3339(Timestamp::now()),event_id],
+            params![
+                remote_id,
+                remote_version,
+                utc_rfc3339(Timestamp::now()),
+                event_id
+            ],
         )?;
-        if changed!=1{return Err(SyncJournalError::EventConflict);}
+        if changed != 1 {
+            return Err(SyncJournalError::EventConflict);
+        }
         tx.commit()?;
         Ok(true)
     }
 
     /// Retain conflicting content and provenance for explicit human review.
-    pub fn mark_conflict(&mut self,event_id:&str)->Result<(),SyncJournalError>{
-        let changed=self.db.execute(
+    pub fn mark_conflict(&mut self, event_id: &str) -> Result<(), SyncJournalError> {
+        let changed = self.db.execute(
             "UPDATE sync_outbox SET state='conflict',updated_at=?
              WHERE event_id=? AND state='pending'",
-            params![utc_rfc3339(Timestamp::now()),event_id],
+            params![utc_rfc3339(Timestamp::now()), event_id],
         )?;
-        if changed!=1{return Err(SyncJournalError::EventConflict);}
+        if changed != 1 {
+            return Err(SyncJournalError::EventConflict);
+        }
         Ok(())
     }
 }
