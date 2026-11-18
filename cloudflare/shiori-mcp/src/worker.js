@@ -204,6 +204,14 @@ async function sha256hex(payload){
 
 async function run(id,arg,env){
  const def=BY_ID.get(id);if(!def)E(404,"UNSUPPORTED_CAPABILITY","Operation not deployed");
+ // Defense-in-depth: the OAuth resource enforces scopes at the gateway,
+ // and the operation executor independently refuses read-only mutations.
+ if(env.SHIO_AUTH_MODE==="oauth"){
+  const scopes=Array.isArray(env.SHIO_OAUTH_SCOPES)?env.SHIO_OAUTH_SCOPES:[];
+  const effect=CATALOG_OPERATIONS.find(entry=>entry.id===id)?.effect;
+  if(!scopes.includes("mcp:read") || (effect!=="read"&&!scopes.includes("mcp:write")))
+   E(403,"FORBIDDEN","OAuth grant does not allow this operation");
+ }
  const a=validate(def,arg,env),db=env.DB,w=a.workspace_id;
  if(id==="system.operations.list"){
   const cursor=a.cursor??"0";
