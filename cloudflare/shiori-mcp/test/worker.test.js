@@ -827,7 +827,7 @@ test("S3 atomic baseline pairs task/tombstone/edge metadata with one exact feed 
  const data=snap.data.data;
  assert.equal(data.task_count,2);
  assert.equal(data.edge_count,1);
- assert.equal(data.cutoff,4,"high water must include all committed changes at read time");
+ assert.equal(data.cutoff,5,"dependency creation also bumps the dependent task revision");
  assert.deepEqual(data.items.map(x=>x.id),[a,b].sort());
  assert.equal(data.items.find(x=>x.id===a).version,2);
  assert(data.items.find(x=>x.id===a).deleted_at);
@@ -844,7 +844,7 @@ test("S3 atomic baseline pairs task/tombstone/edge metadata with one exact feed 
    workspace_id:"personal",cursor:data.cutoff,limit:100
  });
  assert.equal(delta.status,200);
- assert.deepEqual(delta.data.data.changes.map(x=>x.seq),[5]);
+ assert.deepEqual(delta.data.data.changes.map(x=>x.seq),[6]);
  assert.equal(delta.data.data.changes[0].task_id,b);
  assert.equal(delta.data.data.changes[0].kind,"task.update");
 });
