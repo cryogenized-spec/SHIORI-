@@ -276,6 +276,8 @@ async function run(id,arg,env){
  if(id==="sync.import.apply"){
   if(a.owner_approved!==true)E(412,"PRECONDITION_REQUIRED","Owner must explicitly approve the exact proposed import");
   requireUuid(a.proposal_id,"proposal_id");
+  if(new TextEncoder().encode(a.payload_json).length>16000)
+    E(413,"VALIDATION_FAILED","Import payload exceeds the 16 KiB S2 pilot limit");
   const fingerprint=await requestFingerprint(id,a);
   const cached=await duplicate(db,w,id,a.idempotency_key,fingerprint);
   if(cached)return cached;
