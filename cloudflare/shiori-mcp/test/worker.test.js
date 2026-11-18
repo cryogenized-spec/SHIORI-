@@ -62,7 +62,7 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,29);
+  assert.equal(list.data.result.tools.length,31);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
@@ -124,7 +124,7 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
 test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,29);
+  assert.equal(available.length,31);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -240,7 +240,7 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
 test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
  const e=env();
  const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
- assert.equal(expected.operations.length,122);
+ assert.equal(expected.operations.length,124);
  const listed=await call(e,"/mcp",rpc("resources/list",{}));
  assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
  const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
@@ -264,8 +264,8 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
  const first=await callCatalog({limit:7});
  const a=first.data.result.structuredContent;
- assert.equal(a.registry_total,122);
- assert.equal(a.total,122);
+ assert.equal(a.registry_total,124);
+ assert.equal(a.total,124);
  assert.equal(a.items.length,7);
  assert.equal(a.next_cursor,"7");
  assert(a.items[0].inputSchema);
@@ -277,7 +277,7 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const planned=await callCatalog({availability:"planned",limit:500});
  assert.equal(planned.data.result.structuredContent.total,93);
  const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
- assert.equal(implemented.data.result.structuredContent.total,29);
+ assert.equal(implemented.data.result.structuredContent.total,31);
  const item=await callCatalog({operation_id:"comments.delete"});
  assert.equal(item.data.result.structuredContent.items.length,1);
  assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
@@ -291,7 +291,7 @@ test("planned operations are discoverable but never callable",async()=>{
  const e=env();
  const list=await call(e,"/mcp",rpc("tools/list",{}));
  const names=list.data.result.tools.map(x=>x.name);
- assert.equal(names.length,29);
+ assert.equal(names.length,31);
  assert(!names.includes("shiori_comments_delete"));
  const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_comments_delete",arguments:{
   workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
@@ -309,9 +309,9 @@ test("capabilities advertise catalog URI and actual callable tool count",async()
  const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
    arguments:{workspace_id:"personal"}}));
  const c=caps.data.result.structuredContent.capabilities;
- assert.equal(c.registry_total,122);
+ assert.equal(c.registry_total,124);
  assert.equal(c.planned_total,93);
- assert.equal(c.implemented_total,29);
+ assert.equal(c.implemented_total,31);
  assert.equal(c.registry_uri,"shiori://operations/v1");
 });
 
@@ -889,4 +889,70 @@ test("S3 baseline respects OAuth read-only scopes and cross-workspace isolation"
  assert.equal((await call(e,"/api/v1/ops/sync.baseline.read",{workspace_id:"personal"},{auth:null})).status,401);
  assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency").get().n,0,
    "Snapshot read must be entirely nonmutating");
+});
+
+
+test("S3 owner revocation is permanent, idempotent, and blocks stale import proposals",async()=>{
+ const e=env(),f=importFixture();
+ const statusPath="/api/v1/ops/sync.device.status.read";
+ const revokePath="/api/v1/ops/sync.device.revoke";
+ assert.equal((await call(e,statusPath,{workspace_id:"personal",device_id:f.device_id})).status,404);
+ assert.equal((await pairFixture(e,f)).status,200);
+ const before=await call(e,statusPath,{workspace_id:"personal",device_id:f.device_id});
+ assert.equal(before.status,200);
+ assert.equal(before.data.data.can_import,true);
+ assert.equal(before.data.data.revoked_at,null);
+ const preview=await previewFixture(e,f,"revoke-existing-proposal-1");
+ assert.equal(preview.status,200,JSON.stringify(preview.data));
+ const refused=await call(e,revokePath,request("revoke-denied-1",{
+  device_id:f.device_id,confirm_revocation:false
+ }));
+ assert.equal(refused.status,412);
+ assert.equal((await call(e,statusPath,{workspace_id:"personal",device_id:f.device_id})).data.data.can_import,true);
+ const args=request("revoke-approved-owner-1",{device_id:f.device_id,confirm_revocation:true});
+ const revoke=await call(e,revokePath,args);
+ assert.equal(revoke.status,200,JSON.stringify(revoke.data));
+ assert.equal(revoke.data.data.changed,true);
+ assert.equal(revoke.data.data.device_id,f.device_id);
+ assert(revoke.data.data.revoked_at);
+ const replay=await call(e,revokePath,args);
+ assert.deepEqual(replay.data.data,revoke.data.data,"same approval key is replay-safe");
+ assert.equal((await call(e,revokePath,request("revoke-another-key-1",{
+  device_id:f.device_id,confirm_revocation:true
+ }))).status,409,"new approval cannot revoke a second time");
+ const after=await call(e,statusPath,{workspace_id:"personal",device_id:f.device_id});
+ assert.equal(after.status,200);
+ assert.equal(after.data.data.can_import,false);
+ assert.equal(after.data.data.revoked_at,revoke.data.data.revoked_at);
+ assert.equal((await previewFixture(e,f,"revoked-preview-1")).status,403);
+ assert.equal((await pairFixture(e,f,"revoked-repair-1")).status,409,
+   "revoking must not resurrect old device identity");
+ const stale=await call(e,"/api/v1/ops/sync.import.apply",request("apply-before-revoked-1",{
+   proposal_id:preview.data.data.proposal_id,payload_json:f.payload_json,owner_approved:true
+ }));
+ assert.equal(stale.status,403,"previously approved preview must not bypass revocation");
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM remote_tasks").get().n,0);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM sync_imports").get().n,0);
+ assert.equal((await call(e,statusPath,{workspace_id:"other",device_id:f.device_id})).status,403);
+ assert.equal((await call(e,statusPath,{workspace_id:"personal",device_id:f.device_id},{auth:null})).status,401);
+});
+
+test("S3 read-only OAuth may inspect device status but cannot revoke it",async()=>{
+ const e=env(),f=importFixture();
+ await pairFixture(e,f);
+ e.SHIO_AUTH_MODE="oauth";e.SHIO_OAUTH_SCOPES=["mcp:read"];
+ const status=await call(e,"/mcp",rpc("tools/call",{
+   name:"shiori_sync_device_status_read",arguments:{workspace_id:"personal",device_id:f.device_id}
+ }));
+ assert.equal(status.status,200,JSON.stringify(status.data));
+ assert.equal(status.data.result.structuredContent.can_import,true);
+ const other=await call(e,"/mcp",rpc("tools/call",{
+   name:"shiori_sync_device_revoke",
+   arguments:request("oauth-revoke-denied-1",{device_id:f.device_id,confirm_revocation:true})
+ }));
+ assert.equal(other.status,403,"OAuth scope gate must block revoke");
+ const checked=await call(e,"/api/v1/ops/sync.device.status.read",{
+   workspace_id:"personal",device_id:f.device_id
+ });
+ assert.equal(checked.data.data.can_import,true);
 });
