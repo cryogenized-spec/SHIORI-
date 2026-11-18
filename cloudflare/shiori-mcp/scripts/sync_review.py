@@ -109,7 +109,6 @@ def delta_impact(con: sqlite3.Connection, cutoff: int, checkpoint: int,
     changed_edges = set()
     delete_ids = set()
     edge_pairs = set()
-    edge_missing_baseline = set()
     latest_versions = {}
     previous = cutoff
     rows = 0
