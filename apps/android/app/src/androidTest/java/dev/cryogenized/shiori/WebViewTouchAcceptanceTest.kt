@@ -37,6 +37,8 @@ class WebViewTouchAcceptanceTest {
     private lateinit var scenario: ActivityScenario<MainActivity>
     private lateinit var webView: WebView
     private var lastTouchDiagnostic = "no touch yet"
+    private var lastDispatchedDownAt = -1L
+    private var lastDispatchedUpAt = -1L
 
     @Before
     fun launchCleanActivity() {
@@ -148,6 +150,16 @@ class WebViewTouchAcceptanceTest {
         scenario.onActivity { activity ->
             webView = findWebView(activity.window.decorView)
                 ?: error("SHIORI Android Activity has no WebView")
+            // Observe ACTUAL native touch dispatch without consuming, replacing,
+            // or synthesizing gestures. A successful UiAutomation injection alone
+            // does not establish that InputDispatcher routed it into this view.
+            webView.setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> lastDispatchedDownAt = event.downTime
+                    MotionEvent.ACTION_UP -> lastDispatchedUpAt = event.downTime
+                }
+                false
+            }
         }
     }
 
@@ -200,19 +212,17 @@ class WebViewTouchAcceptanceTest {
      * All taps are real Android pointer events, never JS .click() calls.
      */
     private fun touch(selector: String) {
-        // The emulator may report a fully laid-out WebView before Android
-        // routes physical input to its window. Do not retry failed taps:
-        // wait for initial window focus and require the very first real
-        // pointer gesture to succeed.
-        if (selector == ".mobile-fab") {
-            await("New Task target has Android window input focus") {
-                var focused = false
-                scenario.onActivity {
-                    focused = webView.isShown && webView.hasWindowFocus() &&
-                        webView.windowToken != null
-                }
-                focused
+        // Recheck the OS-level input owner for *every* genuine gesture,
+        // including modal X/Cancel/Create; focus may be lost after opening a
+        // modal. Never retry a failed tap or replace it with a DOM click.
+        ensureForegroundWindow()
+        await("touch target $selector has Android window input focus") {
+            var focused = false
+            scenario.onActivity {
+                focused = webView.isShown && webView.hasWindowFocus() &&
+                    webView.windowToken != null
             }
+            focused
         }
         val quoted = JSONObject.quote(selector)
         javascript(
@@ -262,9 +272,12 @@ class WebViewTouchAcceptanceTest {
         val scale = width.toDouble() / bounds.getDouble("viewport")
         val x = (location[0] + bounds.getDouble("x") * scale).toFloat()
         val y = (location[1] + bounds.getDouble("y") * scale).toFloat()
+        var currentWindowFocus = false
+        scenario.onActivity { currentWindowFocus = webView.hasWindowFocus() }
         lastTouchDiagnostic = "selector=$selector, screen=($x,$y), " +
             "webView=${width}x$height at (${location[0]},${location[1]}), " +
-            "ime=$imeVisible, keyboardTop=$keyboardTop, cssBounds=$bounds"
+            "focused=$currentWindowFocus, ime=$imeVisible, " +
+            "keyboardTop=$keyboardTop, cssBounds=$bounds"
         // The DOM hit test cannot detect an Android keyboard overlay.
         // Refuse to inject an ostensibly successful tap into that overlay.
         assertTrue(
@@ -292,6 +305,16 @@ class WebViewTouchAcceptanceTest {
             assertTrue("Android rejected pointer UP at ($x,$y)",
                 automation.injectInputEvent(up, true))
             instrument.waitForIdleSync()
+            assertTrue(
+                "Injected native DOWN did not reach the WebView: " + lastTouchDiagnostic +
+                    ", dispatchedDownTime=" + lastDispatchedDownAt,
+                lastDispatchedDownAt == start
+            )
+            assertTrue(
+                "Injected native UP did not reach the WebView: " + lastTouchDiagnostic +
+                    ", dispatchedUpDownTime=" + lastDispatchedUpAt,
+                lastDispatchedUpAt == start
+            )
         } finally {
             down.recycle()
             up.recycle()
