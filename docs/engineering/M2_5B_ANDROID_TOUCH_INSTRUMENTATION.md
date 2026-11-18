@@ -82,3 +82,9 @@ summon the keyboard, verifies keyboard dismissal after Cancel and reruns the
 full two-test pointer suite twice without clearing app data. These checks
 are **not equivalent to physical-handset acceptance**. Keep this branch
 blocked until the current exact-head Android emulator workflow passes.
+
+## Android 15 foreground-window recovery experiment — 18 November 2026
+
+Issue [#65](https://github.com/cryogenized-spec/SHIORI-/issues/65) reappeared in documentation-only PR #78's Android emulator run: both native tests timed out before any gesture with a visible, attached, 1080 × 2138 WebView reporting `hasWindowFocus() == false`. APK/native compilation and the other quality checks passed. The preceding synchronization PRs had each passed the same real-touch suite, confirming this is intermittent startup state, not evidence of a synchronization regression.
+
+The instrumentation test now gives Android three seconds to hand over window focus normally. Only if focus remains absent does it use `UiAutomation.executeShellCommand("am start -W -f 0x30000000 -n dev.cryogenized.shiori/.MainActivity")` to bring the existing app task to the foreground, without clearing the activity data or injecting a task gesture. It then captures the WebView again and still requires normal window focus, correct mobile viewport geometry, genuine touchscreen DOWN/UP input, modal behavior, offline persistence and Activity recreation. The test also reports decor-window and decor-view focus separately if it fails. It does **not** use JavaScript clicks, skip assertions, or implement a retry loop for failed gestures. This is a CI-only focus-restoration experiment, not a production-application change or proof that the Android problem is fully resolved. A real handset remains an acceptance requirement.
