@@ -1,6 +1,6 @@
 # SHIORI Cloudflare MCP — single-owner alpha (18 November 2026)
 
-**Verified live 18 November 2026:** 28 runnable operations, 121 versioned contracts and 93 planned. S2 owner-reviewed initial import and S3 content-free D1 change feed are deployed. No canonical Rust ↔ D1 task synchronization exists. Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
+**Verified live 18 November 2026:** 29 runnable operations, 122 versioned contracts and 93 planned. S2 owner-reviewed initial import and S3 content-free D1 change feed and atomic bounded snapshot are deployed. No canonical Rust ↔ D1 task synchronization exists. Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
 
 ## S2/S3 synchronization boundary
 
@@ -21,7 +21,7 @@ The **23** verified deployed operations, prior to S2 promotion, are:
 - Tasks: `tasks.list`, `tasks.get`, `tasks.create`, `tasks.update`, `tasks.status.set`, `tasks.delete` (soft delete), `tasks.restore`, `tasks.priority.set`.
 - Graph: `tasks.dependencies.list`, `tasks.dependencies.add`, `tasks.dependencies.remove`.
 - Spatial: `spatial.scene.read`, `spatial.scene.export`, `spatial.node.position.read`, `spatial.node.position.set`, `spatial.viewport.read`, `spatial.viewport.save`, `spatial.layout.lock.set`, `spatial.edge.style.set`, `spatial.node.inspect`.
-- Read-only reconciliation: `sync.manifest.read` (identity/version/tombstone pages, not an atomic snapshot).
+- Read-only reconciliation: `sync.manifest.read` (identity/version/tombstone pages, not an atomic snapshot), and `sync.baseline.read` (a single primary-pinned, consistent snapshot of up to 100 task identities and 200 edges, with exact change-feed cutoff). The latter **does not** return task contents or grant permission to apply remote data to Rust.
 
 Four new **S2 first-import pilot** operations are implemented in the source but must pass release gates and deployment before being considered live: `sync.device.pair`, `sync.import.preview`, `sync.import.apply`, `sync.import.receipt.read`. They do not authorize automatic replication. Details in [S2](../../docs/engineering/RUST_CLOUDFLARE_SYNC_S2.md).
 
@@ -81,8 +81,8 @@ Tests use a disposable in-memory SQLite database and do not touch Cloudflare or 
 
 ## Complete operation schema discovery
 
-Shiori has **121 operation contracts** in `docs/api/operations.v1.json`.
-The Cloudflare MCP makes **all 121 full contracts discoverable** without
+Shiori has **122 operation contracts** in `docs/api/operations.v1.json`.
+The Cloudflare MCP makes **all 122 full contracts discoverable** without
 presenting unimplemented commands as runnable. The registry includes
 input and output JSON Schemas, operation ID, scope, effect, approval
 requirements, phase and actual availability.
@@ -96,7 +96,7 @@ requirements, phase and actual availability.
   access with `workspace_id`, `cursor`, `limit`, and optional
   `availability` or exact `operation_id` lookup. It returns full contracts,
   not merely names.
-- `tools/list` deliberately advertises **only the 28 runnable operations**:
+- `tools/list` deliberately advertises **only the 29 runnable operations**:
   the original operations plus guarded CRUD, graph and spatial operations. Unsupported operations
   are never executed; they cannot be called merely because their schema
   exists in the catalog.
