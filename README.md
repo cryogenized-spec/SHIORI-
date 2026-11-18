@@ -1,98 +1,93 @@
 # SHIORI / 栞
 
-Local-first task management, independent of AI, account providers, and hosting services. A Rust-first project with the ELF//SHELL visual identity.
+**Local-first, Rust-first task management** with an infinite spatial workspace, optional AI and an authenticated Model Context Protocol (MCP) interface. SHIORI is independent of ELF//SHELL and CiRYVA, although it shares their visual design direction. Ordinary offline task management must not require an AI model, online account or Cloudflare.
 
-## Status
+## Project status — 18 November 2026
 
-**Early implementation, not a public release.** This branch includes the Rust task model, SQLite persistence, a local CLI, the interactive web prototype, and a **development-only localhost adapter** that connects the browser to the real Rust CLI and SQLite database. The local bridge is not a public REST/MCP service or finished sync/backup system. A separate single-owner Cloudflare MCP alpha now exists, but it is not synchronized with the local Rust store.
+**Engineering alpha / private development. Not a production release or a synchronized multi-device task manager.** The local Rust/SQLite application, Android offline shell, and user-owned Cloudflare MCP alpha are operational **but still use separate task databases**. Do not treat Cloudflare tasks as copies of locally stored tasks.
 
-## Development
+| Area | Verified implementation | Still missing for a dependable release |
+| --- | --- | --- |
+| Rust core / storage | Jiff **1.0.0**, canonical SQLite schema **v3**, validated task CRUD, priorities, statuses, dependency cycle checks, indexed local attention, revisions and soft-delete tombstones | Full recurring work, calendar-backed scheduling, sync history/conflict UX, production backup/recovery acceptance |
+| Desktop/web | Responsive prototype; optional **localhost-only** Rust CLI/SQLite adapter; real Rust-backed spatial task scene and separate versioned position sidecar | Authenticated production app service, durable inbox and full artefact graph; extensive user testing |
+| Android | Bundled offline WebView shell, Rust JNI/SQLite working copy, guarded experimental native source/cutover and recovery paths; debug APK and three native ABIs build in CI | Physical-device release/upgrade tests, native source finalization; intermittent Android 15 real-touch emulator test **[#65](https://github.com/cryogenized-spec/SHIORI-/issues/65)** remains open |
+| Remote MCP | **22 live operations** out of **115 documented contracts**; OAuth **2.1 + PKCE**; owner consent with explicit required read and optional write scopes; authenticated real task create/read and 7 dependency edges demonstrated | **93 planned/unavailable operations**, no multiuser service, no canonical Rust ↔ Cloudflare sync, limited to single-owner isolated D1 |
+| Synchronization | Read-only identity/revision/tombstone manifest and counts-only local-vs-cloud comparison; [ADR 0005](docs/adr/0005-rust-cloudflare-sync.md) | Durable paired device identities, approved local-to-cloud import, offline queued edits, conflict resolution, delta cursors, rollback, and two-device convergence |
 
-Requires Rust **1.99.1** or newer and Cargo. On Linux:
+**Live test evidence:** eight deliberately labelled demo tasks are in the isolated Cloudflare workspace with seven native prerequisite edges. This verifies the remote graph, **not** replication to the local Rust database. The current GitHub main quality workflow passed after the [Chrono → Jiff migration (#64)](https://github.com/cryogenized-spec/SHIORI-/pull/64); the Android emulator real-touch failure remains tracked independently.
 
-```bash
-cargo test --workspace
-cargo run -p shiori-cli -- add "Review SHIORI task model" --project Development --priority high --due 2026-11-12 --minutes 45
-cargo run -p shiori-cli -- list
-# Edit without overwriting other fields; remove due date explicitly:
-cargo run -p shiori-cli -- edit <task-id> --notes "Review the roadmap" --project Development --priority urgent --clear-due
-# Optionally require the revision displayed by "show" or a previous edit:
-cargo run -p shiori-cli -- edit <task-id> --title "Revised" --if-version 2
-# Link prerequisites, edit a stored estimate and inspect task relationships:
-cargo run -p shiori-cli -- depends <task-id> --on <prerequisite-task-id>
-cargo run -p shiori-cli -- edit <task-id> --minutes 75
-cargo run -p shiori-cli -- show <task-id>
-# Single-user local assignment identity (not a login or permission model):
-cargo run -p shiori-cli -- edit <task-id> --assign-to local
-cargo run -p shiori-cli -- edit <task-id> --unassign
-# The browser's Assigned to me panel reads indexed SQLite assignments,
-# distinguishing waiting-on-prerequisite tasks from actionable work.
-# Local-only attention and a side-effect-free scheduling preview:
-cargo run -p shiori-cli -- attention --on 2026-11-12
-cargo run -p shiori-cli -- plan 2026-11-12 --start 08:00 --end 17:00 --break-start 13:00 --break-end 14:00 --utc-offset-minutes 120 --default-minutes 30
-```
+### Current implementation priorities
 
-By default the local CLI stores data in `~/.local/share/shiori/tasks.sqlite3`; override with `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite works offline. `remove` is a soft delete for later synchronization support. Existing pre-versioning, v1 and v2 SQLite files are upgraded transactionally to canonical schema version 3 while retaining task records and tombstones; unknown future schema versions are refused rather than overwritten. Full multi-version migrations and safe live backup are still future work.
+1. **Unify Rust and Cloudflare task services:** preserve canonical local IDs and content boundaries; validate explicit owner pairing; add versioned sync manifests and durable local outbox, preview/approval, idempotent upload, revision/conflict responses and lossless rollback; test disconnected edits, duplicates and tombstones with two independent clients. See [#47](https://github.com/cryogenized-spec/SHIORI-/issues/47) and [ADR 0005](docs/adr/0005-rust-cloudflare-sync.md).
+2. **Finish Android acceptance:** repair the real-touch test [#65](https://github.com/cryogenized-spec/SHIORI-/issues/65), run physical-device offline/upgrade/backup checks, and finalize a durable native database source.
+3. **Complete everyday task workflows:** durable universal inbox, recurrence, attention and saved views, notifications, calendar-aware scheduling with preview/apply/undo.
+4. **Expand the Spatial Workspace and optional AI:** first-class typed artefacts, indexed backlinks, retrieval, validated expressive scenes and a separate secured companion. These are *not prerequisites* for a useful private beta.
 
-The web design concept runs standalone in Firefox by opening `apps/web/index.html`, or via a local static server (demo tasks only):
+[Product roadmap](ROADMAP.md) · [Remote API operation registry](docs/api/operations.v1.json) · [MCP deployment](cloudflare/shiori-mcp/README.md) · [OAuth and sync preview](cloudflare/shiori-mcp/oauth/README.md) · [Android release hold](docs/engineering/M2_5_ANDROID_ACCEPTANCE_AND_RELEASE_HOLD.md)
+
+## Local development (Linux)
+
+Requires the pinned Rust **1.99.1** toolchain. All CLI commands operate on **your local SQLite database**, never the Cloudflare D1 store:
 
 ```bash
-cd apps/web && python3 -m http.server 8765 --bind 127.0.0.1
+cargo test --workspace --locked
+cargo build --locked -p shiori-cli
+target/debug/shiori-cli add "Review the SHIORI roadmap" --project Development --priority high --minutes 45
+target/debug/shiori-cli list
+target/debug/shiori-cli attention --on 2026-11-18
+target/debug/shiori-cli plan 2026-11-18 --start 08:00 --end 17:00 --break-start 13:00 --break-end 14:00 --utc-offset-minutes 120
+# Inspect a content-free, read-only identity/revision/tombstone manifest:
+target/debug/shiori-cli bridge-manifest
 ```
 
-**To use real tasks from SQLite rather than sample records**, build the local Rust CLI and launch the development bridge:
+Default database: `~/.local/share/shiori/tasks.sqlite3`; specify `--database /path/to/tasks.sqlite3` or `SHIORI_DB`. SQLite v0–v2 files are upgraded transactionally to canonical v3; unknown future schemas are refused. A visual spatial-position sidecar, `tasks.isw.sqlite3`, has its own view revisions; moving a card must not modify task status or dependencies.
+
+### Web UI using real local tasks
+
+The standalone browser prototype uses demo content. To use the **actual** local SQLite tasks:
 
 ```bash
 cargo build --locked -p shiori-cli
 python3 apps/local_bridge.py --cli target/debug/shiori-cli --port 8765
 ```
 
-Open `http://127.0.0.1:8765`. The footer changes to **LOCAL RUST / SQLITE** when connected. The bridge binds only to loopback, invokes Rust CLI operations, and does not import demonstration tasks. The local **Assigned to me** view uses an indexed SQLite query for the `local` identity and exposes dependency blockers and local-read freshness. Assignment IDs are not authentication or multi-user permissions; older task records remain unassigned until explicitly assigned. **Development only:** it is not an authenticated remote service; do not expose it to your LAN, a proxy or a tunnel. For the threat model, limitations and `--database` override see [local web bridge](docs/engineering/LOCAL_WEB_BRIDGE.md).
+Then open `http://127.0.0.1:8765`. The footer identifies **LOCAL RUST / SQLITE**. The `Spatial canvas` link opens the ISW, whose `Live Rust` action reads real tasks and prerequisite relationships. The local attention view reads indexed assigned-to-`local` tasks and explicitly distinguishes blocked work. The planning command remains a **non-mutating fixed-offset preview**, not a DST-aware named-zone or calendar write system.
 
-The optional calendar on **My day** can be collapsed; its state is saved in local storage. Select a date to filter the task list for that day, and select **Today** to reset.
+**Security:** the Python bridge is a *development-only loopback adapter*. Never expose it on a public hostname, LAN, proxy or tunnel; it has no production-grade authentication. [Local bridge threat model](docs/engineering/LOCAL_WEB_BRIDGE.md).
 
-**M2/M3 development slice:** the browser prototype now has a **local attention preview** and saved FIFO/due/priority ordering. The offline CLI can preview deterministic workday blocks with a fixed UTC offset and explicit break. These features are deliberately limited: the standalone browser mode still uses demo data, while the optional development bridge exposes local SQLite assignments (not authenticated multi-user permissions); there is no authenticated production API; task durations and prerequisite links are stored in SQLite and used by the CLI planner, while an optional development-only localhost bridge allows the web prototype to view and mutate that same task database. There is no real calendar write or DST-aware time zone engine. See [M2/M3 slice and remaining exit criteria](docs/engineering/M2_M3_SLICE.md).
+## Remote Cloudflare MCP and OAuth
 
-## OAuth pairing and read-only sync preview
+Shiori's **single-owner** Cloudflare setup consists of `shiori-auth` (OAuth issuer), `shiori-mcp-oauth` (OAuth-protected resource) and a separate `shiori-mcp-alpha` (legacy owner bearer service). Owner approval is operational: ChatGPT has successfully granted `mcp:read` and `mcp:write`, called the live MCP and created remote demo tasks and native dependencies. **Read is mandatory; write is explicitly opt-in.** Tokens and approval codes must never be committed or pasted into issues.
 
-Two additional user-owned Cloudflare Workers have been deployed: `shiori-auth` (OAuth issuer, separate KV) and `shiori-mcp-oauth` (OAuth-protected MCP resource using a service binding). Independent live tests passed OAuth discovery, PKCE S256 metadata, audience metadata and unauthenticated HTTP 401 denial. **Owner authorization remains disabled until the approval secret is installed on `shiori-auth`**; a successful ChatGPT OAuth login and authorized MCP tool call have not yet been demonstrated. The existing `shiori-mcp-alpha` bearer service stays available.
+The 115-operation JSON registry is **documentation/discovery**, not 115 runnable tools: **22 implemented**, **93 planned**. The working subset covers task get/list/create/update/status/delete/restore/priority, dependency list/add/remove, spatial scene read/export and position/viewport/layout/inspection, plus capabilities and operation discovery. Every mutation requires the appropriate authorization; revisions and idempotency guards are used for supported writes. Production multi-user permissions and sync remain pending.
 
-The optional [sync preview](cloudflare/shiori-mcp/oauth/README.md) compares real local Rust task IDs with isolated Cloudflare D1 records using **read-only** calls. It does not copy tasks to the cloud, change either database, or presume that matching titles imply matching identities. See [ADR 0005](docs/adr/0005-rust-cloudflare-sync.md) for staged reconciliation and conflict policy.
+See [MCP README](cloudflare/shiori-mcp/README.md) for exact active operations, [OAuth README](cloudflare/shiori-mcp/oauth/README.md) for owner grants, and [registry](docs/api/operations.v1.json) for authoritative schemas. Cloudflare D1 is a **separate dataset**; even a matching task title or UUID does not prove it is the same local task.
 
-## Remote operations and SHIORI MCP status
+### Read-only local/cloud comparison
 
-An initial [Cloudflare MCP alpha](cloudflare/shiori-mcp/README.md) is provisioned at `https://shiori-mcp-alpha.cryogenized.workers.dev/mcp`, with **nine** deployed bearer-protected tools and dedicated JSON/HTTP routes. The source and in-memory D1 integration tests pass. **Independent live network checks now confirm its health endpoint and refusal of unauthenticated MCP requests**, while authenticated remote tool calls still need verification. It does **not** support OAuth, ChatGPT connection, or synchronization with local Rust/SQLite tasks. Cloudflare D1 is an isolated remote dataset. See [ADR 0004](docs/adr/0004-remote-operation-registry-and-mcp.md) and the [per-operation registry](docs/api/operations.v1.json). Entries marked `planned` remain unavailable. Never expose the existing Python local bridge publicly.
+```bash
+cargo build --locked -p shiori-cli
+python3 cloudflare/shiori-mcp/scripts/sync_preview.py \
+  --cli target/debug/shiori-cli --manifest \
+  --token-file /path/to/private-owner-bearer-token
+```
 
-## Infinite Spatial Workspace — Rust-backed alpha
+The script prints **counts only**, obtains remote tasks by authenticated reads, and does **not** send local task records/identifiers or write either database. Use only a private token file; the OAuth approval code is **not** a bearer token. See [ADR 0005](docs/adr/0005-rust-cloudflare-sync.md). Future opt-in synchronization will be separately permissioned, explicitly reviewed, journaled and tested.
 
-The existing desktop task board retains its own navigation. The **Spatial canvas** link opens `isw.html`; when the local Rust bridge is running on loopback, the canvas reads real SQLite task records and verified prerequisite links. The **Live Rust** control refreshes it. The old board remains available through **← Board**.
+## Architecture and scope
 
-**Implemented against Rust:** task import/read, real stored dependency edges, and visual card positions in a separate, versioned SQLite sidecar (`tasks.isw.sqlite3`, view schema v1) with optimistic view revision checks. The canonical task database remains at schema v3 and is unchanged by the ISW extension. Creating a **Task** on the live canvas calls the existing local Rust task service and saves its view position. Moving a card **never alters task status, version or prerequisites**. Layout starts locked; users must explicitly unlock and enter Move mode.
+- `crates/shiori-core`: pure Rust task/inbox domain and deterministic time-block planning. The inbox currently has **domain rules but not full persistent inbox UX**.
+- `crates/shiori-storage`: local SQLite v3 canonical task store, indexes, tombstones and separate spatial view state.
+- `apps/shiori-cli`: offline command client and read-only bridge/manifest exports.
+- `apps/web`: responsive task board and spatial canvas, demo or optional loopback Rust bridge.
+- `apps/android` + `crates/shiori-android-native`: offline Android shell and experimental guarded JNI/SQLite integration; not yet cleared for general release.
+- `cloudflare/shiori-mcp`: isolated remote D1 MCP/JSON operation service and OAuth adapter; **not** a replacement for local Rust domain logic.
+- `docs/adr`, `docs/engineering`, `ROADMAP.md`: architecture, staged release/acceptance gates and outstanding decisions.
 
-**Still illustrative in the HTML:** non-task artefacts and arbitrary links, comments/activity/automations, external GitHub import, EAI-generated responses, chat messages and model/API interactions. The optional AI dock is a visual-only preview; there is no backend key storage, user login, authenticated model connection, or MCP service in this slice. Drawing a link in fixture mode must not be treated as a real task dependency.
+The future architecture makes **Rust application/domain rules authoritative** and treats MCP, HTTP, web and Android as distinct clients, with cloud sync as an optional permissioned adapter. Do not conflate transport success with offline data convergence.
 
-Canvas controls retained from v0.5: circuit/curved/straight connectors, pan/zoom, pinch protection, map-marker semantic zoom, minimap, full artefact sheet and preview EAI stage. Android-native ISW integration remains separate future work.
+## Quality and release policy
 
-CI workflow **SHIORI Rust-backed ISW snapshot** compiles the Rust CLI, seeds a temporary fictional offshore task graph, checks the local bridge, and uploads desktop/mobile screenshots. It never uses real task data.
+GitHub Actions exercises Rust formatting, strict Clippy, tests, release build, coverage, SQLite performance, RustSec, browser UI, Android host/native cross-target compilation, APK packaging and emulator interaction. A green compilation does **not** replace real phone testing. The [Android emulator touch issue #65](https://github.com/cryogenized-spec/SHIORI-/issues/65) is still open; do not silently disable its assertions. The project is **not yet production beta**.
 
-**Security:** the local bridge is a development adapter bound to 127.0.0.1; do not expose it to a public hostname, LAN or tunnel.
-
-## Layout
-
-- `crates/shiori-core`: standalone task domain rules
-- `crates/shiori-storage`: SQLite adapter with indexed filters and tombstones
-- `apps/shiori-cli`: manual offline task operations
-- `apps/web`: responsive browser UI (static demo or optional localhost Rust/SQLite bridge)
-- `apps/local_bridge.py`: temporary development HTTP adapter; not a public REST API
-- `docs/adr`: architecture decisions
-- `.github/workflows`: automated formatting, lint and tests
-
-This project follows the existing [`ROADMAP.md`](ROADMAP.md). Dependency and licence review remain mandatory before distribution; AGPLv3 is proposed, not yet finalized.
-
-## Extensible architecture
-
-[`ADR 0001`](docs/adr/0001-rust-core-sqlite.md) defines the local Rust/SQLite base. [`ADR 0002`](docs/adr/0002-application-ports-and-provider-boundaries.md) defines the application-service, inbox, MCP and external provider boundaries, with the [`foundation extension gates`](docs/engineering/FOUNDATION_EXTENSION_GATES.md) guiding future changes. The new `shiori-core::inbox` module defines local SH-005 capture/triage/link/archive rules and tests only; **persistent inbox operations, user-facing inbox screens, MCP and ClickUp integration are not yet implemented**.
-
-## Quality, performance, CI
-
-See [`docs/engineering/QUALITY_AND_PERFORMANCE.md`](docs/engineering/QUALITY_AND_PERFORMANCE.md) for the strict CI pipeline, synthetic SQLite benchmarks and browser interaction tests. These produce aggregate performance reports as GitHub Actions artifacts; no real user telemetry is collected.
+The [roadmap](ROADMAP.md) distinguishes minimum private-beta features from the larger Spatial/EAI/companion vision. Licensing and contributor/distribution decisions remain open; **AGPLv3 is proposed, not finalized**.
