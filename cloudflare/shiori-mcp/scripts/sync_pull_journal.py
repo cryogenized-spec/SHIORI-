@@ -8,6 +8,7 @@ Use only an owner-controlled legacy bearer token file, NOT the OAuth code.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 REMOTE_URL = "https://shiori-mcp-alpha.cryogenized.workers.dev/api/v1/ops/sync.changes.read"
+BASELINE_URL = "https://shiori-mcp-alpha.cryogenized.workers.dev/api/v1/ops/sync.baseline.read"
 WORKSPACE = "personal"
 KNOWN_KINDS = {"task.insert", "task.update", "task.delete", "task.purge",
                "edge.add", "edge.remove"}
@@ -26,7 +28,7 @@ PAGE_FIELDS = {"changes", "cutoff", "checkpoint_cursor", "next_cursor",
                "baseline_required", "local_rust_sync"}
 MAX_ROWS = 50_000
 PAGE_LIMIT = 100
-SCHEMA = 1
+SCHEMA = 2
 
 
 class PullError(ValueError):
@@ -52,7 +54,7 @@ def init_journal(path: Path) -> sqlite3.Connection:
     try:
         con.execute("PRAGMA busy_timeout=4000")
         version = con.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, SCHEMA):
+        if version not in (0, 1, SCHEMA):
             raise PullError(f"Unsupported pull journal version {version}; no migration attempted")
         if version == 0:
             tables = con.execute(
@@ -81,6 +83,31 @@ def init_journal(path: Path) -> sqlite3.Connection:
                       VALUES('personal',0,NULL,1);
                     PRAGMA user_version=1;
                 """)
+
+        # v1 -> v2 is additive: preserve all events, checkpoints and the
+        # required-review flag while adding a *metadata-only* baseline.
+        if version in (0,1):
+            with con:
+                con.execute("""CREATE TABLE pull_baseline_meta (
+                    workspace_id TEXT PRIMARY KEY,
+                    cutoff INTEGER NOT NULL CHECK(cutoff>=0),
+                    task_count INTEGER NOT NULL CHECK(task_count>=0),
+                    edge_count INTEGER NOT NULL CHECK(edge_count>=0),
+                    sha256 TEXT NOT NULL CHECK(length(sha256)=64)
+                )""")
+                con.execute("""CREATE TABLE pull_baseline_tasks (
+                    id TEXT PRIMARY KEY,
+                    version INTEGER NOT NULL CHECK(version>=1),
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    deleted_at TEXT
+                )""")
+                con.execute("""CREATE TABLE pull_baseline_edges (
+                    task_id TEXT NOT NULL,
+                    depends_on_id TEXT NOT NULL,
+                    PRIMARY KEY(task_id,depends_on_id)
+                )""")
+                con.execute("PRAGMA user_version=2")
         row = con.execute("SELECT cursor,cutoff,baseline_required FROM pull_state "
                           "WHERE workspace_id=?", (WORKSPACE,)).fetchone()
         if not row or row[2] != 1:
@@ -131,6 +158,131 @@ def request_page(token: str, cursor: int, cutoff: int | None) -> dict:
             or reply.get("operation_id") != "sync.changes.read"):
         raise PullError("Invalid remote operation envelope")
     return reply.get("data")
+
+
+
+BASELINE_FIELDS={"items","edges","cutoff","task_count","edge_count",
+                 "consistent_snapshot","local_rust_sync","automatic_apply"}
+BASELINE_TASK_FIELDS={"id","version","status","updated_at","deleted_at"}
+BASELINE_EDGE_FIELDS={"task_id","depends_on_id"}
+
+
+def request_baseline(token: str) -> dict:
+    """Only a content-free read is allowed, even during first-time setup."""
+    req = Request(
+        BASELINE_URL, method="POST",
+        data=json.dumps({"workspace_id":WORKSPACE},separators=(",",":")).encode(),
+        headers={"Content-Type":"application/json","Authorization":"Bearer "+token,
+                 "User-Agent":"ShioriReadOnlyBaseline/0.1"},
+    )
+    try:
+        with urlopen(req,timeout=25) as response:
+            raw=response.read(200001)
+            if len(raw)>200000:
+                raise PullError("Remote baseline response exceeds safe budget")
+            reply=json.loads(raw)
+    except HTTPError as exc:
+        raise PullError(f"Remote baseline rejected read (HTTP {exc.code})") from None
+    except (URLError,TimeoutError) as exc:
+        raise PullError("Remote baseline unavailable; no local checkpoint changed") from exc
+    if (not isinstance(reply,dict) or reply.get("ok") is not True
+            or reply.get("operation_id")!="sync.baseline.read"):
+        raise PullError("Unexpected baseline response wrapper")
+    return reply.get("data")
+
+
+def check_baseline(snapshot: object) -> tuple[dict,str]:
+    """Validate every field before committing a remote-supplied checkpoint."""
+    import re
+    if not isinstance(snapshot,dict) or set(snapshot)!=BASELINE_FIELDS:
+        raise PullError("Unknown baseline fields (possibly private task content)")
+    if (snapshot["consistent_snapshot"] is not True
+            or snapshot["local_rust_sync"] is not False
+            or snapshot["automatic_apply"] is not False):
+        raise PullError("Baseline claims unsupported source or application guarantees")
+    if not valid_int(snapshot["cutoff"]):
+        raise PullError("Invalid high-water sequence")
+    tasks=snapshot["items"]
+    edges=snapshot["edges"]
+    if (not isinstance(tasks,list) or not isinstance(edges,list)
+            or len(tasks)>100 or len(edges)>200
+            or not valid_int(snapshot["task_count"])
+            or not valid_int(snapshot["edge_count"])
+            or len(tasks)!=snapshot["task_count"]
+            or len(edges)!=snapshot["edge_count"]):
+        raise PullError("Incomplete or oversized baseline")
+    identifier=re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
+    last=""
+    ids=set()
+    for task in tasks:
+        if not isinstance(task,dict) or set(task)!=BASELINE_TASK_FIELDS:
+            raise PullError("Unexpected baseline task fields")
+        name=task["id"]
+        if (not isinstance(name,str) or not identifier.fullmatch(name)
+                or name<=last or not valid_int(task["version"],1)
+                or task["status"] not in ("todo","in_progress","done")
+                or not isinstance(task["updated_at"],str)
+                or not 0<len(task["updated_at"])<=60
+                or (task["deleted_at"] is not None and
+                    (not isinstance(task["deleted_at"],str)
+                     or not 0<len(task["deleted_at"])<=60))):
+            raise PullError("Unordered, malformed or duplicate baseline task")
+        last=name
+        ids.add(name)
+    previous_edge=("", "")
+    for edge in edges:
+        if not isinstance(edge,dict) or set(edge)!=BASELINE_EDGE_FIELDS:
+            raise PullError("Unexpected baseline edge fields")
+        a=edge["task_id"]
+        b=edge["depends_on_id"]
+        if (not isinstance(a,str) or not isinstance(b,str)
+                or a not in ids or b not in ids or a==b or
+                (a,b)<=previous_edge):
+            raise PullError("Dangling, malformed or duplicate baseline edge")
+        previous_edge=(a,b)
+    canonical=json.dumps(snapshot,sort_keys=True,separators=(",",":")).encode()
+    return snapshot,hashlib.sha256(canonical).hexdigest()
+
+
+def persist_baseline(con: sqlite3.Connection, snapshot: dict) -> int:
+    snapshot,digest=check_baseline(snapshot)
+    cutoff=snapshot["cutoff"]
+    with con:
+        current=con.execute(
+            "SELECT cursor,cutoff,baseline_required FROM pull_state WHERE workspace_id=?",
+            (WORKSPACE,)
+        ).fetchone()
+        prior=con.execute("SELECT COUNT(*) FROM pull_events").fetchone()[0]
+        saved=con.execute("SELECT COUNT(*) FROM pull_baseline_meta").fetchone()[0]
+        if current!=(0,None,1) or prior or saved:
+            raise PullError("Initial baseline requires a fresh, empty pull journal; never overwrite a checkpoint")
+        con.execute(
+            "INSERT INTO pull_baseline_meta VALUES(?,?,?,?,?)",
+            (WORKSPACE,cutoff,snapshot["task_count"],snapshot["edge_count"],digest)
+        )
+        con.executemany(
+            "INSERT INTO pull_baseline_tasks VALUES(?,?,?,?,?)",
+            [(t["id"],t["version"],t["status"],t["updated_at"],t["deleted_at"])
+             for t in snapshot["items"]]
+        )
+        con.executemany(
+            "INSERT INTO pull_baseline_edges VALUES(?,?)",
+            [(e["task_id"],e["depends_on_id"]) for e in snapshot["edges"]]
+        )
+        updated=con.execute(
+            "UPDATE pull_state SET cursor=? WHERE workspace_id=? AND cursor=0 AND cutoff IS NULL AND baseline_required=1",
+            (cutoff,WORKSPACE)
+        ).rowcount
+        if updated!=1:
+            raise PullError("Pull journal checkpoint changed concurrently")
+    return cutoff
+
+
+def baseline_info(con: sqlite3.Connection) -> tuple[int,int,int] | None:
+    return con.execute(
+        "SELECT cutoff,task_count,edge_count FROM pull_baseline_meta WHERE workspace_id=?",
+        (WORKSPACE,)
+    ).fetchone()
 
 
 def valid_int(value: object, minimum: int = 0) -> bool:
@@ -236,20 +388,30 @@ def main() -> int:
     parser.add_argument("--token-file", type=Path,
                         help="Private owner bearer file, never the OAuth approval code")
     parser.add_argument("--max-pages", type=int, default=5)
-    parser.add_argument("action", choices=["status", "poll"])
+    parser.add_argument("action", choices=["status", "baseline", "poll"])
     args = parser.parse_args()
     try:
         journal = init_journal(args.journal)
         try:
             if args.action == "status":
                 cursor, cutoff, _baseline, total = state(journal)
+                saved = baseline_info(journal)
+                note = (f"atomic baseline staged at {saved[0]} ({saved[1]} tasks, {saved[2]} edges)"
+                        if saved is not None else "atomic baseline not yet staged")
                 print(f"Shiori remote pull inbox: {total} metadata events, checkpoint {cursor}, "
-                      f"active cutoff {cutoff}, initial baseline still REQUIRED. "
+                      f"active cutoff {cutoff}, {note}; identity review still REQUIRED. "
                       "No local task records have been modified.")
                 return 0
             if args.token_file is None:
-                raise PullError("--token-file is required to poll the remote feed")
+                raise PullError("--token-file is required for baseline or poll")
             token = token_from_file(args.token_file)
+            if args.action == "baseline":
+                snapshot = request_baseline(token)
+                cutoff = persist_baseline(journal, snapshot)
+                print(f"Staged a content-free baseline of {snapshot['task_count']} tasks and "
+                      f"{snapshot['edge_count']} edges at event cutoff {cutoff}. "
+                      "Identity review remains required. No canonical tasks changed.")
+                return 0
             count, cursor, cutoff = poll(journal, token, args.max_pages)
             print(f"Stored {count} new change metadata events, durable checkpoint {cursor}, "
                   f"active cutoff {cutoff}. Baseline still REQUIRED. "
