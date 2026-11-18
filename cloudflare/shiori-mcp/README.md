@@ -1,6 +1,6 @@
 # SHIORI Cloudflare MCP — single-owner alpha (18 November 2026)
 
-**Live:** 22 runnable operations with 115 versioned contracts (93 marked planned). Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
+**Verified live before S2 promotion:** 23 runnable operations. The branch implements four additional S2 tools (27 total in source; 120 versioned contracts; 93 planned), pending database migration, CI and deployment. Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
 
 ## Current limitations
 
@@ -12,11 +12,14 @@
 
 ## Live tools and JSON operations
 
-The **22** runnable operations are:
+The **23** verified deployed operations, prior to S2 promotion, are:
 - System: `system.capabilities.read`, `system.operations.list`.
 - Tasks: `tasks.list`, `tasks.get`, `tasks.create`, `tasks.update`, `tasks.status.set`, `tasks.delete` (soft delete), `tasks.restore`, `tasks.priority.set`.
 - Graph: `tasks.dependencies.list`, `tasks.dependencies.add`, `tasks.dependencies.remove`.
 - Spatial: `spatial.scene.read`, `spatial.scene.export`, `spatial.node.position.read`, `spatial.node.position.set`, `spatial.viewport.read`, `spatial.viewport.save`, `spatial.layout.lock.set`, `spatial.edge.style.set`, `spatial.node.inspect`.
+- Read-only reconciliation: `sync.manifest.read` (identity/version/tombstone pages, not an atomic snapshot).
+
+Four new **S2 first-import pilot** operations are implemented in the source but must pass release gates and deployment before being considered live: `sync.device.pair`, `sync.import.preview`, `sync.import.apply`, `sync.import.receipt.read`. They do not authorize automatic replication. Details in [S2](../../docs/engineering/RUST_CLOUDFLARE_SYNC_S2.md).
 
 The remaining **93** registry contracts are documentation only; the server does not advertise or execute them as tools. Native Rust SQLite sync, inbox, artefacts, jobs, model providers and production multi-user identity are not implemented remotely.
 
