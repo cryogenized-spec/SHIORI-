@@ -85,3 +85,57 @@ CREATE TABLE IF NOT EXISTS sync_imports (
   UNIQUE(workspace_id,event_id),
   UNIQUE(workspace_id,receipt_id)
 );
+
+-- S3 change feed: append-only, sequence-ordered metadata about remote D1
+-- changes. Contains no task title, note, attachment or full task body.
+-- Existing remote tasks require an explicit baseline manifest snapshot:
+-- log installation is NOT a historical backfill.
+CREATE TABLE IF NOT EXISTS remote_change_log (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN
+    ('task.insert','task.update','task.delete','task.purge',
+     'edge.add','edge.remove')),
+  task_id TEXT NOT NULL,
+  depends_on_id TEXT,
+  task_version INTEGER,
+  occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS remote_change_log_scope
+  ON remote_change_log(workspace_id,seq);
+
+CREATE TRIGGER IF NOT EXISTS shiori_log_task_insert
+AFTER INSERT ON remote_tasks BEGIN
+  INSERT INTO remote_change_log(workspace_id,kind,task_id,task_version,occurred_at)
+  VALUES(NEW.workspace_id,'task.insert',NEW.id,NEW.version,NEW.updated_at);
+END;
+
+CREATE TRIGGER IF NOT EXISTS shiori_log_task_update
+AFTER UPDATE ON remote_tasks BEGIN
+  INSERT INTO remote_change_log(workspace_id,kind,task_id,task_version,occurred_at)
+  VALUES(NEW.workspace_id,
+    CASE WHEN NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL
+      THEN 'task.delete' ELSE 'task.update' END,
+    NEW.id,NEW.version,NEW.updated_at);
+END;
+
+CREATE TRIGGER IF NOT EXISTS shiori_log_task_purge
+AFTER DELETE ON remote_tasks BEGIN
+  INSERT INTO remote_change_log(workspace_id,kind,task_id,task_version,occurred_at)
+  VALUES(OLD.workspace_id,'task.purge',OLD.id,OLD.version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS shiori_log_edge_add
+AFTER INSERT ON remote_dependencies BEGIN
+  INSERT INTO remote_change_log(workspace_id,kind,task_id,depends_on_id,occurred_at)
+  VALUES(NEW.workspace_id,'edge.add',NEW.task_id,NEW.depends_on_id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS shiori_log_edge_remove
+AFTER DELETE ON remote_dependencies BEGIN
+  INSERT INTO remote_change_log(workspace_id,kind,task_id,depends_on_id,occurred_at)
+  VALUES(OLD.workspace_id,'edge.remove',OLD.task_id,OLD.depends_on_id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
