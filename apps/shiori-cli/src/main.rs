@@ -504,14 +504,31 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         Command::SyncAck {
-            event_id, remote_id, remote_revision, local_task_id, local_revision, journal,
+            event_id,
+            remote_id,
+            remote_revision,
+            local_task_id,
+            local_revision,
+            journal,
         } => {
-            let mut outbox=SyncJournal::open(journal.unwrap_or(default_journal_path))?;
-            let changed=outbox.acknowledge(&event_id,&remote_id,remote_revision,
-                                          &local_task_id,local_revision)?;
-            println!("{} verified remote receipt for {} (remote revision {}).",
-                if changed {"Acknowledged"} else {"Already acknowledged"},
-                event_id,remote_revision);
+            let mut outbox = SyncJournal::open(journal.unwrap_or(default_journal_path))?;
+            let changed = outbox.acknowledge(
+                &event_id,
+                &remote_id,
+                remote_revision,
+                &local_task_id,
+                local_revision,
+            )?;
+            println!(
+                "{} verified remote receipt for {} (remote revision {}).",
+                if changed {
+                    "Acknowledged"
+                } else {
+                    "Already acknowledged"
+                },
+                event_id,
+                remote_revision
+            );
         }
         Command::BridgeDump => bridge_dump(&store.list(TaskFilter::default())?)?,
         Command::BridgeAttention => {
