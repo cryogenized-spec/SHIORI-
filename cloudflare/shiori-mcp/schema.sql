@@ -49,3 +49,39 @@ CREATE TABLE IF NOT EXISTS access_limits (
   count INTEGER NOT NULL,
   PRIMARY KEY(bucket,window_min)
 );
+-- Owner-approved S2 pilot: additive tables, no changes to existing tasks.
+-- A pairing records owner intent; device IDs are not authentication tokens.
+CREATE TABLE IF NOT EXISTS sync_devices (
+  workspace_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  paired_at TEXT NOT NULL,
+  revoked_at TEXT,
+  PRIMARY KEY(workspace_id,device_id)
+);
+CREATE TABLE IF NOT EXISTS sync_import_previews (
+  proposal_id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  local_version INTEGER NOT NULL CHECK(local_version=1),
+  payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256)=64),
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS sync_import_previews_device
+  ON sync_import_previews(workspace_id,device_id,task_id);
+CREATE TABLE IF NOT EXISTS sync_imports (
+  workspace_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  source_version INTEGER NOT NULL,
+  payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256)=64),
+  payload_json TEXT NOT NULL,
+  receipt_id TEXT NOT NULL,
+  imported_at TEXT NOT NULL,
+  PRIMARY KEY(workspace_id,task_id),
+  UNIQUE(workspace_id,event_id),
+  UNIQUE(workspace_id,receipt_id)
+);
