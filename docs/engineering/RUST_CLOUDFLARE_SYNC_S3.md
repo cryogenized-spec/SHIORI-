@@ -1,6 +1,6 @@
 # SHIORI S3 — Remote append-only change feed (read-only foundation)
 
-**Alpha development — 18 November 2026.** Not yet two-way synchronization. PR for S3 adds a content-free change cursor and fixture tests; it does **not** mutate the user's Rust SQLite database, automatically transfer task contents or authorize cloud data as a local source of truth.
+**Deployed single-owner alpha — 18 November 2026.** Not yet two-way synchronization. S3 includes a content-free change cursor and an atomic bounded baseline with fixture tests; it does **not** mutate the user's Rust SQLite database, automatically transfer task contents or authorize cloud data as a local source of truth.
 
 ## Why a change log?
 
@@ -16,7 +16,7 @@ The first page reads the latest sequence `H` and serves changes with `cursor < s
 
 `baseline_required=true` remains an identity-review gate after a bounded baseline has been staged. An empty change list is **not proof that the remote task set is empty**.
 
-## New bounded atomic baseline (S3 continuation)
+## Bounded atomic baseline (deployed S3 continuation)
 
 `sync.baseline.read` is a **single primary-pinned D1 SQLite SELECT** returning up to **100 tasks and 200 prerequisite edges**, with task identities, revisions, statuses, tombstones and **exact high-water cutoff from the same database snapshot**. This avoids using several non-transactional HTTP pages to establish an initial state. It does **not** return task titles, notes, attachments or due-date content. Missing/cross-workspace task dependencies and over-budget snapshots fail closed rather than silently truncating data.
 
