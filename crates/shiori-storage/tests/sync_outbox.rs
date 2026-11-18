@@ -101,6 +101,11 @@ fn unknown_schema_and_existing_canonical_database_are_rejected() {
     let db=rusqlite::Connection::open(&journal_file).unwrap();
     db.pragma_update(None,"user_version",8_i64).unwrap();
     drop(db);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&journal_file,std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     assert!(matches!(SyncJournal::open(&journal_file),Err(SyncJournalError::UnsupportedSchema(8))));
     // No direct access to future version; never downgrade it.
     let db=rusqlite::Connection::open(&journal_file).unwrap();
