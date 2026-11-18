@@ -16,23 +16,23 @@ Use a **synthetic, unconnected** local Rust SQLite database first. Replace examp
 
 ```bash
 cargo build --locked -p shiori-cli
-# Use a fresh temporary, non-production database:
-mkdir -p /tmp/shiori-s2-test
-target/debug/shiori-cli --database /tmp/shiori-s2-test/tasks.sqlite3 add "[DUMMY] S2 import check"
-target/debug/shiori-cli --database /tmp/shiori-s2-test/tasks.sqlite3 list
+# Create an isolated, owner-private temporary directory:
+TESTDIR=$(mktemp -d)
+target/debug/shiori-cli --database "$TESTDIR/tasks.sqlite3" add "[DUMMY] S2 import check"
+target/debug/shiori-cli --database "$TESTDIR/tasks.sqlite3" list
 # Determine the generated task UUID from the above command; do not guess it.
-target/debug/shiori-cli --database /tmp/shiori-s2-test/tasks.sqlite3 \
+target/debug/shiori-cli --database "$TESTDIR/tasks.sqlite3" \
   sync-stage 'THE-TASK-UUID' --if-version 1
-target/debug/shiori-cli --database /tmp/shiori-s2-test/tasks.sqlite3 sync-queue
+target/debug/shiori-cli --database "$TESTDIR/tasks.sqlite3" sync-queue
 ```
 
-The CLI outbox is `/tmp/shiori-s2-test/tasks.sync.sqlite3` and is private (Unix `0600`). It contains actual staged task content, so use harmless fixture data.
+The CLI outbox is `$TESTDIR/tasks.sync.sqlite3` and is private (Unix `0600`). It contains actual staged task content, so use harmless fixture data.
 
 The remaining commands require a **private legacy owner bearer token file** already authorized for the isolated Cloudflare alpha. This is **not** the Shiori OAuth approval code. Do not paste either secret into chat, issues, logs or GitHub.
 
 ```bash
 PILOT=cloudflare/shiori-mcp/scripts/sync_import_pilot.py
-JOURNAL=/tmp/shiori-s2-test/tasks.sync.sqlite3
+JOURNAL="$TESTDIR/tasks.sync.sqlite3"
 TOKEN=/private/path/to/owner-bearer-token.txt
 # Protect the existing bearer file:
 chmod 600 "$TOKEN"
@@ -47,7 +47,7 @@ The preview prints a proposed ID and expiry. Review your local synthetic task an
 
 ```bash
 python3 "$PILOT" --journal "$JOURNAL" \
-  --database /tmp/shiori-s2-test/tasks.sqlite3 \
+  --database "$TESTDIR/tasks.sqlite3" \
   --token-file "$TOKEN" --cli target/debug/shiori-cli \
   apply 'THE-SYNC1-EVENT-ID' --proposal-id 'THE-PROPOSAL-UUID' \
   --confirm-import
