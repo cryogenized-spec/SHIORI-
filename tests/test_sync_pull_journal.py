@@ -21,7 +21,7 @@ def event(seq: int, kind: str = "task.update", task_id: str = "test-task-id"):
 
 def page(events, cutoff, next_cursor=None):
     return {"changes":events,"cutoff":cutoff,
-            "checkpoint_cursor":events[-1]["seq"] if next_cursor is not None else cutoff,
+            "checkpoint_cursor":(events[-1]["seq"] if events else 0) if next_cursor is not None else cutoff,
             "next_cursor":next_cursor,"baseline_required":True,"local_rust_sync":False}
 
 
@@ -149,7 +149,7 @@ class PullJournalTests(unittest.TestCase):
         class FakeResponse:
             def __enter__(self):return self
             def __exit__(self,*args):return None
-            def read(self):
+            def read(self, size=-1):
                 return json.dumps({"ok":True,"operation_id":"sync.changes.read",
                                    "data":page([],7)}).encode()
         def network(req,timeout):
