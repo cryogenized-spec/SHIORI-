@@ -2180,6 +2180,178 @@
       "release_evidence": "Synthetic D1 tests: one primary SQL statement, tombstones, sorted edges, exact source receipt, cutoff, opt-in, workspace guard and no canonical local data writes."
     },
     {
+      "id": "sync.record.apply",
+      "phase": "B",
+      "description": "Owner-approved, S2 provenance-bound, paired-device non-deleted common-field update of ONE current remote task. Strict exact version and content fingerprint compare-and-swap, single D1 transaction, idempotent. No local Rust write or dependency changes.",
+      "availability": "cloudflare_alpha",
+      "effect": "write",
+      "approval": "reviewed_diff_required",
+      "scope": "sync:write",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.record.apply"
+      },
+      "mcp_tool": "shiori_sync_record_apply",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "task_id",
+          "device_id",
+          "source_event_id",
+          "source_payload_sha256",
+          "expected_revision",
+          "expected_record_sha256",
+          "patch",
+          "owner_approved",
+          "idempotency_key"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "source_event_id": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 160
+          },
+          "source_payload_sha256": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_record_sha256": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          },
+          "patch": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "maxProperties": 5,
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "notes": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "project": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "status": {
+                "enum": [
+                  "todo",
+                  "in_progress",
+                  "done"
+                ]
+              },
+              "priority": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "urgent"
+                ]
+              }
+            }
+          },
+          "owner_approved": {
+            "enum": [
+              true
+            ]
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.record.apply"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changed",
+              "resource_id",
+              "revision",
+              "source_event_id",
+              "base_record_sha256"
+            ],
+            "properties": {
+              "changed": {
+                "const": true
+              },
+              "resource_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 2
+              },
+              "source_event_id": {
+                "type": "string"
+              },
+              "base_record_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Synthetic paired device and approved first-import tests: multi-field atomic D1 CAS, exact current fingerprint, tombstone/revocation and conflicts blocked, idempotent retry. Does not apply changes to local Rust task store."
+    },
+    {
       "id": "tasks.dependencies.add",
       "phase": "A",
       "description": "Add one real prerequisite between two active remote tasks, with cycle protection and revision checks [isolated Cloudflare D1, not synced with Rust].",
