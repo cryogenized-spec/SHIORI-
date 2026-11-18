@@ -16,11 +16,17 @@ pub enum SyncJournalError {
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("unsupported outbox schema version {0}; do not overwrite newer data")]
     UnsupportedSchema(i64),
     #[error("invalid task identity, revision or prerequisite set")]
     InvalidSnapshot,
+    #[error("sync outbox must be a private, regular local file (not a symlink)")] 
+    UnsafeJournalFile,
+    #[error("version-zero file contains other application tables; refusing to modify it")] 
+    WrongDatabase,
     #[error("same task identity/revision was already staged with different contents")]
     SnapshotConflict,
     #[error("event is missing, already acknowledged or conflicting")]
@@ -61,6 +67,26 @@ impl SyncJournal {
     /// Opens a *separate* local sidecar; never upgrades or writes canonical
     /// `tasks.sqlite3`. Unknown future schema versions are rejected.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SyncJournalError> {
+        let path = path.as_ref();
+        #[cfg(unix)]
+        {
+            use std::fs::{OpenOptions, symlink_metadata};
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            match symlink_metadata(path) {
+                Ok(info) => {
+                    if !info.is_file() || info.file_type().is_symlink()
+                        || info.permissions().mode() & 0o077 != 0
+                    {
+                        return Err(SyncJournalError::UnsafeJournalFile);
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let _file = OpenOptions::new().write(true).create_new(true)
+                        .mode(0o600).open(path)?;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
         let mut db = Connection::open(path)?;
         db.execute_batch("PRAGMA busy_timeout=4000; PRAGMA foreign_keys=ON;")?;
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
@@ -68,6 +94,14 @@ impl SyncJournal {
             return Err(SyncJournalError::UnsupportedSchema(version));
         }
         if version == 0 {
+            let other_tables: i64 = db.query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                [], |r| r.get(0),
+            )?;
+            if other_tables != 0 {
+                return Err(SyncJournalError::WrongDatabase);
+            }
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
             tx.execute_batch(
                 "CREATE TABLE sync_meta (
