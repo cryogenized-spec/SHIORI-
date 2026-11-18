@@ -8,7 +8,7 @@ const READ_TOOLS=new Set([
  "shiori_tasks_dependencies_list","shiori_spatial_scene_read",
  "shiori_spatial_node_position_read","shiori_spatial_viewport_read",
  "shiori_spatial_node_inspect","shiori_spatial_scene_export",
- "shiori_sync_manifest_read","shiori_sync_import_receipt_read","shiori_sync_changes_read"
+ "shiori_sync_manifest_read","shiori_sync_import_receipt_read","shiori_sync_changes_read","shiori_sync_baseline_read"
 ]);
 export function requiredScopesForRpc(rpc){
  if(rpc?.method==="tools/call" && !READ_TOOLS.has(rpc?.params?.name))
