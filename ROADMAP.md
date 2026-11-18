@@ -232,7 +232,7 @@ tests/              # integration, contract, performance and migration tests
 
 ## Current engineering checkpoint (18 November 2026)
 
-**Evening update:** S2 first-import server and its receipt path are deployed; S3 D1 task/edge triggers and read-only change cursor are deployed, without backfilling historical tasks. A private local pull journal is under CI review in [PR #70](https://github.com/cryogenized-spec/SHIORI-/pull/70). These are infrastructure milestones, **not** a functioning bidirectional sync release.
+**Evening update:** S2 first-import server and its receipt path are deployed; S3 D1 task/edge triggers and read-only change cursor are deployed, without backfilling historical tasks. A private metadata-only local pull journal is merged through [PR #70](https://github.com/cryogenized-spec/SHIORI-/pull/70). These are infrastructure milestones, **not** a functioning bidirectional sync release.
 
 - **Implemented:** Rust/SQLite v3 offline task domain, Jiff 1.0 date/time migration (Chrono and its temporary RustSec exception removed), deterministic scheduling *preview*, local attention and spatial canvas proof, Android native offline debug shell, and 28 authenticated single-owner remote MCP operations.
 - **Active blockers:** [Android 15 WebView real-touch test reliability #65](https://github.com/cryogenized-spec/SHIORI-/issues/65), physical Android release acceptance, and safe Rust ↔ D1 synchronization with identity provenance, conflict resolution, durable offline outbox and rollback.
