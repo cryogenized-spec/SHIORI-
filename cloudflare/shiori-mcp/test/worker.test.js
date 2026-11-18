@@ -62,7 +62,7 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,27);
+  assert.equal(list.data.result.tools.length,28);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
@@ -124,7 +124,7 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
 test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,27);
+  assert.equal(available.length,28);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -240,7 +240,7 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
 test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
  const e=env();
  const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
- assert.equal(expected.operations.length,120);
+ assert.equal(expected.operations.length,121);
  const listed=await call(e,"/mcp",rpc("resources/list",{}));
  assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
  const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
@@ -264,8 +264,8 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
  const first=await callCatalog({limit:7});
  const a=first.data.result.structuredContent;
- assert.equal(a.registry_total,120);
- assert.equal(a.total,120);
+ assert.equal(a.registry_total,121);
+ assert.equal(a.total,121);
  assert.equal(a.items.length,7);
  assert.equal(a.next_cursor,"7");
  assert(a.items[0].inputSchema);
@@ -277,7 +277,7 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const planned=await callCatalog({availability:"planned",limit:500});
  assert.equal(planned.data.result.structuredContent.total,93);
  const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
- assert.equal(implemented.data.result.structuredContent.total,27);
+ assert.equal(implemented.data.result.structuredContent.total,28);
  const item=await callCatalog({operation_id:"comments.delete"});
  assert.equal(item.data.result.structuredContent.items.length,1);
  assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
@@ -291,7 +291,7 @@ test("planned operations are discoverable but never callable",async()=>{
  const e=env();
  const list=await call(e,"/mcp",rpc("tools/list",{}));
  const names=list.data.result.tools.map(x=>x.name);
- assert.equal(names.length,27);
+ assert.equal(names.length,28);
  assert(!names.includes("shiori_comments_delete"));
  const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_comments_delete",arguments:{
   workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
@@ -309,9 +309,9 @@ test("capabilities advertise catalog URI and actual callable tool count",async()
  const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
    arguments:{workspace_id:"personal"}}));
  const c=caps.data.result.structuredContent.capabilities;
- assert.equal(c.registry_total,120);
+ assert.equal(c.registry_total,121);
  assert.equal(c.planned_total,93);
- assert.equal(c.implemented_total,27);
+ assert.equal(c.implemented_total,28);
  assert.equal(c.registry_uri,"shiori://operations/v1");
 });
 
@@ -677,4 +677,124 @@ test("S2 receipt is scoped and read-only OAuth is not allowed to mutate pairing 
  for(const name of ["shiori_sync_device_pair","shiori_sync_import_preview","shiori_sync_import_apply","shiori_sync_import_receipt_read"])
    assert(manifest.data.result.tools.some(t=>t.name===name));
  assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM sync_imports").get().n,0);
+});
+
+
+test("S3 change log captures task revisions/tombstones and dependency edges without content",async()=>{
+ const e=env();
+ const empty=await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"personal"});
+ assert.equal(empty.status,200);
+ assert.deepEqual(empty.data.data.changes,[]);
+ assert.equal(empty.data.data.baseline_required,true);
+ assert.equal(empty.data.data.local_rust_sync,false);
+ const first=await call(e,"/api/v1/ops/tasks.create",request("feed-create-1",{
+  title:"SECRET TASK TITLE",text:"SECRET PRIVATE NOTES"
+ }));
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ const id=first.data.data.resource_id;
+ const updated=await call(e,"/api/v1/ops/tasks.status.set",request("feed-status-1",{
+  task_id:id,status:"in_progress",expected_revision:1
+ }));
+ assert.equal(updated.status,200);
+ const dependency="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+ e.DB.db.prepare("INSERT INTO remote_dependencies(workspace_id,task_id,depends_on_id) VALUES(?,?,?)")
+  .run("personal",id,dependency);
+ e.DB.db.prepare("DELETE FROM remote_dependencies WHERE workspace_id=? AND task_id=? AND depends_on_id=?")
+  .run("personal",id,dependency);
+ const del=await call(e,"/api/v1/ops/tasks.delete",request("feed-delete-1",{
+  task_id:id,expected_revision:2
+ }));
+ assert.equal(del.status,200,JSON.stringify(del.data));
+ const page=await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"personal",limit:100});
+ assert.equal(page.status,200,JSON.stringify(page.data));
+ const feed=page.data.data;
+ assert.deepEqual(feed.changes.map(x=>x.kind),
+  ["task.insert","task.update","edge.add","edge.remove","task.delete"]);
+ assert.deepEqual(feed.changes.map(x=>x.task_id),[id,id,id,id,id]);
+ assert.equal(feed.changes[0].task_version,1);
+ assert.equal(feed.changes[1].task_version,2);
+ assert.equal(feed.changes[4].task_version,3);
+ assert.equal(feed.changes[2].depends_on_id,dependency);
+ assert.equal(feed.changes[3].depends_on_id,dependency);
+ assert.equal(feed.changes[0].depends_on_id,null);
+ assert.equal(feed.changes[2].task_version,null);
+ assert.equal(feed.next_cursor,null);
+ assert.equal(feed.checkpoint_cursor,feed.cutoff);
+ assert.equal(feed.cutoff,5);
+ assert.deepEqual(feed.changes.map(x=>x.seq),[1,2,3,4,5]);
+ assert(!JSON.stringify(feed).includes("SECRET TASK TITLE"));
+ assert(!JSON.stringify(feed).includes("SECRET PRIVATE NOTES"));
+});
+test("S3 fixed high-watermark pagination never skips or includes new events mid-stream",async()=>{
+ const e=env();
+ for(let i=0;i<5;i++){
+  const created=await call(e,"/api/v1/ops/tasks.create",request("feed-item-"+i,{
+   title:"[DUMMY] Remote feed item "+i
+  }));
+  assert.equal(created.status,200);
+ }
+ const first=await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"personal",cursor:0,limit:2});
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ const p1=first.data.data;
+ assert.equal(p1.cutoff,5);
+ assert.deepEqual(p1.changes.map(x=>x.seq),[1,2]);
+ assert.equal(p1.next_cursor,2);
+ assert.equal(p1.checkpoint_cursor,2);
+ const future=await call(e,"/api/v1/ops/tasks.create",request("feed-new-after-cutoff",{
+  title:"[DUMMY] New event after read"
+ }));
+ assert.equal(future.status,200);
+ const second=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:p1.next_cursor,cutoff:p1.cutoff,limit:2
+ });
+ assert.equal(second.status,200);
+ assert.deepEqual(second.data.data.changes.map(x=>x.seq),[3,4]);
+ const third=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:second.data.data.next_cursor,cutoff:p1.cutoff,limit:2
+ });
+ assert.equal(third.status,200);
+ assert.deepEqual(third.data.data.changes.map(x=>x.seq),[5]);
+ assert.equal(third.data.data.next_cursor,null);
+ assert.equal(third.data.data.checkpoint_cursor,5);
+ const next=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:third.data.data.checkpoint_cursor,limit:100
+ });
+ assert.equal(next.status,200);
+ assert.deepEqual(next.data.data.changes.map(x=>x.seq),[6]);
+ assert.equal(next.data.data.checkpoint_cursor,6);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:3,cutoff:2
+ })).status,400);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:0,cutoff:999999
+ })).status,400);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",limit:101
+ })).status,400);
+});
+test("S3 scope boundary and non-task workspaces do not leak D1 changes",async()=>{
+ const e=env();
+ e.DB.db.prepare(
+  "INSERT INTO remote_tasks(id,workspace_id,title,created_at,updated_at) VALUES(?,?,?,?,?)"
+ ).run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","other",
+  "Unrelated workspace secret","2026-11-18T00:00:00Z","2026-11-18T00:00:00Z");
+ const read=await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal",cursor:0,limit:3
+ });
+ assert.equal(read.status,200);
+ assert.deepEqual(read.data.data.changes,[]);
+ assert.equal(read.data.data.cutoff,1,"global sequence does not expose other workspaces' task IDs");
+ assert.equal(read.data.data.checkpoint_cursor,1);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{workspace_id:"other"})).status,403);
+ assert.equal((await call(e,"/api/v1/ops/sync.changes.read",{
+  workspace_id:"personal"
+ },{auth:null})).status,401);
+ e.SHIO_AUTH_MODE="oauth";
+ e.SHIO_OAUTH_SCOPES=["mcp:read"];
+ const rpcRead=await call(e,"/mcp",rpc("tools/call",{
+  name:"shiori_sync_changes_read",arguments:{workspace_id:"personal",cursor:1}
+ }));
+ assert.equal(rpcRead.status,200);
+ assert.equal(rpcRead.data.result.isError,undefined);
+ assert.equal(rpcRead.data.result.structuredContent.local_rust_sync,false);
 });

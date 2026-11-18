@@ -1518,6 +1518,160 @@
       "release_evidence": "S2 first-import pilot with fixture-only D1 tests; owner pairing, consent, exact-hash receipt and collision rejection required. No automatic sync."
     },
     {
+      "id": "sync.changes.read",
+      "phase": "B",
+      "description": "Owner-authenticated append-only D1 task/edge change events paged to a primary-anchored high-water cutoff; metadata only, not a historical snapshot or automatic Rust synchronization.",
+      "availability": "cloudflare_alpha",
+      "effect": "read",
+      "approval": "none",
+      "scope": "sync:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.changes.read"
+      },
+      "mcp_tool": "shiori_sync_changes_read",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cutoff": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.changes.read"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changes",
+              "cutoff",
+              "checkpoint_cursor",
+              "next_cursor",
+              "baseline_required",
+              "local_rust_sync"
+            ],
+            "properties": {
+              "changes": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "seq",
+                    "kind",
+                    "task_id",
+                    "depends_on_id",
+                    "task_version",
+                    "occurred_at"
+                  ],
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "task.insert",
+                        "task.update",
+                        "task.delete",
+                        "task.purge",
+                        "edge.add",
+                        "edge.remove"
+                      ]
+                    },
+                    "task_id": {
+                      "type": "string"
+                    },
+                    "depends_on_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task_version": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "occurred_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "cutoff": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "checkpoint_cursor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "next_cursor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "baseline_required": {
+                "const": true
+              },
+              "local_rust_sync": {
+                "const": false
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Fixture-based trigger tests for all task and edge changes; bounded high-water pagination and primary session; old remote tasks require a baseline manifest. No actual client sync."
+    },
+    {
       "id": "tasks.dependencies.add",
       "phase": "A",
       "description": "Add one real prerequisite between two active remote tasks, with cycle protection and revision checks [isolated Cloudflare D1, not synced with Rust].",
@@ -10782,7 +10936,7 @@
       }
     }
   ],
-  "notes": "Registry describes all 120 operation contracts (27 isolated Cloudflare alpha tools, 93 planned); S2 allows only approved first import of a new dependency-free revision-1 Rust task. It is not bidirectional synchronization.",
+  "notes": "Registry describes all 121 contracts (28 implemented Cloudflare alpha, 93 planned). S3 adds a content-free bounded change feed; it is not a historical snapshot or bidirectional synchronization.",
   "security_notes": [
     "Every named operation is still checked by a future authenticated application service; a JSON workspace_id is not authorization.",
     "Transient UI commands require a live user-consented UI session and may return UNAVAILABLE without it.",
