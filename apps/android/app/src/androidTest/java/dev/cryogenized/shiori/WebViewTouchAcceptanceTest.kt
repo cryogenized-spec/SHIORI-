@@ -18,6 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.FileInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -41,6 +42,12 @@ class WebViewTouchAcceptanceTest {
     fun launchCleanActivity() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         captureWebView()
+        // On Android 15 the instrumentation runner can own window focus even
+        // after ActivityScenario reports a resumed, laid-out Activity. First
+        // allow the normal focus handoff; if it never occurs, explicitly move
+        // the *same* app task to the foreground through Android's activity
+        // manager. This does not synthesize a WebView click or a pointer tap.
+        ensureForegroundWindow()
         // JS execution can finish while MainActivity still has the WebView
         // INVISIBLE for its first native-vault inspection/onPageFinished. A
         // pointer sent in that gap is accepted by UiAutomation but cannot
@@ -56,8 +63,11 @@ class WebViewTouchAcceptanceTest {
                 // ActivityScenario can transiently take window focus while
                 // the WebView remains fully visible. Focus alone is not proof
                 // that Android will reject a real UiAutomation pointer.
+                val decor = activity.window.decorView
                 lastTouchDiagnostic = "startup: shown=$shown, attached=$attached, " +
-                    "focused=$focused, webView=${webView.width}x${webView.height}, " +
+                    "focused=$focused, decorWindowFocus=${decor.hasWindowFocus()}, " +
+                    "decorViewFocus=${decor.hasFocus()}, " +
+                    "webView=${webView.width}x${webView.height}, " +
                     "activityFinishing=${activity.isFinishing}"
             }
             visible && javascript(
@@ -86,6 +96,42 @@ class WebViewTouchAcceptanceTest {
     @After
     fun closeActivity() {
         scenario.close()
+    }
+
+    /**
+     * Restore ACTUAL Android window focus before requiring real touchscreen
+     * input. A view's requestFocus() cannot grant top-level window focus, and
+     * simply ignoring hasWindowFocus() would let touches go to another app.
+     *
+     * We only ask ActivityManager to reselect the already-running SHIORI task
+     * after a bounded normal startup handoff. SINGLE_TOP plus NEW_TASK avoids
+     * CLEAR_TASK and does not erase test data or change app permissions.
+     * The following readiness check and real pointer assertions must still
+     * succeed; no assertion is skipped on recovery.
+     */
+    private fun ensureForegroundWindow() {
+        val graceUntil = SystemClock.uptimeMillis() + 3_000L
+        while (SystemClock.uptimeMillis() < graceUntil) {
+            var focused = false
+            scenario.onActivity {
+                focused = webView.isShown && webView.windowToken != null &&
+                    webView.hasWindowFocus() && !it.isFinishing
+            }
+            if (focused) return
+            SystemClock.sleep(150)
+        }
+
+        val output = instrument.uiAutomation.executeShellCommand(
+            "am start -W -f 0x30000000 -n dev.cryogenized.shiori/.MainActivity"
+        ).use { descriptor ->
+            FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() }
+        }
+        assertTrue(
+            "Android failed to bring SHIORI foreground task back: $output",
+            output.isNotBlank() && !output.contains("Error:", ignoreCase = true)
+        )
+        instrument.waitForIdleSync()
+        captureWebView()
     }
 
     private fun findWebView(view: View): WebView? {
