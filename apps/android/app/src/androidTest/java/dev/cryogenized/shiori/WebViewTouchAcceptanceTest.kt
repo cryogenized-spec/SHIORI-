@@ -111,29 +111,59 @@ class WebViewTouchAcceptanceTest {
      * The following readiness check and real pointer assertions must still
      * succeed; no assertion is skipped on recovery.
      */
-    private fun ensureForegroundWindow() {
-        val graceUntil = SystemClock.uptimeMillis() + 3_000L
-        while (SystemClock.uptimeMillis() < graceUntil) {
-            var focused = false
-            scenario.onActivity {
-                focused = webView.isShown && webView.windowToken != null &&
-                    webView.hasWindowFocus() && !it.isFinishing
-            }
-            if (focused) return
-            SystemClock.sleep(150)
+    private fun focusGranted(): Boolean {
+        var result = false
+        scenario.onActivity { activity ->
+            result = activity.window.decorView.hasWindowFocus() &&
+                webView.hasWindowFocus() && webView.windowToken != null &&
+                !activity.isFinishing
+        }
+        return result
+    }
+
+    private fun waitForFocus(budget: Long): Boolean {
+        val deadline = SystemClock.uptimeMillis() + budget
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (focusGranted()) return true
+            SystemClock.sleep(160)
+        }
+        return focusGranted()
+    }
+
+    private fun shell(command: String): String =
+        instrument.uiAutomation.executeShellCommand(command).use { fd ->
+            FileInputStream(fd.fileDescriptor).bufferedReader().use { it.readText() }
         }
 
-        val output = instrument.uiAutomation.executeShellCommand(
-            "am start -W -f 0x30000000 -n dev.cryogenized.shiori/.MainActivity"
-        ).use { descriptor ->
-            FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() }
-        }
-        assertTrue(
-            "Android failed to bring SHIORI foreground task back: $output",
-            output.isNotBlank() && !output.contains("Error:", ignoreCase = true)
-        )
+    private fun ensureForegroundWindow() {
+        if (waitForFocus(3_000L)) return
+        val command = "am start -W -f 0x30000000 -n dev.cryogenized.shiori/.MainActivity"
+        val first = shell(command)
+        assertTrue("Android task selection failed: $first",
+            first.isNotBlank() && !first.contains("Error:", ignoreCase = true))
         instrument.waitForIdleSync()
         captureWebView()
+        if (waitForFocus(4_000L)) return
+
+        // One bounded system-level HOME -> app task focus handoff on Android
+        // 15; never retries a failed task tap, mocks a click or skips checks.
+        shell("input keyevent 3")
+        SystemClock.sleep(350)
+        val second = shell(command)
+        assertTrue("Android Home-to-app task handoff failed: $second",
+            second.isNotBlank() && !second.contains("Error:", ignoreCase = true))
+        instrument.waitForIdleSync()
+        captureWebView()
+        if (!waitForFocus(6_000L)) {
+            var diagnostic = "unknown"
+            scenario.onActivity {
+                diagnostic = "windowFocus=\${it.window.decorView.hasWindowFocus()}, " +
+                    "webViewFocus=\${webView.hasWindowFocus()}, " +
+                    "shown=\${webView.isShown}, attached=\${webView.windowToken != null}"
+            }
+            throw AssertionError("Real SHIORI input focus remains absent: " +
+                diagnostic + "; first=$first; second=$second")
+        }
     }
 
     private fun findWebView(view: View): WebView? {
