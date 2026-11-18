@@ -1182,7 +1182,7 @@ async function mcp(body, env) {
     if (body.method === "initialize") return { jsonrpc: "2.0", id, result: { protocolVersion: PROTOCOL, capabilities: { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } }, serverInfo: { name: SERVER, version: VERSION } } };
     if (body.method === "ping") return { jsonrpc: "2.0", id, result: {} };
     if (body.method === "tools/list") return { jsonrpc: "2.0", id, result: { tools: OPERATIONS.map((o) => ({ name: o.name, description: o.description, inputSchema: o.inputSchema })) } };
-    if (body.method === "resources/list") return { jsonrpc: "2.0", id, result: { resources: [{ uri: SCHEMA_URI, name: "Shiori full operation registry", description: "All 113 complete input/output contracts with explicit deployed/planned status", mimeType: "application/json" }] } };
+    if (body.method === "resources/list") return { jsonrpc: "2.0", id, result: { resources: [{ uri: SCHEMA_URI, name: "Shiori full operation registry", description: "All 122 versioned input/output contracts with explicit deployed/planned status", mimeType: "application/json" }] } };
     if (body.method === "resources/templates/list") return { jsonrpc: "2.0", id, result: { resourceTemplates: [{ uriTemplate: SCHEMA_URI + "/{operation_id}", name: "Shiori individual operation contract", description: "Read one full input/output schema by dot-separated operation ID", mimeType: "application/json" }] } };
     if (body.method === "resources/read") {
       const uri = body.params?.uri;
