@@ -201,7 +201,7 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** offline edits converge safely after reconnect; conflicts and deletes are not lost; a documented export/restore migration succeeds between two independently operated environments.
 
 ### M5 — MCP interoperability and compact UI
-**2026-11-18 checkpoint:** Owner OAuth 2.1/PKCE authorization is completed and verified with ChatGPT. There are **28 live scoped D1 operations** (121 contracts; 93 still planned). Real remote task creation and native dependency links have been demonstrated. The cloud backend remains separate from Rust/SQLite and this is **not** production multi-user MCP or completed M4 sync.
+**2026-11-18 checkpoint:** Owner OAuth 2.1/PKCE authorization is completed and verified with ChatGPT. There are **29 live scoped D1 operations** (122 contracts; 93 still planned). Real remote task creation and native dependency links have been demonstrated. The cloud backend remains separate from Rust/SQLite and this is **not** production multi-user MCP or completed M4 sync.
 
 **SH-008 groundwork:** define model-provider capability contracts, account/secret setup boundary and a strictly optional local companion UI prototype. Its chat state must not become another task store or bypass application permissions.
 
@@ -232,7 +232,7 @@ tests/              # integration, contract, performance and migration tests
 
 ## Current engineering checkpoint (18 November 2026)
 
-**Evening update:** S2 first-import server and its receipt path are deployed; S3 D1 task/edge triggers and read-only change cursor are deployed, without backfilling historical tasks. A private metadata-only local pull journal is merged through [PR #70](https://github.com/cryogenized-spec/SHIORI-/pull/70). These are infrastructure milestones, **not** a functioning bidirectional sync release.
+**Evening update:** S2 first-import server and its receipt path are deployed; S3 D1 task/edge triggers, read-only change cursor and a bounded single-statement atomic baseline with paired high-water cutoff are deployed; earlier events are not backfilled. A private metadata-only local pull journal is merged through [PR #70](https://github.com/cryogenized-spec/SHIORI-/pull/70). These are infrastructure milestones, **not** a functioning bidirectional sync release.
 
 - **Implemented:** Rust/SQLite v3 offline task domain, Jiff 1.0 date/time migration (Chrono and its temporary RustSec exception removed), deterministic scheduling *preview*, local attention and spatial canvas proof, Android native offline debug shell, and 28 authenticated single-owner remote MCP operations.
 - **Active blockers:** [Android 15 WebView real-touch test reliability #65](https://github.com/cryogenized-spec/SHIORI-/issues/65), physical Android release acceptance, and safe Rust ↔ D1 synchronization with identity provenance, conflict resolution, durable offline outbox and rollback.
