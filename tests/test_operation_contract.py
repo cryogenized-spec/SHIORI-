@@ -44,7 +44,7 @@ class TestRemoteOperationContract(unittest.TestCase):
                      "spatial.node.inspect", "spatial.scene.export",
                      "sync.manifest.read","sync.device.pair","sync.import.preview",
                      "sync.import.apply","sync.import.receipt.read","sync.changes.read",
-                     "sync.baseline.read","sync.record.snapshot.read",
+                     "sync.baseline.read","sync.record.snapshot.read","sync.record.apply",
                      "sync.device.status.read","sync.device.revoke"}
             self.assertEqual(
                 op["availability"],
@@ -57,7 +57,7 @@ class TestRemoteOperationContract(unittest.TestCase):
                     op["data_source"], "isolated_remote_d1_not_synced_with_local_rust"
                 )
         self.assertEqual(self.catalog["mcp"]["endpoint"], "/mcp")
-        self.assertEqual(len([op for op in self.ops if op["availability"] == "cloudflare_alpha"]), 32)
+        self.assertEqual(len([op for op in self.ops if op["availability"] == "cloudflare_alpha"]), 33)
 
     def test_every_operation_has_typed_bounded_input_and_output(self):
         for op in self.ops:
