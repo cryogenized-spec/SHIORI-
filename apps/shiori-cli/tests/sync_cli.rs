@@ -66,17 +66,50 @@ fn only_matching_remote_receipt_can_acknowledge_a_staged_local_event() {
     let folder = tempdir().unwrap();
     let db = folder.path().join("tasks.sqlite3");
     let created = stdout(&cli(&db, &["add", "Private fixture"]));
-    let id = created.rsplit_once('[').unwrap().1.trim_end_matches(']').trim();
+    let id = created
+        .rsplit_once('[')
+        .unwrap()
+        .1
+        .trim_end_matches(']')
+        .trim();
     let staged = stdout(&cli(&db, &["sync-stage", id, "--if-version", "1"]));
-    let event = staged.split("local event ").nth(1).unwrap().split_whitespace().next().unwrap();
-    let wrong = cli(&db, &[
-        "sync-ack", event, "--remote-id", id, "--remote-revision", "1",
-        "--local-task-id", "wrong-task", "--local-revision", "1"
-    ]);
-    assert!(!wrong.status.success(), "a forged remote receipt must not be accepted");
+    let event = staged
+        .split("local event ")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
+    let wrong = cli(
+        &db,
+        &[
+            "sync-ack",
+            event,
+            "--remote-id",
+            id,
+            "--remote-revision",
+            "1",
+            "--local-task-id",
+            "wrong-task",
+            "--local-revision",
+            "1",
+        ],
+    );
+    assert!(
+        !wrong.status.success(),
+        "a forged remote receipt must not be accepted"
+    );
     let args = [
-        "sync-ack", event, "--remote-id", id, "--remote-revision", "1",
-        "--local-task-id", id, "--local-revision", "1",
+        "sync-ack",
+        event,
+        "--remote-id",
+        id,
+        "--remote-revision",
+        "1",
+        "--local-task-id",
+        id,
+        "--local-revision",
+        "1",
     ];
     let acknowledged = stdout(&cli(&db, &args));
     assert!(acknowledged.contains("Acknowledged verified remote receipt"));
