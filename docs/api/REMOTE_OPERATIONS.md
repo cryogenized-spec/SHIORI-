@@ -1,8 +1,10 @@
 # SHIORI Remote Operations — v1 contract plan
 
-**Status: 113-operation design; 9 Cloudflare-only alpha operations deployed, 104 planned. Last reviewed 2026-11-15. See [machine-readable registry](operations.v1.json) and [ADR 0004](../adr/0004-remote-operation-registry-and-mcp.md).
+**Status: 115-operation contract catalogue; 22 implemented Cloudflare alpha tools, 93 planned. Last verified 2026-11-18. See [machine-readable registry](operations.v1.json) and [ADR 0004](../adr/0004-remote-operation-registry-and-mcp.md).
 
-This document freezes the **shape of the integration**, not the eventual release of all 113 operations. The registry is deliberately wide enough to cover the full ISW vision; a small Phase A subset has been uploaded as a token-protected Cloudflare Worker with an **isolated D1 dataset**, not the Rust application service. `availability: cloudflare_alpha` identifies those nine implemented Worker operations; `availability: planned` means no handler is deployed. OAuth, local sync and third-party MCP client connection are not complete. The local Python development bridge is not a production API.
+This document freezes the **shape of the integration**, not the eventual release of all 115 operations. The registry is deliberately wide enough to cover the full ISW vision; a guarded subset is deployed through a bearer Worker and a separate owner OAuth resource with an **isolated D1 dataset**, not the Rust application service. `availability: cloudflare_alpha` identifies the 22 implemented Worker operations; `availability: planned` means no handler is deployed. Owner OAuth/PKCE ChatGPT pairing works; Rust↔Cloudflare sync and multi-user authentication are not complete. The local Python development bridge is not a production API.
+
+See [the canonical operation registry](operations.v1.json) for the current list. The later example table includes proposed operations, which must not be confused with deployed commands.
 
 ## One operation, two remote faces
 
@@ -51,7 +53,7 @@ All query and mutation operations remain accessible to *ordinary software* via t
 
 **Phase D — external workflows.** Add read-only GitHub source graph, ClickUp import/sync previews, secure inbox events, opt-in email automation and job processing. Explicit user review is required before modifying external records or sending messages.
 
-These are **implementation phases**, not promises that 94 remote tools will be enabled immediately. MCP tool discovery should expose *only actually implemented and authorized operations*; the full planning manifest is not the live tool list.
+These are **implementation phases**, not promises that 93 planned remote tools will be enabled immediately. MCP tool discovery should expose *only actually implemented and authorized operations*; the full planning manifest is not the live tool list.
 
 ## JSON request and response — planned wire format
 
