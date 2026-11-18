@@ -338,7 +338,7 @@ async function run(id,arg,env){
   // transaction split across Cloudflare requests would not be a snapshot.
   // Return 413 rather than silently truncate an oversized workspace.
   const reader=typeof db.withSession==="function"?db.withSession("first-primary"):db;
-  const query=\`
+  const query=`
   SELECT
     (SELECT COALESCE(MAX(seq),0) FROM remote_change_log) AS cutoff,
     (SELECT COUNT(*) FROM remote_tasks WHERE workspace_id=?) AS task_count,
@@ -355,7 +355,7 @@ async function run(id,arg,env){
     (SELECT COALESCE(json_group_array(json_object(
       'task_id',task_id,'depends_on_id',depends_on_id)), '[]')
       FROM (SELECT task_id,depends_on_id FROM remote_dependencies
-            WHERE workspace_id=? ORDER BY task_id,depends_on_id LIMIT 201)) AS edges_json\`;
+            WHERE workspace_id=? ORDER BY task_id,depends_on_id LIMIT 201)) AS edges_json`;
   const snapshot=await reader.prepare(query).bind(w,w,w,w,w).first();
   if(!snapshot || !Number.isSafeInteger(snapshot.cutoff) || snapshot.cutoff<0
      || !Number.isSafeInteger(snapshot.task_count) || snapshot.task_count<0
