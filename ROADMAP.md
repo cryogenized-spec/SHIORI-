@@ -194,14 +194,14 @@ tests/              # integration, contract, performance and migration tests
 **Exit:** contract tests check unique tool/route names, schemas, scope/risk classifications and the separation between visual routing and true graph mutations. This milestone is **a design and test contract, not a deployed MCP server**. Phase A implements a small working subset before exposing the wider catalogue.
 
 ### M4 — Optional sync, accounts and portable hosting
-**2026-11-18 checkpoint:** Local Rust `bridge-manifest` exports task IDs, revisions, status, tombstones and dependency references without titles/notes, and `sync_preview.py --manifest` compares counts against remote D1. Identity proof, pairing, revision-aware uploads, durable outbox and two-device convergence are still outstanding. **No production sync is enabled.**
+**2026-11-18 checkpoint:** Local Rust `bridge-manifest` exports task IDs, revisions, status, tombstones and dependency references without titles/notes, and `sync_preview.py --manifest` compares counts against remote D1. The private Rust outbox, owner-paired first-import pilot, and content-free D1 append-only change feed now exist. Missing: verifiable initial snapshot-and-cursor provenance, safe two-way edits, conflict resolution and two-device convergence. **No production sync is enabled.**
 
 **Deliver:** independent server, authentication and permission model, sync protocol, conflict resolution, tombstones, secure backup/restore, multiple-device testing, and Docker/local deployment. Additional cloud targets remain adapters, not prerequisites.
 
 **Exit:** offline edits converge safely after reconnect; conflicts and deletes are not lost; a documented export/restore migration succeeds between two independently operated environments.
 
 ### M5 — MCP interoperability and compact UI
-**2026-11-18 checkpoint:** Owner OAuth 2.1/PKCE authorization is completed and verified with ChatGPT. There are **22 live scoped D1 operations** (115 contracts; 93 still planned). Real remote task creation and native dependency links have been demonstrated. The cloud backend remains separate from Rust/SQLite and this is **not** production multi-user MCP or completed M4 sync.
+**2026-11-18 checkpoint:** Owner OAuth 2.1/PKCE authorization is completed and verified with ChatGPT. There are **28 live scoped D1 operations** (121 contracts; 93 still planned). Real remote task creation and native dependency links have been demonstrated. The cloud backend remains separate from Rust/SQLite and this is **not** production multi-user MCP or completed M4 sync.
 
 **SH-008 groundwork:** define model-provider capability contracts, account/secret setup boundary and a strictly optional local companion UI prototype. Its chat state must not become another task store or bypass application permissions.
 
@@ -232,7 +232,9 @@ tests/              # integration, contract, performance and migration tests
 
 ## Current engineering checkpoint (18 November 2026)
 
-- **Implemented:** Rust/SQLite v3 offline task domain, Jiff 1.0 date/time migration (Chrono and its temporary RustSec exception removed), deterministic scheduling *preview*, local attention and spatial canvas proof, Android native offline debug shell, and 22 authenticated single-owner remote MCP operations.
+**Evening update:** S2 first-import server and its receipt path are deployed; S3 D1 task/edge triggers and read-only change cursor are deployed, without backfilling historical tasks. A private metadata-only local pull journal is merged through [PR #70](https://github.com/cryogenized-spec/SHIORI-/pull/70). These are infrastructure milestones, **not** a functioning bidirectional sync release.
+
+- **Implemented:** Rust/SQLite v3 offline task domain, Jiff 1.0 date/time migration (Chrono and its temporary RustSec exception removed), deterministic scheduling *preview*, local attention and spatial canvas proof, Android native offline debug shell, and 28 authenticated single-owner remote MCP operations.
 - **Active blockers:** [Android 15 WebView real-touch test reliability #65](https://github.com/cryogenized-spec/SHIORI-/issues/65), physical Android release acceptance, and safe Rust ↔ D1 synchronization with identity provenance, conflict resolution, durable offline outbox and rollback.
 - **Next focused engineering work:** S1 manifest/cursor/identity proof → S2 owner-approved one-way import → S3 offline queued bidirectional reconciliation; keep real local records untouched until cross-device fixture convergence passes. This sequence is a **plan**, not a claim of live sync.
 - **Private beta exit gate:** one task edited on Android, CLI/spatial UI and authorized MCP must represent a single canonical record across reconnects without lost revisions, duplicated tasks or tombstone resurrection. Backup/recovery and a reliable Android on-device test are mandatory.

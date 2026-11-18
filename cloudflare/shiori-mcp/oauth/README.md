@@ -9,7 +9,7 @@ Cloudflare's maintained `@cloudflare/workers-oauth-provider` (pinned to version 
 - `shiori-auth`: authorization issuer, with its own `OAUTH_KV` namespace and a **single-owner approval form**.
 - `shiori-mcp-oauth`: authenticated MCP resource server, calling `shiori-auth` over a Cloudflare Service Binding. Shares the existing isolated `shiori-mcp-alpha` D1 workspace, **not the local Rust database**.
 
-The OAuth resource Worker is **MCP-only**, audience-bound to `/mcp`. The original private-bearer Cloudflare Worker retains the dedicated JSON/HTTP routes. The OAuth resource requires `mcp:read` to discover/read and `mcp:write` for mutations. Its protected handler forwards only validated requests to the same 23 verified deployed Shiori operations (with four additional S2 pilot operations pending promotion) that the bearer alpha exposes. The legacy internal auth check receives a random per-request nonce; no persistent bearer secret is shared.
+The OAuth resource Worker is **MCP-only**, audience-bound to `/mcp`. The original private-bearer Cloudflare Worker retains the dedicated JSON/HTTP routes. The OAuth resource requires `mcp:read` to discover/read and `mcp:write` for mutations. Its protected handler forwards only validated requests to the same 28 verified deployed Shiori operations that the bearer alpha exposes. The legacy internal auth check receives a random per-request nonce; no persistent bearer secret is shared.
 
 ### OAuth sign-in protection
 

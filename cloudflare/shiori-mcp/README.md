@@ -1,6 +1,10 @@
 # SHIORI Cloudflare MCP — single-owner alpha (18 November 2026)
 
-**Verified live before S2 promotion:** 23 runnable operations. The branch implements four additional S2 tools (27 total in source; 120 versioned contracts; 93 planned), pending database migration, CI and deployment. Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
+**Verified live 18 November 2026:** 28 runnable operations, 121 versioned contracts and 93 planned. S2 owner-reviewed initial import and S3 content-free D1 change feed are deployed. No canonical Rust ↔ D1 task synchronization exists. Both the legacy bearer Worker `shiori-mcp-alpha` and OAuth-protected MCP resource `shiori-mcp-oauth` are deployed. ChatGPT has successfully authorized `mcp:read` and optional `mcp:write`, created demo tasks and read seven native prerequisite edges. Cloudflare D1 and Rust/SQLite **remain isolated**.
+
+## S2/S3 synchronization boundary
+
+Cloudflare's new `sync.device.pair`, `sync.import.preview`, `sync.import.apply` and `sync.import.receipt.read` operations require explicit owner approval, an exact staged payload hash and collision-safe receipts. `sync.changes.read` exposes only ordered task/edge metadata with a fixed high-water cursor; existing remote tasks still need an initial verified baseline. The service has **not** read, copied or merged private Rust/SQLite tasks. No background sync or two-device conflict resolution is implemented.
 
 ## Current limitations
 
@@ -77,8 +81,8 @@ Tests use a disposable in-memory SQLite database and do not touch Cloudflare or 
 
 ## Complete operation schema discovery
 
-Shiori has **115 operation contracts** in `docs/api/operations.v1.json`.
-The Cloudflare MCP makes **all 115 full contracts discoverable** without
+Shiori has **121 operation contracts** in `docs/api/operations.v1.json`.
+The Cloudflare MCP makes **all 121 full contracts discoverable** without
 presenting unimplemented commands as runnable. The registry includes
 input and output JSON Schemas, operation ID, scope, effect, approval
 requirements, phase and actual availability.
@@ -92,7 +96,7 @@ requirements, phase and actual availability.
   access with `workspace_id`, `cursor`, `limit`, and optional
   `availability` or exact `operation_id` lookup. It returns full contracts,
   not merely names.
-- `tools/list` deliberately advertises **only the 22 runnable operations**:
+- `tools/list` deliberately advertises **only the 28 runnable operations**:
   the original operations plus guarded CRUD, graph and spatial operations. Unsupported operations
   are never executed; they cannot be called merely because their schema
   exists in the catalog.
@@ -176,7 +180,7 @@ with tombstones, source IDs, conflict resolution and rollback is implemented.
 
 1. Implement standards-compliant OAuth/PKCE pairing for ChatGPT and similar remote clients; use explicit user identity and revocable sessions.
 2. Introduce a Rust application-service facade over canonical local tasks and a well-defined authenticated sync protocol. Prove field mapping, conflicts, tombstones, revisions and offline queue replay.
-3. Add live EAI/MCP Apps UI resources and typed graph/inbox operations only as Rust-backed services become available. Use the 115-operation registry as a planning inventory, not a dynamic arbitrary-execution endpoint.
+3. Add live EAI/MCP Apps UI resources and typed graph/inbox operations only as Rust-backed services become available. Use the 121-operation registry as a planning inventory, not a dynamic arbitrary-execution endpoint.
 
 ## Native cloud prerequisite links (2026-11-17)
 
