@@ -151,5 +151,88 @@ class ReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(review.ReviewError, "untrusted"):
             review.baseline_journal(self.journal)
 
+
+    def test_delta_impact_summarizes_affected_identities_without_exposing_them(self):
+        local, links = self._local([
+            ("task-a", "2", "todo", "2026-11-18T09:00:00Z", "", ""),
+            ("task-c", "1", "todo", "2026-11-18T09:00:00Z", "", ""),
+            ("task-d", "1", "todo", "2026-11-18T09:00:00Z", "", ""),
+        ])
+        db = sqlite3.connect(self.journal)
+        db.executemany(
+            "INSERT INTO pull_events VALUES(?,?,?,?,?,?)",
+            [(8, "task.update", "task-a", None, 3, "2026-11-18T11:01:00Z"),
+             (9, "task.delete", "task-a", None, 4, "2026-11-18T11:02:00Z"),
+             (10, "task.insert", "task-c", None, 1, "2026-11-18T11:03:00Z"),
+             (11, "edge.add", "task-c", "task-a", None, "2026-11-18T11:04:00Z"),
+             (12, "edge.remove", "task-b", "task-a", None, "2026-11-18T11:05:00Z")],
+        )
+        db.execute("UPDATE pull_state SET cursor=12,cutoff=NULL")
+        db.commit()
+        db.close()
+        remote, edges, cutoff, checkpoint, count, incomplete, impact = review.baseline_journal(
+            self.journal, include_delta=True)
+        report = review.compare(local, links, remote, edges, cutoff, checkpoint, count,
+                                incomplete, impact)
+        self.assertEqual(report["remote_delta_insert_events"], 1)
+        self.assertEqual(report["remote_delta_update_events"], 1)
+        self.assertEqual(report["remote_delta_delete_events"], 1)
+        self.assertEqual(report["remote_delta_purge_events"], 0)
+        self.assertEqual(report["remote_delta_dependency_events"], 2)
+        self.assertEqual(report["remote_delta_distinct_changed_task_ids"], 2)
+        self.assertEqual(report["remote_delta_distinct_changed_dependency_pairs"], 2)
+        self.assertEqual(report["remote_delta_changed_shared_ids"], 1)
+        self.assertEqual(report["remote_delta_changed_local_only_ids"], 1)
+        self.assertEqual(report["remote_delta_changed_ids_absent_from_baseline"], 1)
+        self.assertEqual(report["remote_delta_possible_delete_vs_local_active"], 1)
+        self.assertEqual(report["remote_delta_versions_ahead_of_baseline"], 1)
+        self.assertEqual(report["remote_delta_dependency_endpoints_absent_from_baseline"], 1)
+        self.assertEqual(report["remote_delta_dependency_endpoints_absent_locally"], 1)
+        self.assertTrue(report["identity_review_required"])
+        self.assertFalse(report["safe_to_apply"])
+        output = json.dumps(report)
+        for secret in ("task-a", "task-b", "task-c", "task-d", "2026-11-18T11:"):
+            self.assertNotIn(secret, output)
+        self.assertEqual(self.canonical.read_bytes(), b"CANONICAL TASK DATA - DO NOT TOUCH")
+
+    def test_delta_impact_does_not_infer_provenance_from_clean_metadata(self):
+        local, links = self._local([
+            ("task-a", "2", "todo", "2026-11-18T09:00:00Z", "", ""),
+            ("task-b", "3", "done", "2026-11-18T09:00:00Z",
+             "2026-11-18T09:01:00Z", ""),
+        ])
+        remote, edges, cutoff, checkpoint, count, incomplete, impact = review.baseline_journal(
+            self.journal, include_delta=True)
+        report = review.compare(local, links, remote, edges, cutoff, checkpoint, count,
+                                incomplete, impact)
+        self.assertEqual(report["post_baseline_remote_events"], 0)
+        self.assertEqual(report["remote_delta_distinct_changed_task_ids"], 0)
+        self.assertEqual(report["remote_delta_dependency_events"], 0)
+        self.assertEqual(report["shared_ids_provenance_unverified"], 2)
+        self.assertFalse(report["safe_to_apply"])
+
+    def test_delta_impact_refuses_an_event_beyond_checkpoint(self):
+        db = sqlite3.connect(self.journal)
+        db.execute("INSERT INTO pull_events VALUES(8,'task.update','task-a',NULL,3,'2026-11-18T11:00:00Z')")
+        db.commit()
+        db.close()
+        with self.assertRaisesRegex(review.ReviewError, "uncheckpointed"):
+            review.baseline_journal(self.journal, include_delta=True)
+
+    def test_delta_impact_refuses_unrecognized_or_malformed_events(self):
+        db = sqlite3.connect(self.journal)
+        db.execute("INSERT INTO pull_events VALUES(8,'unexpected','task-a',NULL,3,'2026-11-18T11:00:00Z')")
+        db.execute("UPDATE pull_state SET cursor=8")
+        db.commit()
+        db.close()
+        with self.assertRaisesRegex(review.ReviewError, "Malformed"):
+            review.baseline_journal(self.journal, include_delta=True)
+        db = sqlite3.connect(self.journal)
+        db.execute("UPDATE pull_events SET kind='edge.add',depends_on_id='task-a',task_version=3 WHERE seq=8")
+        db.commit()
+        db.close()
+        with self.assertRaisesRegex(review.ReviewError, "Malformed"):
+            review.baseline_journal(self.journal, include_delta=True)
+
 if __name__ == "__main__":
     unittest.main()

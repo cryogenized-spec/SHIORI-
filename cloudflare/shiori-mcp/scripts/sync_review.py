@@ -23,6 +23,8 @@ MAX_LOCAL_BYTES = 4_000_000
 MAX_LOCAL_ITEMS = 10_000
 ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
 STATUSES = {"todo", "in_progress", "done"}
+EVENT_KINDS = {"task.insert", "task.update", "task.delete", "task.purge", "edge.add", "edge.remove"}
+MAX_DELTA_EVENTS = 50_000
 
 
 class ReviewError(ValueError):
@@ -90,7 +92,67 @@ def local_manifest(data: bytes) -> tuple[dict, set]:
     return rows, edges
 
 
-def baseline_journal(path: Path) -> tuple[dict, set, int, int, int, bool]:
+
+def delta_impact(con: sqlite3.Connection, cutoff: int, checkpoint: int,
+                 event_count: int) -> dict:
+    """Inspect *journaled* post-baseline events in the caller's read snapshot.
+
+    This records affected IDs only in process memory. No names, notes, raw IDs
+    or inferred current remote state are printed or written to disk.
+    """
+    if (type(cutoff) is not int or type(checkpoint) is not int
+            or checkpoint < cutoff or type(event_count) is not int
+            or not 0 <= event_count <= MAX_DELTA_EVENTS):
+        raise ReviewError("Post-baseline event budget or checkpoint is invalid")
+    kinds = {kind: 0 for kind in EVENT_KINDS}
+    changed_tasks = set()
+    changed_edges = set()
+    delete_ids = set()
+    edge_pairs = set()
+    latest_versions = {}
+    previous = cutoff
+    rows = 0
+    for seq, kind, task_id, depends_on_id, version, occurred_at in con.execute(
+        "SELECT seq,kind,task_id,depends_on_id,task_version,occurred_at "
+        "FROM pull_events WHERE seq>? ORDER BY seq", (cutoff,)
+    ):
+        rows += 1
+        if rows > MAX_DELTA_EVENTS:
+            raise ReviewError("Too many change events for safe offline review")
+        if (type(seq) is not int or not previous < seq <= checkpoint
+                or kind not in EVENT_KINDS or not isinstance(task_id, str)
+                or not ID.fullmatch(task_id) or not isinstance(occurred_at, str)
+                or not 0 < len(occurred_at) <= 60):
+            raise ReviewError("Malformed or uncheckpointed remote change event")
+        previous = seq
+        kinds[kind] += 1
+        if kind.startswith("task."):
+            if depends_on_id is not None or type(version) is not int or not 1 <= version <= 2**53 - 1:
+                raise ReviewError("Malformed remote task change event")
+            changed_tasks.add(task_id)
+            latest_versions[task_id] = version
+            if kind in ("task.delete", "task.purge"):
+                delete_ids.add(task_id)
+        else:
+            if (not isinstance(depends_on_id, str) or not ID.fullmatch(depends_on_id)
+                    or depends_on_id == task_id or version is not None):
+                raise ReviewError("Malformed remote dependency change event")
+            changed_edges.add(task_id)
+            changed_edges.add(depends_on_id)
+            edge_pairs.add((task_id, depends_on_id))
+    if rows != event_count:
+        raise ReviewError("Post-baseline event count changed during review")
+    return {
+        "kind_counts": kinds,
+        "changed_task_ids": changed_tasks,
+        "edge_endpoints": changed_edges,
+        "delete_ids": delete_ids,
+        "edge_pairs": edge_pairs,
+        "latest_versions": latest_versions,
+    }
+
+
+def baseline_journal(path: Path, *, include_delta: bool = False) -> tuple:
     # Verify that the existing file is not a symlink or world-readable.
     private_file_bytes(path, 0, metadata_only=True)
     file_path = path.expanduser().resolve()
@@ -127,7 +189,10 @@ def baseline_journal(path: Path) -> tuple[dict, set, int, int, int, bool]:
         if prior:
             raise ReviewError("Pull journal contains pre-baseline events; cannot review safely")
         remote = {task_id: (version, status, deleted_at) for task_id, version, status, _, deleted_at in rows}
-        return remote, set(edges), cutoff, state[0], delta, state[1] is not None
+        result = (remote, set(edges), cutoff, state[0], delta, state[1] is not None)
+        if include_delta:
+            return (*result, delta_impact(con, cutoff, state[0], delta))
+        return result
     except sqlite3.Error as exc:
         raise ReviewError("Invalid or unreadable pull journal schema") from exc
     finally:
@@ -135,10 +200,11 @@ def baseline_journal(path: Path) -> tuple[dict, set, int, int, int, bool]:
 
 
 def compare(local: dict, local_edges: set, remote: dict, remote_edges: set,
-            cutoff: int, checkpoint: int, delta: int, incomplete_page: bool) -> dict:
+            cutoff: int, checkpoint: int, delta: int, incomplete_page: bool,
+            impact: dict | None = None) -> dict:
     li, ri = set(local), set(remote)
     both = li & ri
-    return {
+    result = {
         "remote_baseline_cutoff": cutoff,
         "remote_journal_checkpoint": checkpoint,
         "post_baseline_remote_events": delta,
@@ -160,6 +226,32 @@ def compare(local: dict, local_edges: set, remote: dict, remote_edges: set,
         "safe_to_apply": False,
         "data_transfer_performed": False,
     }
+    if impact is not None:
+        counts = impact["kind_counts"]
+        touched = impact["changed_task_ids"]
+        endpoints = impact["edge_endpoints"]
+        removed = impact["delete_ids"]
+        edges = impact["edge_pairs"]
+        versions = impact["latest_versions"]
+        result.update({
+            "remote_delta_insert_events": counts["task.insert"],
+            "remote_delta_update_events": counts["task.update"],
+            "remote_delta_delete_events": counts["task.delete"],
+            "remote_delta_purge_events": counts["task.purge"],
+            "remote_delta_dependency_events": counts["edge.add"] + counts["edge.remove"],
+            "remote_delta_distinct_changed_task_ids": len(touched),
+            "remote_delta_distinct_changed_dependency_pairs": len(edges),
+            "remote_delta_changed_shared_ids": len(touched & both),
+            "remote_delta_changed_local_only_ids": len(touched & (li - ri)),
+            "remote_delta_changed_ids_absent_from_baseline": len(touched - ri),
+            "remote_delta_possible_delete_vs_local_active": sum(
+                k in li and local[k][2] is None for k in removed),
+            "remote_delta_versions_ahead_of_baseline": sum(
+                k in remote and v > remote[k][0] for k, v in versions.items()),
+            "remote_delta_dependency_endpoints_absent_from_baseline": len(endpoints - ri),
+            "remote_delta_dependency_endpoints_absent_locally": len(endpoints - li),
+        })
+    return result
 
 
 def main() -> int:
@@ -170,9 +262,10 @@ def main() -> int:
     args = parser.parse_args()
     try:
         local, local_edges = local_manifest(private_file_bytes(args.local_manifest, MAX_LOCAL_BYTES))
-        remote, remote_edges, cutoff, checkpoint, delta, incomplete = baseline_journal(args.journal)
+        remote, remote_edges, cutoff, checkpoint, delta, incomplete, impact = baseline_journal(
+            args.journal, include_delta=True)
         print(json.dumps(compare(local, local_edges, remote, remote_edges, cutoff, checkpoint,
-                                 delta, incomplete), indent=2, sort_keys=True))
+                                 delta, incomplete, impact), indent=2, sort_keys=True))
         return 0
     except (ReviewError, OSError) as exc:
         print("SHIORI offline sync review: " + str(exc), file=sys.stderr)

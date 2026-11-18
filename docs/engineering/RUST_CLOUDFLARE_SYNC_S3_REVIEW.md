@@ -30,12 +30,25 @@ The staged baseline can be out of date. When the pull journal contains events af
 
 `identity_review_required` is **always true**, `safe_to_apply` is **always false**, and `data_transfer_performed` is **always false**. Matching IDs are not source provenance. No task import, conflict resolution, edge mutation, tombstone application or two-device convergence is implemented here.
 
+
+### Post-baseline delta impact (metadata-only S3 continuation)
+
+After a staged baseline, the event journal may contain inserts, updates, deletions, hard purges and dependency changes. The offline review now validates only **durably checkpointed** events and reports counts of:
+
+- Post-baseline insert, update, delete, purge and edge-change events.
+- Distinct changed task IDs and dependency pairs; how many changed task IDs overlap the two local/baseline inventories, or were absent from the staged remote baseline.
+- Possible delete-vs-active conflicts on local tasks, event-reported task revisions ahead of the staged remote baseline, and dependency endpoints absent from either original inventory.
+
+These are **risk indicators, not reconstructed remote state**. Event rows contain no task title or notes, and the review prints only counts, never IDs. An affected dependency endpoint absent from the *staged* baseline may have been inserted legitimately after that snapshot. A delete event does not give permission to delete the corresponding local task, nor does a matching UUID authenticate its origin.
+
+The review refuses malformed, unknown-kind, out-of-order or uncheckpointed events, with a maximum of **50,000** post-baseline events examined within one read-only database snapshot. It never polls Cloudflare, updates the event journal, or resolves conflicts. Safe application remains **disabled** even when every count is zero.
+
 ## Synthetic tests
 
 ```bash
 python3 -m unittest -v tests/test_sync_review.py
 ```
 
-Fixtures cover metadata-only counts, delete-vs-active and version disagreements, stale event cursors, baseline integrity, untrusted file permissions, wrong binary export type and unsafe schema/checkpoint states. The canonical task fixture is left untouched.
+Fixtures cover metadata-only counts, delete-vs-active and version disagreements, post-baseline event impact and malformed/uncheckpointed events, stale event cursors, baseline integrity, untrusted file permissions, wrong binary export type and unsafe schema/checkpoint states. The canonical task fixture is left untouched.
 
 See [S3 change-feed guide](RUST_CLOUDFLARE_SYNC_S3.md), [Issue #72](https://github.com/cryogenized-spec/SHIORI-/issues/72), and [ADR 0005](../adr/0005-rust-cloudflare-sync.md).
