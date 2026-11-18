@@ -8,7 +8,6 @@ Use only an owner-controlled legacy bearer token file, NOT the OAuth code.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -120,7 +119,10 @@ def request_page(token: str, cursor: int, cutoff: int | None) -> dict:
     )
     try:
         with urlopen(request, timeout=25) as response:
-            reply = json.load(response)
+            raw = response.read(200001)
+            if len(raw) > 200000:
+                raise PullError("Remote change-feed page exceeds safe response size")
+            reply = json.loads(raw)
     except HTTPError as exc:
         raise PullError(f"Owner-authenticated remote change feed rejected request (HTTP {exc.code})") from None
     except (URLError, TimeoutError) as exc:
@@ -153,7 +155,7 @@ def check_page(page: object, cursor: int, fixed_cutoff: int | None) -> tuple[lis
         seq = event["seq"]
         if not valid_int(seq, 1) or not (previous < seq <= cutoff):
             raise PullError("Event sequence is not increasing within the cutoff")
-        if (event["kind"] not in KNOWN_KINDS
+        if (not isinstance(event["kind"], str) or event["kind"] not in KNOWN_KINDS
                 or not isinstance(event["task_id"], str) or not 0 < len(event["task_id"]) <= 160
                 or not isinstance(event["occurred_at"], str) or not event["occurred_at"]):
             raise PullError("Invalid event identity, kind or timestamp")
