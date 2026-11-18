@@ -10,7 +10,7 @@ test("read methods retain mcp:read only",()=>{
                      "shiori_tasks_dependencies_list","shiori_spatial_scene_read","shiori_system_operations_list",
                      "shiori_spatial_node_position_read","shiori_spatial_viewport_read",
                      "shiori_spatial_node_inspect","shiori_spatial_scene_export",
-                     "shiori_sync_manifest_read"]){
+                     "shiori_sync_manifest_read","shiori_sync_import_receipt_read"]){
   assert.deepEqual(requiredScopesForRpc({method:"tools/call",params:{name}}),["mcp:read"]);
  }
 });
@@ -22,6 +22,7 @@ test("known writes and unknown tools both require mcp:write",()=>{
                     "shiori_tasks_update","shiori_tasks_delete","shiori_tasks_restore",
                     "shiori_tasks_priority_set","shiori_spatial_viewport_save",
                     "shiori_spatial_layout_lock_set",
+                    "shiori_sync_device_pair","shiori_sync_import_preview","shiori_sync_import_apply",
                     "shiori_not_implemented",undefined]){
   const needed=requiredScopesForRpc({method:"tools/call",params:{name}});
   assert.deepEqual(needed,["mcp:read","mcp:write"]);
