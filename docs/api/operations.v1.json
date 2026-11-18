@@ -1987,6 +1987,199 @@
       "release_evidence": "Single primary-pinned SQL SELECT with bounded snapshot and high-water cutoff; fake D1 race/cursor, deleted, overflow and cross-workspace tests. Local tasks remain untouched."
     },
     {
+      "id": "sync.record.snapshot.read",
+      "phase": "B",
+      "description": "Owner-requested atomic current remote record including task body, tombstone, prerequisites, import receipt and feed cutoff. Explicit include_content true is required. No automatic apply.",
+      "availability": "cloudflare_alpha",
+      "effect": "read",
+      "approval": "none",
+      "scope": "sync:read",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/ops/sync.record.snapshot.read"
+      },
+      "mcp_tool": "shiori_sync_record_snapshot_read",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "task_id",
+          "include_content"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "include_content": {
+            "enum": [
+              true
+            ]
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "operation_id",
+          "data"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "operation_id": {
+            "const": "sync.record.snapshot.read"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "record",
+              "depends_on",
+              "source_import",
+              "cutoff",
+              "record_sha256",
+              "consistent_snapshot",
+              "local_rust_sync",
+              "automatic_apply"
+            ],
+            "properties": {
+              "record": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "title",
+                  "notes",
+                  "project",
+                  "status",
+                  "priority",
+                  "version",
+                  "created_at",
+                  "updated_at",
+                  "deleted_at"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "created_at": {
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "type": "string"
+                  },
+                  "deleted_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "depends_on": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "source_import": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "receipt_id",
+                      "source_event_id",
+                      "source_version",
+                      "source_payload_sha256"
+                    ],
+                    "properties": {
+                      "receipt_id": {
+                        "type": "string"
+                      },
+                      "source_event_id": {
+                        "type": "string"
+                      },
+                      "source_version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "source_payload_sha256": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              },
+              "cutoff": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "record_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              },
+              "consistent_snapshot": {
+                "const": true
+              },
+              "local_rust_sync": {
+                "const": false
+              },
+              "automatic_apply": {
+                "const": false
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "implementation": "cloudflare/shiori-mcp/src/worker.js",
+      "data_source": "isolated_remote_d1_not_synced_with_local_rust",
+      "release_evidence": "Synthetic D1 tests: one primary SQL statement, tombstones, sorted edges, exact source receipt, cutoff, opt-in, workspace guard and no canonical local data writes."
+    },
+    {
       "id": "tasks.dependencies.add",
       "phase": "A",
       "description": "Add one real prerequisite between two active remote tasks, with cycle protection and revision checks [isolated Cloudflare D1, not synced with Rust].",
