@@ -263,6 +263,15 @@ impl SqliteStore {
             .optional()?)
     }
 
+    /// Read a task including its deleted tombstone for explicit sync staging.
+    /// Ordinary get() retains its active-only semantics.
+    pub fn get_including_deleted(&self, id: &str) -> Result<Task, StorageError> {
+        self.db
+            .query_row(&format!("{SELECT} WHERE id=?1"), params![id], task_from_row)
+            .optional()?
+            .ok_or(StorageError::NotFound)
+    }
+
     pub fn get(&self, id: &str) -> Result<Task, StorageError> {
         self.db
             .query_row(
