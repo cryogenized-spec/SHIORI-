@@ -999,6 +999,16 @@
       closeEdit();
     });
   });
+  // The persistent mobile New Task FAB gets a direct handler instead of
+  // relying on a document-level bubbling click in Android WebView. The
+  // delegated fallback below remains for newly-rendered add buttons.
+  document.querySelectorAll('button[data-add]').forEach(button=>{
+    button.addEventListener('click',event=>{
+      event.preventDefault();
+      event.stopPropagation();
+      openModal();
+    });
+  });
   document.addEventListener('click',e=>{
     const monthButton=e.target.closest('[data-calendar-shift]');
     if(monthButton){calendarMonth.setMonth(calendarMonth.getMonth()+Number(monthButton.dataset.calendarShift));renderCalendar();return;}
@@ -1345,4 +1355,7 @@
     $('.rail-footer').textContent='No account · on-device storage only';
   }
   bootstrapBridge();
+  // Signals that DOM click handlers were registered. Android tests still
+  // require a genuine native pointer gesture; this never simulates one.
+  window.shioriInteractionReady=true;
 })();
