@@ -176,6 +176,8 @@ def load_remote_manifest(base:str,token:str)->list[dict]:
     while True:
         page=remote_manifest_request(base,token,cursor)
         for row in page["items"]:
+            # The ordering invariant applies within each page as well as across
+            # cursor boundaries. Reject duplicates before producing any report.
             if cursor is not None and row["id"]<=cursor:
                 raise ValueError("Manifest not strictly ordered")
             cursor=row["id"]
