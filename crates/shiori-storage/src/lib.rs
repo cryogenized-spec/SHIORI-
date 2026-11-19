@@ -7,7 +7,9 @@ use rusqlite::{
 use shiori_core::{
     Priority, Task, TaskError, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id,
 };
-use std::{path::Path, str::FromStr};
+use std::{fs, path::Path, str::FromStr};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use thiserror::Error;
 
 mod spatial;
@@ -21,6 +23,14 @@ const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on
 
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("Private SQLite backup requires explicit consent")]
+    PrivateBackupApprovalRequired,
+    #[error("Private SQLite backup destination must be a new *.shiori-backup.sqlite3 file")]
+    PrivateBackupInvalidDestination,
+    #[error("Verified private SQLite backup failed validation")]
+    PrivateBackupVerificationFailed,
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
@@ -82,6 +92,77 @@ impl SqliteStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let db = Connection::open(path)?;
         Self::initialize(db)
+    }
+
+    /// Snapshot the current canonical SQLite database as a separate verified
+    /// private file. User-invoked prerequisite for any future local sync apply.
+    ///
+    /// SQLite VACUUM INTO gives a transactionally consistent database image
+    /// even when the source uses WAL; naive filesystem copies do not. Never
+    /// overwrite a backup, print task content or mutate canonical task rows.
+    pub fn backup_private_copy(
+        &self,
+        destination: &Path,
+        owner_approved: bool,
+    ) -> Result<(), StorageError> {
+        if !owner_approved {
+            return Err(StorageError::PrivateBackupApprovalRequired);
+        }
+        if !destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".shiori-backup.sqlite3"))
+        {
+            return Err(StorageError::PrivateBackupInvalidDestination);
+        }
+        let origin: String = self.db.query_row(
+            "SELECT file FROM pragma_database_list WHERE name='main'",
+            [],
+            |row| row.get(0),
+        )?;
+        if origin.is_empty() {
+            return Err(StorageError::PrivateBackupInvalidDestination);
+        }
+        let parent = destination.parent().ok_or(StorageError::PrivateBackupInvalidDestination)?;
+        let verified_parent = parent.canonicalize()?;
+        let backup = verified_parent.join(
+            destination.file_name().ok_or(StorageError::PrivateBackupInvalidDestination)?,
+        );
+        if origin.as_str().is_empty() || origin == backup.to_string_lossy() {
+            return Err(StorageError::PrivateBackupInvalidDestination);
+        }
+        let encoded_path = backup.to_str().ok_or(StorageError::PrivateBackupInvalidDestination)?;
+        // O_EXCL/create_new rejects pre-existing files and symlinks at the
+        // destination. On Unix the private backup never becomes world-readable.
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        drop(options.open(&backup)?);
+        let outcome = (|| -> Result<(), StorageError> {
+            self.db.execute("VACUUM INTO ?1", params![encoded_path])?;
+            let copy = Connection::open_with_flags(
+                &backup,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let check: String = copy.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+            let schema: i64 = copy.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            let original_count: i64 = self.db.query_row(
+                "SELECT count(*) FROM tasks", [], |row| row.get(0)
+            )?;
+            let backup_count: i64 = copy.query_row(
+                "SELECT count(*) FROM tasks", [], |row| row.get(0)
+            )?;
+            if check != "ok" || schema != SCHEMA_VERSION || backup_count != original_count {
+                return Err(StorageError::PrivateBackupVerificationFailed);
+            }
+            Ok(())
+        })();
+        if outcome.is_err() {
+            // Only remove the just-created destination; NEVER touch source DB.
+            let _ = fs::remove_file(&backup);
+        }
+        outcome
     }
 
     pub fn in_memory() -> Result<Self, StorageError> {
