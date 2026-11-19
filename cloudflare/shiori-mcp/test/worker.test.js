@@ -1177,3 +1177,70 @@ test("S5 refuses deleted records, stale hash and OAuth read-only writes",async()
   workspace_id:"personal",task_id:f.task_id,include_content:true
  })).data.data.record.deleted_at,deleted.record.deleted_at);
 });
+
+
+async function s5RaceFixture(){
+ const e=env(),f=importFixture();
+ assert.equal((await pairFixture(e,f)).status,200);
+ const p=await previewFixture(e,f);
+ assert.equal(p.status,200);
+ const imported=await call(e,"/api/v1/ops/sync.import.apply",request("race-apply-first",{
+  proposal_id:p.data.data.proposal_id,payload_json:f.payload_json,
+  owner_approved:true
+ }));
+ assert.equal(imported.status,200,JSON.stringify(imported.data));
+ const snapshot=(await call(e,"/api/v1/ops/sync.record.snapshot.read",{
+  workspace_id:"personal",task_id:f.task_id,include_content:true
+ })).data.data;
+ return {e,f,snapshot};
+}
+function s5RaceArgs(f,snapshot,key){
+ return request(key,{
+   device_id:f.device_id,task_id:f.task_id,
+   source_event_id:f.event_id,source_payload_sha256:f.payload_sha256,
+   expected_revision:snapshot.record.version,
+   expected_record_sha256:snapshot.record_sha256,
+   patch:{notes:"A private device-side change"},owner_approved:true
+ });
+}
+test("S5 CAS rejects device revocation between preflight and atomic UPDATE",async()=>{
+ const {e,f,snapshot}=await s5RaceFixture(),oldBatch=e.DB.batch.bind(e.DB);
+ e.DB.batch=async statements=>{
+  e.DB.db.prepare("UPDATE sync_devices SET revoked_at=? WHERE workspace_id=? AND device_id=?")
+    .run("2026-11-19T17:00:00Z","personal",f.device_id);
+  return oldBatch(statements);
+ };
+ const failed=await call(e,"/api/v1/ops/sync.record.apply",
+   s5RaceArgs(f,snapshot,"race-device-revoked"));
+ assert.equal(failed.status,409,JSON.stringify(failed.data));
+ assert.equal(e.DB.db.prepare("SELECT version FROM remote_tasks WHERE id=?").get(f.task_id).version,1);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency WHERE operation_id='sync.record.apply'").get().n,0);
+});
+test("S5 CAS rejects late changes to remote event cutoff even without task version change",async()=>{
+ const {e,f,snapshot}=await s5RaceFixture(),oldBatch=e.DB.batch.bind(e.DB);
+ e.DB.batch=async statements=>{
+  e.DB.db.prepare(
+    "INSERT INTO remote_tasks(id,workspace_id,title,created_at,updated_at) VALUES(?,?,?,?,?)"
+  ).run("cccccccc-cccc-4ccc-8ccc-cccccccccccc","personal","UNRELATED CHANGE",
+    "2026-11-19T17:00:00Z","2026-11-19T17:00:00Z");
+  return oldBatch(statements);
+ };
+ const failed=await call(e,"/api/v1/ops/sync.record.apply",
+   s5RaceArgs(f,snapshot,"race-cutoff-changed"));
+ assert.equal(failed.status,409,JSON.stringify(failed.data));
+ assert.equal(e.DB.db.prepare("SELECT version FROM remote_tasks WHERE id=?").get(f.task_id).version,1);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency WHERE operation_id='sync.record.apply'").get().n,0);
+});
+test("S5 CAS rejects import lineage replacement between source read and transaction",async()=>{
+ const {e,f,snapshot}=await s5RaceFixture(),oldBatch=e.DB.batch.bind(e.DB);
+ e.DB.batch=async statements=>{
+  e.DB.db.prepare("UPDATE sync_imports SET payload_sha256=? WHERE workspace_id=? AND task_id=?")
+   .run("a".repeat(64),"personal",f.task_id);
+  return oldBatch(statements);
+ };
+ const failed=await call(e,"/api/v1/ops/sync.record.apply",
+   s5RaceArgs(f,snapshot,"race-lineage-updated"));
+ assert.equal(failed.status,409,JSON.stringify(failed.data));
+ assert.equal(e.DB.db.prepare("SELECT version FROM remote_tasks WHERE id=?").get(f.task_id).version,1);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency WHERE operation_id='sync.record.apply'").get().n,0);
+});
