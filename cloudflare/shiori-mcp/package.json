@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/worker.js && node --test"
+    "check": "node --check src/worker.js && node --test && npm run check:sync-owner",
+    "check:sync-owner": "python3 -m unittest discover -s ../../tests -p 'test_sync_apply_owner.py' -v"
   },
-  "engines": {"node": ">=22"}
+  "engines": {
+    "node": ">=22"
+  }
 }
