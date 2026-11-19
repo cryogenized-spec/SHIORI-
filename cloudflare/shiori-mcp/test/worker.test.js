@@ -62,7 +62,7 @@ test("stateless MCP initializes and registers implemented tools only",async()=>{
   assert.equal(init.data.result.serverInfo.name,"shiori-mcp-cloudflare");
   const list=await call(e,"/mcp",rpc("tools/list",{}));
   assert.equal(list.status,200);
-  assert.equal(list.data.result.tools.length,31);
+  assert.equal(list.data.result.tools.length,33);
   assert(list.data.result.tools.some(t=>t.name==="shiori_spatial_node_position_set"));
   assert(!list.data.result.tools.some(t=>t.name==="shiori_graph_restructure_apply"));
   assert(list.data.result.tools.some(t=>t.name==="shiori_system_operations_list"));
@@ -124,7 +124,7 @@ test("reject unknown operations, unexpected fields and malformed data",async()=>
 test("the implemented MCP schemas match the central Shiori operation registry",async()=>{
   const registry=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
   const available=registry.operations.filter(o=>o.availability==="cloudflare_alpha");
-  assert.equal(available.length,31);
+  assert.equal(available.length,33);
   const result=await call(env(),"/mcp",rpc("tools/list",{}));
   const tools=result.data.result.tools;
   assert.equal(tools.length,available.length);
@@ -240,7 +240,7 @@ test("migration preserves legacy keys, which fail closed on replay",async()=>{
 test("the full schema catalog is available to MCP clients, including output contracts",async()=>{
  const e=env();
  const expected=JSON.parse(fs.readFileSync(new URL("../../../docs/api/operations.v1.json",import.meta.url),"utf8"));
- assert.equal(expected.operations.length,124);
+ assert.equal(expected.operations.length,126);
  const listed=await call(e,"/mcp",rpc("resources/list",{}));
  assert.equal(listed.data.result.resources[0].uri,"shiori://operations/v1");
  const templates=await call(e,"/mcp",rpc("resources/templates/list",{}));
@@ -264,8 +264,8 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const callCatalog=args=>call(e,"/mcp",rpc("tools/call",{name,arguments:{workspace_id:"personal",...args}}));
  const first=await callCatalog({limit:7});
  const a=first.data.result.structuredContent;
- assert.equal(a.registry_total,124);
- assert.equal(a.total,124);
+ assert.equal(a.registry_total,126);
+ assert.equal(a.total,126);
  assert.equal(a.items.length,7);
  assert.equal(a.next_cursor,"7");
  assert(a.items[0].inputSchema);
@@ -277,7 +277,7 @@ test("catalog tool paginates all 113 schemas and filters availability and exact 
  const planned=await callCatalog({availability:"planned",limit:500});
  assert.equal(planned.data.result.structuredContent.total,93);
  const implemented=await callCatalog({availability:"cloudflare_alpha",limit:500});
- assert.equal(implemented.data.result.structuredContent.total,31);
+ assert.equal(implemented.data.result.structuredContent.total,33);
  const item=await callCatalog({operation_id:"comments.delete"});
  assert.equal(item.data.result.structuredContent.items.length,1);
  assert.equal(item.data.result.structuredContent.items[0].effect,"destructive");
@@ -291,7 +291,7 @@ test("planned operations are discoverable but never callable",async()=>{
  const e=env();
  const list=await call(e,"/mcp",rpc("tools/list",{}));
  const names=list.data.result.tools.map(x=>x.name);
- assert.equal(names.length,31);
+ assert.equal(names.length,33);
  assert(!names.includes("shiori_comments_delete"));
  const planned=await call(e,"/mcp",rpc("tools/call",{name:"shiori_comments_delete",arguments:{
   workspace_id:"personal",task_id:"x",expected_revision:0,idempotency_key:"must-not-run-01"
@@ -309,9 +309,9 @@ test("capabilities advertise catalog URI and actual callable tool count",async()
  const caps=await call(e,"/mcp",rpc("tools/call",{name:"shiori_system_capabilities_read",
    arguments:{workspace_id:"personal"}}));
  const c=caps.data.result.structuredContent.capabilities;
- assert.equal(c.registry_total,124);
+ assert.equal(c.registry_total,126);
  assert.equal(c.planned_total,93);
- assert.equal(c.implemented_total,31);
+ assert.equal(c.implemented_total,33);
  assert.equal(c.registry_uri,"shiori://operations/v1");
 });
 
@@ -958,4 +958,222 @@ test("S3 read-only OAuth may inspect device status but cannot revoke it",async()
    workspace_id:"personal",device_id:f.device_id
  });
  assert.equal(checked.data.data.can_import,true);
+});
+
+
+test("S4 current remote snapshot requires explicit content request and is owner scoped",async()=>{
+ const e=env(),url="/api/v1/ops/sync.record.snapshot.read";
+ const created=await call(e,"/api/v1/ops/tasks.create",request("s4-create-001",{
+   title:"PRIVATE test title",text:"PRIVATE test notes"
+ }));
+ assert.equal(created.status,200);
+ const task_id=created.data.data.resource_id;
+ assert.equal((await call(e,url,{workspace_id:"personal",task_id})).status,400);
+ assert.equal((await call(e,url,{workspace_id:"personal",task_id,include_content:false})).status,400);
+ assert.equal((await call(e,url,{workspace_id:"other",task_id,include_content:true})).status,403);
+ assert.equal((await call(e,url,{workspace_id:"personal",task_id,include_content:true},{auth:null})).status,401);
+ assert.equal((await call(e,url,{workspace_id:"personal",task_id:"absent",include_content:true})).status,404);
+ const snap=await call(e,url,{workspace_id:"personal",task_id,include_content:true});
+ assert.equal(snap.status,200,JSON.stringify(snap.data));
+ assert.equal(snap.data.data.record.title,"PRIVATE test title");
+ assert.equal(snap.data.data.record.notes,"PRIVATE test notes");
+ assert.equal(snap.data.data.record.deleted_at,null);
+ assert.equal(snap.data.data.source_import,null,"Remote-only record has no verified S2 origin");
+ assert.deepEqual(snap.data.data.depends_on,[]);
+ assert.equal(snap.data.data.cutoff,1);
+ assert.equal(snap.data.data.consistent_snapshot,true);
+ assert.equal(snap.data.data.local_rust_sync,false);
+ assert.equal(snap.data.data.automatic_apply,false);
+ assert.match(snap.data.data.record_sha256,/^[0-9a-f]{64}$/);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM sync_imports").get().n,0);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency").get().n,1);
+ e.SHIO_AUTH_MODE="oauth";e.SHIO_OAUTH_SCOPES=["mcp:read"];
+ const rpcRead=await call(e,"/mcp",rpc("tools/call",{
+   name:"shiori_sync_record_snapshot_read",
+   arguments:{workspace_id:"personal",task_id,include_content:true}
+ }));
+ assert.equal(rpcRead.status,200,JSON.stringify(rpcRead.data));
+ assert.equal(rpcRead.data.result.structuredContent.record.id,task_id);
+});
+
+test("S4 snapshot sees exact source receipt, tombstone, prerequisites and high-water together",async()=>{
+ const e=env(),f=importFixture(),url="/api/v1/ops/sync.record.snapshot.read";
+ assert.equal((await pairFixture(e,f)).status,200);
+ const preview=await previewFixture(e,f);
+ assert.equal(preview.status,200);
+ const applied=await call(e,"/api/v1/ops/sync.import.apply",request("s4-import-001",{
+  proposal_id:preview.data.data.proposal_id,
+  payload_json:f.payload_json,owner_approved:true
+ }));
+ assert.equal(applied.status,200,JSON.stringify(applied.data));
+ const origin=await call(e,url,{workspace_id:"personal",task_id:f.task_id,include_content:true});
+ assert.equal(origin.status,200,JSON.stringify(origin.data));
+ assert.equal(origin.data.data.source_import.source_event_id,f.event_id);
+ assert.equal(origin.data.data.source_import.source_payload_sha256,f.payload_sha256);
+ assert.equal(origin.data.data.source_import.receipt_id,applied.data.data.receipt_id);
+ assert.equal(origin.data.data.record.notes,f.envelope.task.notes);
+ assert.equal(origin.data.data.cutoff,1);
+ const second=await call(e,"/api/v1/ops/tasks.create",request("s4-second-task",{
+   title:"Independent prerequisite"
+ }));
+ const secondId=second.data.data.resource_id;
+ assert.equal(second.status,200);
+ const link=await call(e,"/api/v1/ops/tasks.dependencies.add",request("s4-first-dependency",{
+  task_id:f.task_id,depends_on_id:secondId,expected_revision:1
+ }));
+ assert.equal(link.status,200,JSON.stringify(link.data));
+ const beforeDelete=await call(e,url,{workspace_id:"personal",task_id:f.task_id,include_content:true});
+ assert.equal(beforeDelete.data.data.cutoff,4);
+ assert.equal(beforeDelete.data.data.record.version,2);
+ assert.deepEqual(beforeDelete.data.data.depends_on,[secondId]);
+ assert.notEqual(beforeDelete.data.data.record_sha256,origin.data.data.record_sha256);
+ const del=await call(e,"/api/v1/ops/tasks.delete",request("s4-delete-task",{
+  task_id:f.task_id,expected_revision:2
+ }));
+ assert.equal(del.status,200,JSON.stringify(del.data));
+ const tombstone=await call(e,url,{workspace_id:"personal",task_id:f.task_id,include_content:true});
+ assert.equal(tombstone.status,200);
+ assert(tombstone.data.data.record.deleted_at,"Soft-deleted tasks must be included");
+ assert.equal(tombstone.data.data.record.version,3);
+ assert.equal(tombstone.data.data.cutoff,5);
+ assert.deepEqual(tombstone.data.data.depends_on,[secondId]);
+ assert.equal(tombstone.data.data.source_import.source_version,1);
+ assert.equal(tombstone.data.data.automatic_apply,false);
+ assert(!JSON.stringify(tombstone.data.data).includes(f.payload_json),
+   "Do not expose historical full source payload");
+});
+
+test("S4 source snapshot has deterministic hash and refuses altered input schema",async()=>{
+ const e=env(),url="/api/v1/ops/sync.record.snapshot.read";
+ const created=await call(e,"/api/v1/ops/tasks.create",request("s4-hash-create",{
+   title:"Hash source",text:"Do not leak to summary scans"
+ }));
+ const task_id=created.data.data.resource_id;
+ const args={workspace_id:"personal",task_id,include_content:true};
+ const first=await call(e,url,args),second=await call(e,url,args);
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ assert.equal(first.data.data.record_sha256,second.data.data.record_sha256);
+ assert.equal((await call(e,url,{...args,extra_field:"injection"})).status,400);
+ assert.equal((await call(e,url,{...args,include_content:"true"})).status,400);
+ assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM remote_tasks").get().n,1);
+});
+
+
+test("S5 owner-approved paired source task update commits several fields atomically",async()=>{
+ const e=env(),f=importFixture(),b="33333333-3333-4333-8333-333333333333";
+ assert.equal((await pairFixture(e,f)).status,200);
+ const p=await previewFixture(e,f);
+ assert.equal(p.status,200);
+ assert.equal((await call(e,"/api/v1/ops/sync.import.apply",request("s5-import-first",{
+   proposal_id:p.data.data.proposal_id,payload_json:f.payload_json,owner_approved:true
+ }))).status,200);
+ assert.equal((await call(e,"/api/v1/ops/sync.device.pair",request("s5-pair-b",{
+   device_id:b,confirm_pairing:true
+ }))).status,200);
+ const url="/api/v1/ops/sync.record.snapshot.read";
+ const old=(await call(e,url,{workspace_id:"personal",task_id:f.task_id,include_content:true})).data.data;
+ const args=request("s5-approved-atomic",{
+  device_id:b,task_id:f.task_id,
+  source_event_id:f.event_id,source_payload_sha256:f.payload_sha256,
+  expected_revision:old.record.version,expected_record_sha256:old.record_sha256,
+  patch:{notes:"Reviewed device B edit",status:"in_progress",priority:"urgent"},
+  owner_approved:true
+ });
+ const applied=await call(e,"/api/v1/ops/sync.record.apply",args);
+ assert.equal(applied.status,200,JSON.stringify(applied.data));
+ assert.equal(applied.data.data.revision,2);
+ assert.equal(applied.data.data.changed,true);
+ assert.equal(applied.data.data.base_record_sha256,old.record_sha256);
+ const after=await call(e,url,{workspace_id:"personal",task_id:f.task_id,include_content:true});
+ assert.equal(after.status,200);
+ assert.equal(after.data.data.record.notes,"Reviewed device B edit");
+ assert.equal(after.data.data.record.priority,"urgent");
+ assert.equal(after.data.data.record.status,"in_progress");
+ assert.equal(after.data.data.record.version,2);
+ assert.equal(after.data.data.cutoff,2,"One atomic multi-field update creates one task event");
+ assert.deepEqual(after.data.data.depends_on,old.depends_on);
+ assert.equal(after.data.data.source_import.source_event_id,f.event_id);
+ const replay=await call(e,"/api/v1/ops/sync.record.apply",args);
+ assert.deepEqual(replay.data.data,applied.data.data,"Replay must not bump revision twice");
+ assert.equal((await call(e,url,{workspace_id:"personal",task_id:f.task_id,include_content:true})).data.data.record.version,2);
+ const stale=await call(e,"/api/v1/ops/sync.record.apply",{
+   ...args,idempotency_key:"s5-stale-different-key",patch:{title:"Offline device A change"}
+ });
+ assert.equal(stale.status,409,"Stale snapshot cannot overwrite another device");
+ assert.equal((await call(e,url,{workspace_id:"personal",task_id:f.task_id,include_content:true})).data.data.record.title,
+   f.envelope.task.title);
+});
+
+test("S5 rejects unpaired/revoked clients, wrong provenance and missing owner approval",async()=>{
+ const e=env(),f=importFixture(),b="33333333-3333-4333-8333-333333333333";
+ await pairFixture(e,f);
+ const p=await previewFixture(e,f);
+ await call(e,"/api/v1/ops/sync.import.apply",request("s5-source-apply",{
+  proposal_id:p.data.data.proposal_id,payload_json:f.payload_json,owner_approved:true
+ }));
+ const before=(await call(e,"/api/v1/ops/sync.record.snapshot.read",{
+   workspace_id:"personal",task_id:f.task_id,include_content:true
+ })).data.data;
+ const args=request("s5-scope",{
+   device_id:b,task_id:f.task_id,source_event_id:f.event_id,
+   source_payload_sha256:f.payload_sha256,expected_revision:1,
+   expected_record_sha256:before.record_sha256,
+   patch:{status:"done"},owner_approved:true
+ });
+ const endpoint="/api/v1/ops/sync.record.apply";
+ assert.equal((await call(e,endpoint,args)).status,403);
+ assert.equal((await call(e,"/api/v1/ops/sync.device.pair",request("s5-pair-client",{
+  device_id:b,confirm_pairing:true
+ }))).status,200);
+ assert.equal((await call(e,endpoint,{...args,source_payload_sha256:"e".repeat(64)})).status,409);
+ assert.equal((await call(e,endpoint,{...args,owner_approved:false})).status,400);
+ assert.equal((await call(e,endpoint,{...args,patch:{due_on:"2026-11-30"}})).status,400);
+ assert.equal((await call(e,endpoint,{...args,patch:{}})).status,400);
+ const rev=await call(e,"/api/v1/ops/sync.device.revoke",request("s5-revoke",{
+   device_id:b,confirm_revocation:true
+ }));
+ assert.equal(rev.status,200);
+ assert.equal((await call(e,endpoint,args)).status,403);
+ const current=(await call(e,"/api/v1/ops/sync.record.snapshot.read",{
+  workspace_id:"personal",task_id:f.task_id,include_content:true
+ })).data.data;
+ assert.equal(current.record.version,1);
+});
+
+test("S5 refuses deleted records, stale hash and OAuth read-only writes",async()=>{
+ const e=env(),f=importFixture();
+ await pairFixture(e,f);
+ const p=await previewFixture(e,f);
+ await call(e,"/api/v1/ops/sync.import.apply",request("s5-source-tombstone",{
+  proposal_id:p.data.data.proposal_id,payload_json:f.payload_json,owner_approved:true
+ }));
+ const base=(await call(e,"/api/v1/ops/sync.record.snapshot.read",{
+  workspace_id:"personal",task_id:f.task_id,include_content:true
+ })).data.data;
+ const args=request("s5-owner-update",{
+   device_id:f.device_id,task_id:f.task_id,
+   source_event_id:f.event_id,source_payload_sha256:f.payload_sha256,
+   expected_revision:base.record.version,expected_record_sha256:base.record_sha256,
+   patch:{notes:"Changed"},owner_approved:true
+ });
+ e.SHIO_AUTH_MODE="oauth";e.SHIO_OAUTH_SCOPES=["mcp:read"];
+ assert.equal((await call(e,"/api/v1/ops/sync.record.apply",args)).status,403);
+ e.SHIO_OAUTH_SCOPES=["mcp:read","mcp:write"];
+ assert.equal((await call(e,"/api/v1/ops/sync.record.apply",{
+  ...args,expected_record_sha256:"0".repeat(64)
+ })).status,409);
+ assert.equal((await call(e,"/api/v1/ops/tasks.delete",request("s5-delete",{
+  task_id:f.task_id,expected_revision:1
+ }))).status,200);
+ const deleted=(await call(e,"/api/v1/ops/sync.record.snapshot.read",{
+  workspace_id:"personal",task_id:f.task_id,include_content:true
+ })).data.data;
+ assert.equal(deleted.record.version,2);
+ assert(deleted.record.deleted_at);
+ assert.equal((await call(e,"/api/v1/ops/sync.record.apply",{
+  ...args,expected_revision:2,expected_record_sha256:deleted.record_sha256
+ })).status,409);
+ assert.equal((await call(e,"/api/v1/ops/sync.record.snapshot.read",{
+  workspace_id:"personal",task_id:f.task_id,include_content:true
+ })).data.data.record.deleted_at,deleted.record.deleted_at);
 });
