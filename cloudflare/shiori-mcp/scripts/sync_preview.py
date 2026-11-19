@@ -166,11 +166,12 @@ def remote_manifest_request(base: str, token: str, cursor: str | None) -> dict:
     for row in items:
         if not isinstance(row,dict) or set(row)!={"id","version","status","updated_at","deleted_at"}:
             raise ValueError("Unexpected remote manifest fields")
-        if (not isinstance(row["id"],str) or not row["id"] or
+        if (not isinstance(row["id"],str) or not row["id"] or len(row["id"])>4096 or
             type(row["version"]) is not int or row["version"]<1 or
             row["status"] not in ("todo","in_progress","done") or
-            not isinstance(row["updated_at"],str) or
-            row["deleted_at"] is not None and not isinstance(row["deleted_at"],str)):
+            not isinstance(row["updated_at"],str) or len(row["updated_at"])>4096 or
+            (row["deleted_at"] is not None and
+             (not isinstance(row["deleted_at"],str) or len(row["deleted_at"])>4096))):
             raise ValueError("Malformed manifest task")
     return result
 
@@ -182,6 +183,8 @@ def load_remote_manifest(base:str,token:str)->list[dict]:
     while True:
         page=remote_manifest_request(base,token,cursor)
         for row in page["items"]:
+            # The ordering invariant applies within each page as well as across
+            # cursor boundaries. Reject duplicates before producing any report.
             if cursor is not None and row["id"]<=cursor:
                 raise ValueError("Manifest not strictly ordered")
             cursor=row["id"]

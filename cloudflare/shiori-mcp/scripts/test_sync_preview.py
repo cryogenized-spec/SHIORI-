@@ -122,6 +122,59 @@ class RemoteManifestTests(unittest.TestCase):
         self.assertEqual(len(seen),2)
         self.assertEqual(seen[1]["cursor"],"native-a")
 
+    def test_remote_manifest_rejects_out_of_order_and_duplicate_page_ids(self):
+        def row(task_id):
+            return {"id":task_id,"version":1,"status":"todo",
+                    "updated_at":"2026-11-19T00:00:00Z","deleted_at":None}
+
+        for ids in (("b","a"), ("a","a")):
+            with self.subTest(ids=ids):
+                payload={"ok":True,"operation_id":"sync.manifest.read","data":{
+                    "items":[row(task_id) for task_id in ids],
+                    "next_cursor":None,"consistent_snapshot":False,
+                    "local_rust_sync":False}}
+                with patch("sync_preview.urlopen",
+                           return_value=io.BytesIO(json.dumps(payload).encode())):
+                    with self.assertRaisesRegex(ValueError,"Manifest not strictly ordered"):
+                        load_remote_manifest("https://example.invalid","synthetic-token")
+
+    def test_remote_manifest_rejects_cross_page_cursor_regression(self):
+        def row(task_id):
+            return {"id":task_id,"version":1,"status":"todo",
+                    "updated_at":"2026-11-19T00:00:00Z","deleted_at":None}
+
+        requests = []
+        def fake_urlopen(request, timeout):
+            cursor = json.loads(request.data).get("cursor")
+            requests.append(cursor)
+            if cursor is None:
+                items, next_cursor = [row("b")], "b"
+            else:
+                items, next_cursor = [row("a")], None
+            payload={"ok":True,"operation_id":"sync.manifest.read","data":{
+                "items":items,"next_cursor":next_cursor,
+                "consistent_snapshot":False,"local_rust_sync":False}}
+            return io.BytesIO(json.dumps(payload).encode())
+
+        with patch("sync_preview.urlopen", side_effect=fake_urlopen):
+            with self.assertRaisesRegex(ValueError,"Manifest not strictly ordered"):
+                load_remote_manifest("https://example.invalid","synthetic-token")
+        self.assertEqual(requests,[None,"b"])
+
+    def test_remote_manifest_rejects_oversized_identity_and_timestamps(self):
+        row={"id":"a","version":1,"status":"todo",
+             "updated_at":"2026-11-19T00:00:00Z","deleted_at":None}
+        for field in ("id","updated_at","deleted_at"):
+            with self.subTest(field=field):
+                oversized={**row,field:"x"*4097}
+                payload={"ok":True,"operation_id":"sync.manifest.read","data":{
+                    "items":[oversized],"next_cursor":None,
+                    "consistent_snapshot":False,"local_rust_sync":False}}
+                with patch("sync_preview.urlopen",
+                           return_value=io.BytesIO(json.dumps(payload).encode())):
+                    with self.assertRaisesRegex(ValueError,"Malformed manifest task"):
+                        remote_manifest_request("https://example.invalid","synthetic-token",None)
+
     def test_remote_manifest_refuses_task_content_or_false_sync_claims(self):
         bad={"ok":True,"operation_id":"sync.manifest.read","data":{
             "items":[{"id":"a","version":1,"status":"todo",
