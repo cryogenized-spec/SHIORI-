@@ -76,7 +76,10 @@ class WebViewTouchAcceptanceTest {
                 "document.readyState === 'complete' && " +
                     "typeof window.shioriExportBackup === 'function' && " +
                     "document.querySelector('#taskModal') !== null && " +
+                    "window.shioriInteractionReady === true && " +
                     "document.querySelector('.mobile-fab') !== null && " +
+                    "!document.querySelector('.mobile-fab').disabled && " +
+                    "getComputedStyle(document.querySelector('.mobile-fab')).pointerEvents !== 'none' && " +
                     "window.shioriNativeBridgeEnabled === true"
             ) == "true"
         }
