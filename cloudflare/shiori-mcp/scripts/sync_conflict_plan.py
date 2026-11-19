@@ -127,6 +127,23 @@ def approved_request(result: dict, device_id: str, *, owner_approved: bool) -> d
             or not result.get("patch")):
         raise ConflictError("Conflicts or no-op plan cannot become a write request")
     patch = result["patch"]
+    # A caller can retain or modify a plan before approval. Validate the
+    # outgoing request independently; the server still verifies all evidence.
+    if (not isinstance(patch, dict) or not set(patch) <= FIELDS
+            or any(not isinstance(value, str) for value in patch.values())
+            or not valid_uuid(result.get("remote_task_id"))
+            or type(result.get("expected_remote_revision")) is not int
+            or result["expected_remote_revision"] < 1
+            or not isinstance(result.get("expected_record_sha256"), str)
+            or len(result["expected_record_sha256"]) != 64
+            or any(c not in "0123456789abcdef" for c in result["expected_record_sha256"])):
+        raise ConflictError("Malformed approved plan metadata or patch")
+    for field, value in patch.items():
+        if ((field in ("title", "project") and not 1 <= len(value.strip()) <= 160)
+                or (field == "notes" and len(value) > 8192)
+                or (field == "status" and value not in STATUSES)
+                or (field == "priority" and value not in PRIORITIES)):
+            raise ConflictError("Malformed approved plan field")
     canonical = json.dumps({
         "device": device_id, "task": result["remote_task_id"],
         "expected_revision": result["expected_remote_revision"],
