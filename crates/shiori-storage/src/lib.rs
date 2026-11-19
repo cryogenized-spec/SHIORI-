@@ -7,7 +7,9 @@ use rusqlite::{
 use shiori_core::{
     Priority, Task, TaskError, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id,
 };
-use std::{path::Path, str::FromStr};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+use std::{fs, path::Path, str::FromStr};
 use thiserror::Error;
 
 mod spatial;
@@ -21,6 +23,14 @@ const SELECT: &str = "SELECT id, title, notes, project, priority, status, due_on
 
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("Private SQLite backup requires explicit consent")]
+    PrivateBackupApprovalRequired,
+    #[error("Private SQLite backup destination must be a new *.shiori-backup.sqlite3 file")]
+    PrivateBackupInvalidDestination,
+    #[error("Verified private SQLite backup failed validation")]
+    PrivateBackupVerificationFailed,
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
@@ -82,6 +92,80 @@ impl SqliteStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let db = Connection::open(path)?;
         Self::initialize(db)
+    }
+
+    /// Snapshot the current canonical SQLite database as a separate verified
+    /// private file. User-invoked prerequisite for any future local sync apply.
+    ///
+    /// SQLite VACUUM INTO gives a transactionally consistent database image
+    /// even when the source uses WAL; naive filesystem copies do not. Never
+    /// overwrite a backup, print task content or mutate canonical task rows.
+    pub fn backup_private_copy(
+        &self,
+        destination: &Path,
+        owner_approved: bool,
+    ) -> Result<(), StorageError> {
+        if !owner_approved {
+            return Err(StorageError::PrivateBackupApprovalRequired);
+        }
+        if !destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".shiori-backup.sqlite3"))
+        {
+            return Err(StorageError::PrivateBackupInvalidDestination);
+        }
+        let origin: String = self.db.query_row(
+            "SELECT file FROM pragma_database_list WHERE name='main'",
+            [],
+            |row| row.get(0),
+        )?;
+        if origin.is_empty() {
+            return Err(StorageError::PrivateBackupInvalidDestination);
+        }
+        let parent = destination
+            .parent()
+            .ok_or(StorageError::PrivateBackupInvalidDestination)?;
+        let verified_parent = parent.canonicalize()?;
+        let backup = verified_parent.join(
+            destination
+                .file_name()
+                .ok_or(StorageError::PrivateBackupInvalidDestination)?,
+        );
+        if Path::new(&origin).canonicalize()? == backup {
+            return Err(StorageError::PrivateBackupInvalidDestination);
+        }
+        let encoded_path = backup
+            .to_str()
+            .ok_or(StorageError::PrivateBackupInvalidDestination)?;
+        // O_EXCL/create_new rejects pre-existing files and symlinks at the
+        // destination. On Unix the private backup never becomes world-readable.
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        drop(options.open(&backup)?);
+        let outcome = (|| -> Result<(), StorageError> {
+            self.db.execute("VACUUM INTO ?1", params![encoded_path])?;
+            let copy =
+                Connection::open_with_flags(&backup, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let check: String = copy.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+            let schema: i64 = copy.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            let original_count: i64 =
+                self.db
+                    .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))?;
+            let backup_count: i64 =
+                copy.query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))?;
+            if check != "ok" || schema != SCHEMA_VERSION || backup_count != original_count {
+                return Err(StorageError::PrivateBackupVerificationFailed);
+            }
+            Ok(())
+        })();
+        if outcome.is_err() {
+            // Only remove the just-created destination; NEVER touch source DB.
+            let _ = fs::remove_file(&backup);
+        }
+        outcome
     }
 
     pub fn in_memory() -> Result<Self, StorageError> {
@@ -700,6 +784,79 @@ mod tests {
         assert_eq!(store.get(&task.id).unwrap().version, 1);
         store.delete_if_version(&task.id, 1).unwrap();
         assert!(matches!(update(1, true), Err(StorageError::NotFound)));
+    }
+
+    #[test]
+    fn private_backup_requires_consent_and_never_overwrites_existing_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("canonical.sqlite3");
+        let backup = dir.path().join("pre-sync.shiori-backup.sqlite3");
+        let store = SqliteStore::open(&source).unwrap();
+        let task = Task::new("Private title", "Personal", Priority::High, None).unwrap();
+        store.insert(&task).unwrap();
+        assert!(matches!(
+            store.backup_private_copy(&backup, false),
+            Err(StorageError::PrivateBackupApprovalRequired)
+        ));
+        assert!(
+            !backup.exists(),
+            "No file may be created before explicit approval"
+        );
+        store.backup_private_copy(&backup, true).unwrap();
+        assert!(backup.is_file());
+        assert_eq!(store.get(&task.id).unwrap().version, 1);
+        let saved = SqliteStore::open(&backup).unwrap();
+        assert_eq!(saved.get(&task.id).unwrap().title, "Private title");
+        drop(saved);
+        store.rename(&task.id, "New title after backup").unwrap();
+        let unchanged = SqliteStore::open(&backup).unwrap();
+        assert_eq!(unchanged.get(&task.id).unwrap().title, "Private title");
+        drop(unchanged);
+        let original_copy = std::fs::read(&backup).unwrap();
+        assert!(matches!(
+            store.backup_private_copy(&backup, true),
+            Err(StorageError::Io(_))
+        ));
+        assert_eq!(std::fs::read(&backup).unwrap(), original_copy);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = std::fs::metadata(&backup).unwrap().permissions();
+            assert_eq!(
+                permissions.mode() & 0o077,
+                0,
+                "Private notes cannot be world-readable"
+            );
+        }
+    }
+
+    #[test]
+    fn private_backup_rejects_invalid_names_symlinks_and_in_memory_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("canonical.sqlite3");
+        let store = SqliteStore::open(&source).unwrap();
+        let wrong = dir.path().join("unexpected.sqlite3");
+        assert!(matches!(
+            store.backup_private_copy(&wrong, true),
+            Err(StorageError::PrivateBackupInvalidDestination)
+        ));
+        assert!(!wrong.exists());
+        let destination = dir.path().join("sync.shiori-backup.sqlite3");
+        let link_target = dir.path().join("user-owned-private-file");
+        std::fs::write(&link_target, b"DO NOT REPLACE").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&link_target, &destination).unwrap();
+            assert!(store.backup_private_copy(&destination, true).is_err());
+            assert_eq!(std::fs::read(&link_target).unwrap(), b"DO NOT REPLACE");
+        }
+        let memory = SqliteStore::in_memory().unwrap();
+        let another = dir.path().join("memory.shiori-backup.sqlite3");
+        assert!(matches!(
+            memory.backup_private_copy(&another, true),
+            Err(StorageError::PrivateBackupInvalidDestination)
+        ));
+        assert!(!another.exists());
     }
 
     #[test]
