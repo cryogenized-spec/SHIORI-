@@ -784,6 +784,70 @@ mod tests {
     }
 
     #[test]
+    fn private_backup_requires_consent_and_never_overwrites_existing_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("canonical.sqlite3");
+        let backup = dir.path().join("pre-sync.shiori-backup.sqlite3");
+        let store = SqliteStore::open(&source).unwrap();
+        let task = Task::new("Private title", "Personal", Priority::High, None).unwrap();
+        store.insert(&task).unwrap();
+        assert!(matches!(
+            store.backup_private_copy(&backup, false),
+            Err(StorageError::PrivateBackupApprovalRequired)
+        ));
+        assert!(!backup.exists(), "No file may be created before explicit approval");
+        store.backup_private_copy(&backup, true).unwrap();
+        assert!(backup.is_file());
+        assert_eq!(store.get(&task.id).unwrap().version, 1);
+        let saved = SqliteStore::open(&backup).unwrap();
+        assert_eq!(saved.get(&task.id).unwrap().title, "Private title");
+        drop(saved);
+        store.rename(&task.id, "New title after backup").unwrap();
+        let unchanged = SqliteStore::open(&backup).unwrap();
+        assert_eq!(unchanged.get(&task.id).unwrap().title, "Private title");
+        drop(unchanged);
+        let original_copy = std::fs::read(&backup).unwrap();
+        assert!(matches!(store.backup_private_copy(&backup, true),
+            Err(StorageError::Io(_))));
+        assert_eq!(std::fs::read(&backup).unwrap(), original_copy);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = std::fs::metadata(&backup).unwrap().permissions();
+            assert_eq!(permissions.mode() & 0o077, 0, "Private notes cannot be world-readable");
+        }
+    }
+
+    #[test]
+    fn private_backup_rejects_invalid_names_symlinks_and_in_memory_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("canonical.sqlite3");
+        let store = SqliteStore::open(&source).unwrap();
+        let wrong = dir.path().join("unexpected.sqlite3");
+        assert!(matches!(
+            store.backup_private_copy(&wrong, true),
+            Err(StorageError::PrivateBackupInvalidDestination)
+        ));
+        assert!(!wrong.exists());
+        let destination = dir.path().join("sync.shiori-backup.sqlite3");
+        let link_target = dir.path().join("user-owned-private-file");
+        std::fs::write(&link_target, b"DO NOT REPLACE").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&link_target, &destination).unwrap();
+            assert!(store.backup_private_copy(&destination, true).is_err());
+            assert_eq!(std::fs::read(&link_target).unwrap(), b"DO NOT REPLACE");
+        }
+        let memory = SqliteStore::in_memory().unwrap();
+        let another = dir.path().join("memory.shiori-backup.sqlite3");
+        assert!(matches!(
+            memory.backup_private_copy(&another, true),
+            Err(StorageError::PrivateBackupInvalidDestination)
+        ));
+        assert!(!another.exists());
+    }
+
+    #[test]
     fn assigned_to_me_lookup_uses_the_local_index() {
         let store = SqliteStore::in_memory().unwrap();
         let mut statement = store
