@@ -134,6 +134,22 @@ class ConflictPlanningTests(unittest.TestCase):
         self.assertEqual(len(req["expected_record_sha256"]), 64)
         self.assertTrue(req["idempotency_key"].startswith("s5-"))
 
+    def test_approval_rechecks_mutated_plan_before_constructing_request(self):
+        original = sync.plan(snap(), snap(), {"notes": "Reviewed note"})
+        mutations = (
+            {"patch": {"due_on": "2026-12-01"}},
+            {"patch": {"status": "not-a-status"}},
+            {"patch": {"notes": "x" * 8193}},
+            {"expected_remote_revision": True},
+            {"expected_record_sha256": "z" * 64},
+            {"remote_task_id": "not-a-uuid"},
+        )
+        for mutation in mutations:
+            with self.subTest(keys=tuple(mutation)):
+                changed = {**original, **mutation}
+                with self.assertRaisesRegex(sync.ConflictError, "Malformed approved plan"):
+                    sync.approved_request(changed, A, owner_approved=True)
+
     def test_repeated_owner_approval_generates_same_idempotency_key(self):
         planned = sync.plan(snap(), snap(), {"notes": "Sensitive private note"})
         req1 = sync.approved_request(planned, A, owner_approved=True)
