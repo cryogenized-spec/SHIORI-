@@ -658,9 +658,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             io::stdin()
                 .take((reviewed_apply::MAX_REVIEW_BYTES + 1) as u64)
                 .read_to_end(&mut content)?;
-            let revision = reviewed_apply::apply(
-                &store, &id, if_version, &backup_to, true, &content,
-            )?;
+            let revision =
+                reviewed_apply::apply(&store, &id, if_version, &backup_to, true, &content)?;
             println!(
                 "Reviewed local task projection committed at revision {revision};                  private verified pre-apply backup retained."
             );
