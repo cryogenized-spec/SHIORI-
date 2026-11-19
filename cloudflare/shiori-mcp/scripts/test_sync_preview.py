@@ -33,6 +33,18 @@ class SyncPreviewTests(unittest.TestCase):
         self.assertEqual(result["possible_title_matches_not_authoritative"],1)
         self.assertEqual(fingerprint(local[0]),fingerprint(remote[0]))
 
+    def test_legacy_preview_rejects_duplicate_active_ids_without_leaking_content(self):
+        sample={"id":"private-id","title":"Confidential task",
+                "status":"todo","project":"Private"}
+        for source in ("local","remote"):
+            with self.subTest(source=source):
+                local=[sample,sample.copy()] if source=="local" else []
+                remote=[sample,sample.copy()] if source=="remote" else []
+                with self.assertRaisesRegex(ValueError, f"Duplicate {source} task identities") as ctx:
+                    compare(local,remote)
+                self.assertNotIn("private-id",str(ctx.exception))
+                self.assertNotIn("Confidential",str(ctx.exception))
+
     def test_no_data_contents_leak_into_report(self):
         local=[{"id":"private-id","title":"Private customer information","status":"todo","project":"Secret"}]
         result=compare(local,[])
