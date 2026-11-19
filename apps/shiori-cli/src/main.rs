@@ -12,9 +12,10 @@ use shiori_core::{
     Priority, Task, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id, validate_estimate,
 };
 use shiori_storage::{SpatialViewStore, SqliteStore, SyncJournal, TaskFilter};
+mod reviewed_apply;
 use std::{
     error::Error,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::PathBuf,
 };
 
@@ -152,6 +153,19 @@ enum Command {
         /// Explicitly consent to a second copy containing task titles/notes.
         #[arg(long)]
         confirm_private_copy: bool,
+    },
+    /// Apply one freshly source-verified and owner-reviewed remote task, after
+    /// making a new private verified local backup. JSON arrives via stdin.
+    /// This CLI never contacts Cloudflare; its caller MUST verify S2/S4.
+    #[command(hide = true)]
+    SyncApplyReviewed {
+        id: String,
+        #[arg(long)]
+        if_version: i64,
+        #[arg(long)]
+        backup_to: PathBuf,
+        #[arg(long)]
+        confirm_reviewed_snapshot: bool,
     },
     /// Update only a task's visual placement, guarded by its view revision.
     #[command(hide = true)]
@@ -310,6 +324,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => path,
         None => default_database()?,
     };
+    // Never create an empty canonical task database as a side effect of a
+    // failed guarded apply. This command is for existing source records only.
+    if matches!(&args.command, Command::SyncApplyReviewed { .. }) {
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err("Existing canonical Rust task file required for reviewed apply".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err("Reviewed apply requires a private canonical task file".into());
+            }
+        }
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -613,6 +642,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         } => {
             store.backup_private_copy(&to, confirm_private_copy)?;
             println!("Private SQLite snapshot created and verified. Canonical tasks unchanged.");
+        }
+        Command::SyncApplyReviewed {
+            id,
+            if_version,
+            backup_to,
+            confirm_reviewed_snapshot,
+        } => {
+            // No private notes/titles or JSON appear in command arguments.
+            // Cap stdin before parsing to stop unlimited pipe/file reads.
+            if !confirm_reviewed_snapshot {
+                return Err("Explicit --confirm-reviewed-snapshot is required".into());
+            }
+            let mut content = Vec::new();
+            io::stdin()
+                .take((reviewed_apply::MAX_REVIEW_BYTES + 1) as u64)
+                .read_to_end(&mut content)?;
+            let revision =
+                reviewed_apply::apply(&store, &id, if_version, &backup_to, true, &content)?;
+            println!(
+                "Reviewed local task projection committed at revision {revision};                  private verified pre-apply backup retained."
+            );
         }
         Command::SpatialSet {
             id,
