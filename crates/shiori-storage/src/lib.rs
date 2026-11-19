@@ -7,9 +7,9 @@ use rusqlite::{
 use shiori_core::{
     Priority, Task, TaskError, TaskPatch, TaskStatus, utc_rfc3339, validate_assignee_id,
 };
-use std::{fs, path::Path, str::FromStr};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+use std::{fs, path::Path, str::FromStr};
 use thiserror::Error;
 
 mod spatial;
@@ -123,15 +123,21 @@ impl SqliteStore {
         if origin.is_empty() {
             return Err(StorageError::PrivateBackupInvalidDestination);
         }
-        let parent = destination.parent().ok_or(StorageError::PrivateBackupInvalidDestination)?;
+        let parent = destination
+            .parent()
+            .ok_or(StorageError::PrivateBackupInvalidDestination)?;
         let verified_parent = parent.canonicalize()?;
         let backup = verified_parent.join(
-            destination.file_name().ok_or(StorageError::PrivateBackupInvalidDestination)?,
+            destination
+                .file_name()
+                .ok_or(StorageError::PrivateBackupInvalidDestination)?,
         );
         if Path::new(&origin).canonicalize()? == backup {
             return Err(StorageError::PrivateBackupInvalidDestination);
         }
-        let encoded_path = backup.to_str().ok_or(StorageError::PrivateBackupInvalidDestination)?;
+        let encoded_path = backup
+            .to_str()
+            .ok_or(StorageError::PrivateBackupInvalidDestination)?;
         // O_EXCL/create_new rejects pre-existing files and symlinks at the
         // destination. On Unix the private backup never becomes world-readable.
         let mut options = fs::OpenOptions::new();
@@ -141,18 +147,15 @@ impl SqliteStore {
         drop(options.open(&backup)?);
         let outcome = (|| -> Result<(), StorageError> {
             self.db.execute("VACUUM INTO ?1", params![encoded_path])?;
-            let copy = Connection::open_with_flags(
-                &backup,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )?;
+            let copy =
+                Connection::open_with_flags(&backup, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
             let check: String = copy.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
             let schema: i64 = copy.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            let original_count: i64 = self.db.query_row(
-                "SELECT count(*) FROM tasks", [], |row| row.get(0)
-            )?;
-            let backup_count: i64 = copy.query_row(
-                "SELECT count(*) FROM tasks", [], |row| row.get(0)
-            )?;
+            let original_count: i64 =
+                self.db
+                    .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))?;
+            let backup_count: i64 =
+                copy.query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))?;
             if check != "ok" || schema != SCHEMA_VERSION || backup_count != original_count {
                 return Err(StorageError::PrivateBackupVerificationFailed);
             }
@@ -795,7 +798,10 @@ mod tests {
             store.backup_private_copy(&backup, false),
             Err(StorageError::PrivateBackupApprovalRequired)
         ));
-        assert!(!backup.exists(), "No file may be created before explicit approval");
+        assert!(
+            !backup.exists(),
+            "No file may be created before explicit approval"
+        );
         store.backup_private_copy(&backup, true).unwrap();
         assert!(backup.is_file());
         assert_eq!(store.get(&task.id).unwrap().version, 1);
@@ -807,14 +813,20 @@ mod tests {
         assert_eq!(unchanged.get(&task.id).unwrap().title, "Private title");
         drop(unchanged);
         let original_copy = std::fs::read(&backup).unwrap();
-        assert!(matches!(store.backup_private_copy(&backup, true),
-            Err(StorageError::Io(_))));
+        assert!(matches!(
+            store.backup_private_copy(&backup, true),
+            Err(StorageError::Io(_))
+        ));
         assert_eq!(std::fs::read(&backup).unwrap(), original_copy);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let permissions = std::fs::metadata(&backup).unwrap().permissions();
-            assert_eq!(permissions.mode() & 0o077, 0, "Private notes cannot be world-readable");
+            assert_eq!(
+                permissions.mode() & 0o077,
+                0,
+                "Private notes cannot be world-readable"
+            );
         }
     }
 
