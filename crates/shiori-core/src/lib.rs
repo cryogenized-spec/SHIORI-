@@ -88,6 +88,8 @@ pub enum TaskError {
     TitleTooLong,
     #[error("project name cannot be empty")]
     EmptyProject,
+    #[error("synchronized notes exceed the permitted 8192 characters")]
+    SyncedNotesTooLong,
     #[error("invalid priority")]
     InvalidPriority,
     #[error("invalid task status")]
@@ -274,6 +276,50 @@ impl Task {
         if let Some(value) = assignee_id {
             self.assignee_id = value;
         }
+        self.bump();
+        Ok(true)
+    }
+
+    /// Apply a validated common-field projection in *one* local revision.
+    ///
+    /// Intended only after a separately authenticated S2-origin receipt,
+    /// verified S4 snapshot, explicit user review and backup. This is a pure
+    /// domain operation: it does NOT authenticate Cloudflare or start syncing.
+    /// Local-only due dates, estimates, assignees and creation times survive.
+    /// Status transitions preserve their existing completion-time semantics.
+    pub fn apply_reviewed_remote_common_fields(
+        &mut self,
+        title: &str,
+        notes: &str,
+        project: &str,
+        priority: Priority,
+        status: TaskStatus,
+    ) -> Result<bool, TaskError> {
+        let title = validate_title(title)?;
+        let project = validate_project(project)?;
+        if notes.chars().count() > 8192 {
+            return Err(TaskError::SyncedNotesTooLong);
+        }
+        let changed = self.title != title
+            || self.notes != notes
+            || self.project != project
+            || self.priority != priority
+            || self.status != status;
+        if !changed {
+            return Ok(false);
+        }
+        if self.status != status {
+            self.completed_at = if status == TaskStatus::Done {
+                Some(Timestamp::now())
+            } else {
+                None
+            };
+        }
+        self.title = title;
+        self.notes = notes.to_owned();
+        self.project = project;
+        self.priority = priority;
+        self.status = status;
         self.bump();
         Ok(true)
     }
