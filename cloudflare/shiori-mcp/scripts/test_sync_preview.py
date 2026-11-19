@@ -33,6 +33,18 @@ class SyncPreviewTests(unittest.TestCase):
         self.assertEqual(result["possible_title_matches_not_authoritative"],1)
         self.assertEqual(fingerprint(local[0]),fingerprint(remote[0]))
 
+    def test_legacy_preview_rejects_duplicate_active_ids_without_leaking_content(self):
+        sample={"id":"private-id","title":"Confidential task",
+                "status":"todo","project":"Private"}
+        for source in ("local","remote"):
+            with self.subTest(source=source):
+                local=[sample,sample.copy()] if source=="local" else []
+                remote=[sample,sample.copy()] if source=="remote" else []
+                with self.assertRaisesRegex(ValueError, f"Duplicate {source} task identities") as ctx:
+                    compare(local,remote)
+                self.assertNotIn("private-id",str(ctx.exception))
+                self.assertNotIn("Confidential",str(ctx.exception))
+
     def test_no_data_contents_leak_into_report(self):
         local=[{"id":"private-id","title":"Private customer information","status":"todo","project":"Secret"}]
         result=compare(local,[])
@@ -123,6 +135,24 @@ class RemoteManifestTests(unittest.TestCase):
         with patch("sync_preview.urlopen",return_value=io.BytesIO(json.dumps(bad).encode())):
             with self.assertRaises(ValueError):
                 remote_manifest_request("https://example.invalid","private",None)
+
+    def test_duplicate_manifest_identifiers_fail_closed_without_leaking_ids(self):
+        local=[{"id":"private-local-id","version":1,"deleted":False,"depends_on":[]}]
+        remote=[{"id":"private-remote-id","version":1,"deleted_at":None}]
+        for left,right,expected in (
+            (local * 2, remote, "Duplicate local task identities"),
+            (local, remote * 2, "Duplicate remote task identities"),
+            (local + [{"id":"private-local-id","version":2,"deleted":True,"depends_on":[]}],
+             remote, "Duplicate local task identities"),
+            (local, remote + [{"id":"private-remote-id","version":2,"deleted_at":"now"}],
+             "Duplicate remote task identities"),
+        ):
+            with self.subTest(expected=expected):
+                with self.assertRaisesRegex(ValueError, expected) as error:
+                    compare_manifest(left,right)
+                self.assertNotIn("private-local-id",str(error.exception))
+                self.assertNotIn("private-remote-id",str(error.exception))
+        self.assertEqual(compare_manifest(local,remote)["counts"]["local_active_only"],1)
 
     def test_tombstone_conflicts_are_counted_without_leaking_identifiers(self):
         local=[
