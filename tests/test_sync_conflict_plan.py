@@ -38,6 +38,15 @@ def snap(version=1, *, title="Owner task", notes="Base note", status="todo",
             "automatic_apply": False}
 
 
+def reseal(snapshot):
+    """Only test fixtures may deliberately recompute a modified observation."""
+    evidence = {key: snapshot[key] for key in ("record", "depends_on", "source_import", "cutoff")}
+    snapshot["record_sha256"] = hashlib.sha256(
+        json.dumps(evidence, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return snapshot
+
+
 def synthetic_cas(server, req):
     """One fixture-only conditional server edit; never accesses real task DB."""
     if server["record"]["version"] != req["expected_revision"]:
@@ -106,6 +115,7 @@ class ConflictPlanningTests(unittest.TestCase):
     def test_wrong_source_receipt_and_revision_regressions_refused(self):
         bad = snap(2)
         bad["source_import"] = {**SOURCE, "source_payload_sha256": "f"*64}
+        reseal(bad)
         with self.assertRaisesRegex(sync.ConflictError, "lineage"):
             sync.plan(snap(), bad, {"status": "done"})
         with self.assertRaisesRegex(sync.ConflictError, "regressed"):
@@ -146,10 +156,40 @@ class ConflictPlanningTests(unittest.TestCase):
                 with self.assertRaises(sync.ConflictError):
                     sync.plan(snap(), snap(), fields)
 
+    def test_tampered_record_with_unchanged_digest_is_rejected(self):
+        base = snap()
+        remote = copy.deepcopy(base)
+        remote["record"]["notes"] = "Tampered remote note"
+        with self.assertRaisesRegex(sync.ConflictError, "digest"):
+            sync.plan(base, remote, {"status": "done"})
+
+    def test_tampered_dependencies_and_source_are_rejected(self):
+        for field, value in (
+            ("depends_on", ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]),
+            ("source_import", {**SOURCE, "source_payload_sha256": "f" * 64}),
+        ):
+            with self.subTest(field=field):
+                remote = snap()
+                remote[field] = value
+                with self.assertRaisesRegex(sync.ConflictError, "digest"):
+                    sync.plan(snap(), remote, {"status": "done"})
+
+    def test_malformed_digest_and_unexpected_fields_fail_closed(self):
+        for mutation in ("invalid-digest", "extra-field"):
+            with self.subTest(mutation=mutation):
+                remote = snap()
+                if mutation == "invalid-digest":
+                    remote["record_sha256"] = "g" * 64
+                else:
+                    remote["unexpected"] = "unsafe"
+                with self.assertRaises(sync.ConflictError):
+                    sync.plan(snap(), remote, {"status": "done"})
+
     def test_distinct_snapshot_identity_refused(self):
         data = snap()
         other = snap()
         other["record"]["id"] = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        reseal(other)
         with self.assertRaisesRegex(sync.ConflictError, "identity"):
             sync.plan(data, other, {"status": "done"})
 
