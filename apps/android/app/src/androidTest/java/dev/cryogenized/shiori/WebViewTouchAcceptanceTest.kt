@@ -93,7 +93,31 @@ class WebViewTouchAcceptanceTest {
                 dimensions.getDouble("width") <= 760 &&
                 dimensions.getDouble("fabWidth") >= 44
         )
+        installDomInputTrace()
     }
+
+    /**
+     * Passive capture-phase DOM telemetry for issue #65. This observes actual
+     * browser events caused by native touchscreen injection; it never creates
+     * synthetic events or invokes application handlers.
+     */
+    private fun installDomInputTrace() {
+        javascript(
+            "(function(){if(window.__shioriTouchTrace)return true;" +
+                "const trace=[];window.__shioriTouchTrace=trace;" +
+                "for(const type of ['pointerdown','pointerup','touchstart','touchend','click']){" +
+                "document.addEventListener(type,function(e){" +
+                "trace.push({type:type,target:e.target?.id||e.target?.className||e.target?.tagName," +
+                "x:e.clientX??null,y:e.clientY??null,defaultPrevented:e.defaultPrevented});" +
+                "if(trace.length>24)trace.shift();" +
+                "},true);}return true;})()"
+        )
+    }
+
+    private fun domInputTrace(): String =
+        runCatching {
+            javascript("JSON.stringify(window.__shioriTouchTrace||[])")
+        }.getOrElse { "trace unavailable: ${it.javaClass.simpleName}" }
 
     @After
     fun closeActivity() {
@@ -212,7 +236,7 @@ class WebViewTouchAcceptanceTest {
             if (predicate()) return
             Thread.sleep(160)
         }
-        throw AssertionError("Android WebView acceptance timed out: $label; last touch: $lastTouchDiagnostic")
+        throw AssertionError("Android WebView acceptance timed out: $label; last touch: $lastTouchDiagnostic; DOM input trace: ${domInputTrace()}")
     }
 
     private fun modalOpen(): Boolean =
