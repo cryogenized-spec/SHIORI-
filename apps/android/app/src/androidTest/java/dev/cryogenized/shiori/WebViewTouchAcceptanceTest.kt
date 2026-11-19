@@ -110,7 +110,9 @@ class WebViewTouchAcceptanceTest {
                 "const trace=[];window.__shioriTouchTrace=trace;" +
                 "for(const type of ['pointerdown','pointerup','touchstart','touchend','click']){" +
                 "document.addEventListener(type,function(e){" +
-                "trace.push({type:type,target:e.target?.id||e.target?.className||e.target?.tagName," +
+                "trace.push({type:type,target:e.target?.getAttribute?.('class')||" +
+                "e.target?.id||e.target?.tagName,pointerType:e.pointerType||null," +
+                "trusted:e.isTrusted,primary:e.isPrimary??null,button:e.button??null," +
                 "x:e.clientX??null,y:e.clientY??null,defaultPrevented:e.defaultPrevented});" +
                 "if(trace.length>24)trace.shift();" +
                 "},true);}return true;})()"
@@ -119,7 +121,8 @@ class WebViewTouchAcceptanceTest {
 
     private fun domInputTrace(): String =
         runCatching {
-            javascript("JSON.stringify(window.__shioriTouchTrace||[])")
+            javascript("JSON.stringify({events:window.__shioriTouchTrace||[],fab:" +
+                "window.__shioriFabTouchDiagnostic||null})")
         }.getOrElse { "trace unavailable: ${it.javaClass.simpleName}" }
 
     @After
