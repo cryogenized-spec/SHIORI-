@@ -148,7 +148,7 @@ mod tests {
         store.insert(&dependency).unwrap();
         let mut store = store;
         store
-            .set_dependencies(&task.id, &[dependency.id.clone()])
+            .set_dependencies(&task.id, std::slice::from_ref(&dependency.id))
             .unwrap();
         let backup = dir.path().join("before.shiori-backup.sqlite3");
         let local_version = store.get(&task.id).unwrap().version;
