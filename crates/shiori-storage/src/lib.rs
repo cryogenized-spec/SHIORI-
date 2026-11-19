@@ -616,6 +616,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_remote_projection_is_atomic_preserves_rust_only_fields() {
+        let store = SqliteStore::in_memory().unwrap();
+        let due = Date::new(2026, 12, 5).unwrap();
+        let mut task = Task::new("Original", "Personal", Priority::Low, Some(due)).unwrap();
+        task.estimate_minutes = Some(40);
+        task.assignee_id = Some("local".to_owned());
+        store.insert(&task).unwrap();
+        let changed = store.apply_remote_common_fields_if_version(
+            &task.id, 1, "Cloud title", "Cloud notes", "Remote",
+            Priority::High, TaskStatus::Done, true,
+        ).unwrap();
+        assert_eq!(changed.version, 2);
+        let read = store.get(&task.id).unwrap();
+        assert_eq!(read.title, "Cloud title");
+        assert_eq!(read.notes, "Cloud notes");
+        assert_eq!(read.priority, Priority::High);
+        assert_eq!(read.status, TaskStatus::Done);
+        assert!(read.completed_at.is_some());
+        assert_eq!(read.due_on, Some(due));
+        assert_eq!(read.estimate_minutes, Some(40));
+        assert_eq!(read.assignee_id.as_deref(), Some("local"));
+        assert_eq!(read.created_at, task.created_at);
+        assert_eq!(store.apply_remote_common_fields_if_version(
+            &task.id, 2, "Cloud title", "Cloud notes", "Remote",
+            Priority::High, TaskStatus::Done, true,
+        ).unwrap().version, 2, "Exact replay must remain a no-op");
+    }
+
+    #[test]
+    fn remote_projection_refuses_unreviewed_stale_or_deleted_task() {
+        let store = SqliteStore::in_memory().unwrap();
+        let task = Task::new("Important", "SHIORI", Priority::Medium, None).unwrap();
+        store.insert(&task).unwrap();
+        let update = |version, approved| store.apply_remote_common_fields_if_version(
+            &task.id, version, "Cloud edit", "notes", "Cloud",
+            Priority::Urgent, TaskStatus::Done, approved,
+        );
+        assert!(matches!(update(1, false), Err(StorageError::RemoteApplyApprovalRequired)));
+        assert!(matches!(update(2, true), Err(StorageError::RevisionConflict)));
+        assert_eq!(store.get(&task.id).unwrap().version, 1);
+        assert_eq!(store.get(&task.id).unwrap().title, "Important");
+        assert!(matches!(store.apply_remote_common_fields_if_version(
+            &task.id, 1, "", "notes", "Cloud", Priority::Urgent,
+            TaskStatus::Done, true,
+        ), Err(StorageError::Domain(TaskError::EmptyTitle))));
+        assert_eq!(store.get(&task.id).unwrap().version, 1);
+        store.delete_if_version(&task.id, 1).unwrap();
+        assert!(matches!(update(1, true), Err(StorageError::NotFound)));
+    }
+
+    #[test]
     fn assigned_to_me_lookup_uses_the_local_index() {
         let store = SqliteStore::in_memory().unwrap();
         let mut statement = store
