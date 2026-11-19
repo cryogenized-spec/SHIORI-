@@ -149,6 +149,20 @@ class RemoteManifestTests(unittest.TestCase):
                 load_remote_manifest("https://example.invalid","synthetic-token")
         self.assertEqual(requests,[None,"b"])
 
+    def test_remote_manifest_rejects_oversized_identity_and_timestamps(self):
+        row={"id":"a","version":1,"status":"todo",
+             "updated_at":"2026-11-19T00:00:00Z","deleted_at":None}
+        for field in ("id","updated_at","deleted_at"):
+            with self.subTest(field=field):
+                oversized={**row,field:"x"*4097}
+                payload={"ok":True,"operation_id":"sync.manifest.read","data":{
+                    "items":[oversized],"next_cursor":None,
+                    "consistent_snapshot":False,"local_rust_sync":False}}
+                with patch("sync_preview.urlopen",
+                           return_value=io.BytesIO(json.dumps(payload).encode())):
+                    with self.assertRaisesRegex(ValueError,"Malformed manifest task"):
+                        remote_manifest_request("https://example.invalid","synthetic-token",None)
+
     def test_remote_manifest_refuses_task_content_or_false_sync_claims(self):
         bad={"ok":True,"operation_id":"sync.manifest.read","data":{
             "items":[{"id":"a","version":1,"status":"todo",
