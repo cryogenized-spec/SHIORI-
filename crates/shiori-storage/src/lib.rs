@@ -689,7 +689,10 @@ mod tests {
         ));
         assert_eq!(store.get(&task.id).unwrap().version, 1);
         assert_eq!(store.get(&task.id).unwrap().title, "Important");
-        let invalid = RemoteCommonFields { title: "", ..fields };
+        let invalid = RemoteCommonFields {
+            title: "",
+            ..fields
+        };
         assert!(matches!(
             store.apply_remote_common_fields_if_version(&task.id, 1, &invalid, true),
             Err(StorageError::Domain(TaskError::EmptyTitle))
