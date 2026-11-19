@@ -35,6 +35,8 @@ pub enum StorageError {
     InvalidSpatialSchema,
     #[error("task was changed by another writer")]
     RevisionConflict,
+    #[error("remote common-field apply requires explicit owner approval")]
+    RemoteApplyApprovalRequired,
     #[error("unsupported SQLite schema version {found} (latest supported: {supported})")]
     UnsupportedSchemaVersion { found: i64, supported: i64 },
     #[error("unversioned SQLite database has an incompatible task schema")]
@@ -60,6 +62,16 @@ pub struct TaskFilter<'a> {
     pub due_on_or_before: Option<Date>,
     pub search: Option<&'a str>,
     pub include_deleted: bool,
+}
+
+/// Validated common task fields from a *separately verified* remote record.
+/// Local-only scheduling, assignment and dependency fields are intentionally absent.
+pub struct RemoteCommonFields<'a> {
+    pub title: &'a str,
+    pub notes: &'a str,
+    pub project: &'a str,
+    pub priority: Priority,
+    pub status: TaskStatus,
 }
 
 pub struct SqliteStore {
@@ -398,6 +410,41 @@ impl SqliteStore {
         Ok(task)
     }
 
+    /// Apply only common task fields from an *already verified and reviewed*
+    /// remote snapshot, preserving Rust-only local fields in one revision.
+    ///
+    /// This is a guarded storage primitive, NOT a sync client. A higher-layer
+    /// workflow must independently verify the original S2 source receipt,
+    /// exact S4 snapshot digest and fresh server revision, create a backup,
+    /// and obtain owner consent before calling it. No endpoint calls this yet.
+    pub fn apply_remote_common_fields_if_version(
+        &self,
+        id: &str,
+        expected_local_version: i64,
+        fields: &RemoteCommonFields<'_>,
+        owner_approved: bool,
+    ) -> Result<Task, StorageError> {
+        if !owner_approved {
+            return Err(StorageError::RemoteApplyApprovalRequired);
+        }
+        let mut task = self.get(id)?;
+        if task.version != expected_local_version {
+            return Err(StorageError::RevisionConflict);
+        }
+        if task.apply_reviewed_remote_common_fields(
+            fields.title,
+            fields.notes,
+            fields.project,
+            fields.priority,
+            fields.status,
+        )? {
+            // Existing SQL CAS enforces version and active-tombstone guard.
+            // It commits all five fields atomically in a single UPDATE.
+            self.update_existing(&task)?;
+        }
+        Ok(task)
+    }
+
     /// List immediate prerequisites of an active task. A tombstoned
     /// prerequisite remains referenced and must not silently unblock work.
     pub fn get_dependencies(&self, id: &str) -> Result<Vec<String>, StorageError> {
@@ -577,6 +624,83 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_remote_projection_is_atomic_preserves_rust_only_fields() {
+        let store = SqliteStore::in_memory().unwrap();
+        let due = Date::new(2026, 12, 5).unwrap();
+        let mut task = Task::new("Original", "Personal", Priority::Low, Some(due)).unwrap();
+        task.estimate_minutes = Some(40);
+        task.assignee_id = Some("local".to_owned());
+        store.insert(&task).unwrap();
+        let fields = RemoteCommonFields {
+            title: "Cloud title",
+            notes: "Cloud notes",
+            project: "Remote",
+            priority: Priority::High,
+            status: TaskStatus::Done,
+        };
+        let changed = store
+            .apply_remote_common_fields_if_version(&task.id, 1, &fields, true)
+            .unwrap();
+        assert_eq!(changed.version, 2);
+        let read = store.get(&task.id).unwrap();
+        assert_eq!(read.title, "Cloud title");
+        assert_eq!(read.notes, "Cloud notes");
+        assert_eq!(read.priority, Priority::High);
+        assert_eq!(read.status, TaskStatus::Done);
+        assert!(read.completed_at.is_some());
+        assert_eq!(read.due_on, Some(due));
+        assert_eq!(read.estimate_minutes, Some(40));
+        assert_eq!(read.assignee_id.as_deref(), Some("local"));
+        assert_eq!(read.created_at, task.created_at);
+        assert_eq!(
+            store
+                .apply_remote_common_fields_if_version(&task.id, 2, &fields, true)
+                .unwrap()
+                .version,
+            2,
+            "Exact replay must remain a no-op"
+        );
+    }
+
+    #[test]
+    fn remote_projection_refuses_unreviewed_stale_or_deleted_task() {
+        let store = SqliteStore::in_memory().unwrap();
+        let task = Task::new("Important", "SHIORI", Priority::Medium, None).unwrap();
+        store.insert(&task).unwrap();
+        let fields = RemoteCommonFields {
+            title: "Cloud edit",
+            notes: "notes",
+            project: "Cloud",
+            priority: Priority::Urgent,
+            status: TaskStatus::Done,
+        };
+        let update = |version, approved| {
+            store.apply_remote_common_fields_if_version(&task.id, version, &fields, approved)
+        };
+        assert!(matches!(
+            update(1, false),
+            Err(StorageError::RemoteApplyApprovalRequired)
+        ));
+        assert!(matches!(
+            update(2, true),
+            Err(StorageError::RevisionConflict)
+        ));
+        assert_eq!(store.get(&task.id).unwrap().version, 1);
+        assert_eq!(store.get(&task.id).unwrap().title, "Important");
+        let invalid = RemoteCommonFields {
+            title: "",
+            ..fields
+        };
+        assert!(matches!(
+            store.apply_remote_common_fields_if_version(&task.id, 1, &invalid, true),
+            Err(StorageError::Domain(TaskError::EmptyTitle))
+        ));
+        assert_eq!(store.get(&task.id).unwrap().version, 1);
+        store.delete_if_version(&task.id, 1).unwrap();
+        assert!(matches!(update(1, true), Err(StorageError::NotFound)));
+    }
 
     #[test]
     fn assigned_to_me_lookup_uses_the_local_index() {

@@ -88,6 +88,8 @@ pub enum TaskError {
     TitleTooLong,
     #[error("project name cannot be empty")]
     EmptyProject,
+    #[error("synchronized notes exceed the permitted 8192 characters")]
+    SyncedNotesTooLong,
     #[error("invalid priority")]
     InvalidPriority,
     #[error("invalid task status")]
@@ -278,6 +280,50 @@ impl Task {
         Ok(true)
     }
 
+    /// Apply a validated common-field projection in *one* local revision.
+    ///
+    /// Intended only after a separately authenticated S2-origin receipt,
+    /// verified S4 snapshot, explicit user review and backup. This is a pure
+    /// domain operation: it does NOT authenticate Cloudflare or start syncing.
+    /// Local-only due dates, estimates, assignees and creation times survive.
+    /// Status transitions preserve their existing completion-time semantics.
+    pub fn apply_reviewed_remote_common_fields(
+        &mut self,
+        title: &str,
+        notes: &str,
+        project: &str,
+        priority: Priority,
+        status: TaskStatus,
+    ) -> Result<bool, TaskError> {
+        let title = validate_title(title)?;
+        let project = validate_project(project)?;
+        if notes.chars().count() > 8192 {
+            return Err(TaskError::SyncedNotesTooLong);
+        }
+        let changed = self.title != title
+            || self.notes != notes
+            || self.project != project
+            || self.priority != priority
+            || self.status != status;
+        if !changed {
+            return Ok(false);
+        }
+        if self.status != status {
+            self.completed_at = if status == TaskStatus::Done {
+                Some(Timestamp::now())
+            } else {
+                None
+            };
+        }
+        self.title = title;
+        self.notes = notes.to_owned();
+        self.project = project;
+        self.priority = priority;
+        self.status = status;
+        self.bump();
+        Ok(true)
+    }
+
     pub fn soft_delete(&mut self) {
         self.deleted_at = Some(Timestamp::now());
         self.bump();
@@ -292,6 +338,89 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_common_fields_preserve_local_only_data_and_bump_once() {
+        let due = Date::new(2026, 12, 5).unwrap();
+        let mut task = Task::new("Original", "Personal", Priority::Low, Some(due)).unwrap();
+        task.estimate_minutes = Some(35);
+        task.assignee_id = Some("local".to_owned());
+        let created_at = task.created_at;
+        let changed = task
+            .apply_reviewed_remote_common_fields(
+                "Remote title",
+                "Remote note",
+                "SHIORI",
+                Priority::High,
+                TaskStatus::Done,
+            )
+            .unwrap();
+        assert!(changed);
+        assert_eq!(task.version, 2, "Five fields are one local revision");
+        assert_eq!(task.title, "Remote title");
+        assert_eq!(task.notes, "Remote note");
+        assert_eq!(task.status, TaskStatus::Done);
+        assert_eq!(task.priority, Priority::High);
+        assert!(task.completed_at.is_some());
+        assert_eq!(task.due_on, Some(due));
+        assert_eq!(task.estimate_minutes, Some(35));
+        assert_eq!(task.assignee_id.as_deref(), Some("local"));
+        assert_eq!(task.created_at, created_at);
+        let completed_at = task.completed_at;
+        assert!(
+            !task
+                .apply_reviewed_remote_common_fields(
+                    "Remote title",
+                    "Remote note",
+                    "SHIORI",
+                    Priority::High,
+                    TaskStatus::Done,
+                )
+                .unwrap()
+        );
+        assert_eq!(task.version, 2, "Exact replay must be a no-op");
+        assert_eq!(task.completed_at, completed_at);
+        task.apply_reviewed_remote_common_fields(
+            "Remote title",
+            "Remote note",
+            "SHIORI",
+            Priority::High,
+            TaskStatus::Todo,
+        )
+        .unwrap();
+        assert_eq!(task.version, 3);
+        assert!(task.completed_at.is_none());
+    }
+
+    #[test]
+    fn invalid_common_field_projection_changes_nothing() {
+        let mut task = Task::new("Original", "Personal", Priority::Low, None).unwrap();
+        let before = task.clone();
+        assert_eq!(
+            task.apply_reviewed_remote_common_fields(
+                "",
+                "notes",
+                "SHIORI",
+                Priority::High,
+                TaskStatus::Done,
+            ),
+            Err(TaskError::EmptyTitle)
+        );
+        assert_eq!(
+            task.apply_reviewed_remote_common_fields(
+                "Good",
+                &"n".repeat(8193),
+                "SHIORI",
+                Priority::High,
+                TaskStatus::Done,
+            ),
+            Err(TaskError::SyncedNotesTooLong)
+        );
+        assert_eq!(task.version, before.version);
+        assert_eq!(task.title, before.title);
+        assert_eq!(task.notes, before.notes);
+        assert_eq!(task.completed_at, before.completed_at);
+    }
 
     #[test]
     fn rejects_empty_and_too_long_titles() {
