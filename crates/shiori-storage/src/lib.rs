@@ -128,7 +128,7 @@ impl SqliteStore {
         let backup = verified_parent.join(
             destination.file_name().ok_or(StorageError::PrivateBackupInvalidDestination)?,
         );
-        if origin.as_str().is_empty() || origin == backup.to_string_lossy() {
+        if Path::new(&origin).canonicalize()? == backup {
             return Err(StorageError::PrivateBackupInvalidDestination);
         }
         let encoded_path = backup.to_str().ok_or(StorageError::PrivateBackupInvalidDestination)?;
