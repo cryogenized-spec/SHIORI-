@@ -999,40 +999,67 @@
       closeEdit();
     });
   });
-  // Persistent New Task buttons use a direct click handler. Android 15
-  // occasionally delivers genuine touch pointerdown/up yet WebView emits no
-  // synthesized click. Fall back ONLY to a short, trusted primary touch
-  // release that began inside the same enabled button and did not drag.
-  // Never synthesize click(), replay a task action or consume browser tests.
+  // A real Android touchscreen input sometimes sends pointerdown/up but no
+  // synthesized click. Handle ONLY a short, trusted, primary pointer gesture
+  // which presses and releases inside the same enabled New Task button.
+  // On Android WebView, pointerType can be "mouse" for some injected/native
+  // touchscreen paths; only requiring "touch" lost these real events.
+  // Capture-phase listeners still run if a nested SVG/icon stops bubbling.
   document.querySelectorAll('button[data-add]').forEach(button=>{
     let nativePress=null;
     let nativeOpenedAt=-Infinity;
+    const diagnostic=(phase,event,extra={})=>{
+      // Technical trace only, no user task contents, credentials or IDs.
+      window.__shioriFabTouchDiagnostic={
+        phase,pointerType:event.pointerType||'unknown',
+        trusted:!!event.isTrusted,primary:!!event.isPrimary,
+        button:event.button,buttons:event.buttons,...extra
+      };
+    };
     button.addEventListener('pointerdown',event=>{
-      if(!event.isTrusted||event.pointerType!=='touch'||!event.isPrimary||button.disabled)return;
-      nativePress={id:event.pointerId,x:event.clientX,y:event.clientY,at:performance.now()};
-    });
-    button.addEventListener('pointercancel',()=>{nativePress=null;});
+      nativePress=null;
+      diagnostic('pointerdown',event);
+      if(!event.isTrusted||!event.isPrimary||button.disabled||
+          (event.pointerType==='mouse'&&event.button!==0)){
+        diagnostic('down-rejected',event);
+        return;
+      }
+      nativePress={id:event.pointerId,x:event.clientX,y:event.clientY,
+        at:performance.now(),type:event.pointerType};
+      diagnostic('down-accepted',event);
+    },true);
+    button.addEventListener('pointercancel',event=>{
+      nativePress=null;
+      diagnostic('cancelled',event);
+    },true);
     button.addEventListener('pointerup',event=>{
       const press=nativePress;
       nativePress=null;
       if(!press||button.disabled||!event.isTrusted||
-          event.pointerType!=='touch'||!event.isPrimary||event.pointerId!==press.id)return;
+          !event.isPrimary||event.pointerId!==press.id||
+          (event.pointerType==='mouse'&&event.button!==0)){
+        diagnostic('up-rejected',event,{hadPress:!!press});
+        return;
+      }
       const duration=performance.now()-press.at;
       const distance=Math.hypot(event.clientX-press.x,event.clientY-press.y);
       const bounds=button.getBoundingClientRect();
-      if(duration<0||duration>650||distance>14||
-         event.clientX<bounds.left||event.clientX>bounds.right||
-         event.clientY<bounds.top||event.clientY>bounds.bottom)return;
+      if(duration<0||duration>1200||distance>14||
+          event.clientX<bounds.left||event.clientX>bounds.right||
+          event.clientY<bounds.top||event.clientY>bounds.bottom){
+        diagnostic('up-outside-tap',event,{duration,distance});
+        return;
+      }
       nativeOpenedAt=performance.now();
+      diagnostic('opened',event,{duration,distance});
       event.preventDefault();
       event.stopPropagation();
       openModal();
-    });
+    },true);
     button.addEventListener('click',event=>{
       event.preventDefault();
       event.stopPropagation();
-      // Do not reopen the modal when the browser *also* synthesizes click
-      // after the trusted touch-up path already handled that same gesture.
+      // Suppress the synthetic click of the same real pointer release.
       if(performance.now()-nativeOpenedAt<950)return;
       openModal();
     });
