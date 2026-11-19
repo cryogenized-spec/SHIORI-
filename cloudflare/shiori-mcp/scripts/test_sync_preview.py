@@ -124,6 +124,24 @@ class RemoteManifestTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 remote_manifest_request("https://example.invalid","private",None)
 
+    def test_duplicate_manifest_identifiers_fail_closed_without_leaking_ids(self):
+        local=[{"id":"private-local-id","version":1,"deleted":False,"depends_on":[]}]
+        remote=[{"id":"private-remote-id","version":1,"deleted_at":None}]
+        for left,right,expected in (
+            (local * 2, remote, "Duplicate local task identities"),
+            (local, remote * 2, "Duplicate remote task identities"),
+            (local + [{"id":"private-local-id","version":2,"deleted":True,"depends_on":[]}],
+             remote, "Duplicate local task identities"),
+            (local, remote + [{"id":"private-remote-id","version":2,"deleted_at":"now"}],
+             "Duplicate remote task identities"),
+        ):
+            with self.subTest(expected=expected):
+                with self.assertRaisesRegex(ValueError, expected) as error:
+                    compare_manifest(left,right)
+                self.assertNotIn("private-local-id",str(error.exception))
+                self.assertNotIn("private-remote-id",str(error.exception))
+        self.assertEqual(compare_manifest(local,remote)["counts"]["local_active_only"],1)
+
     def test_tombstone_conflicts_are_counted_without_leaking_identifiers(self):
         local=[
             {"id":"x","version":4,"deleted":True,"depends_on":[]},
