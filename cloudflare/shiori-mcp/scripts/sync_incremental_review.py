@@ -115,6 +115,8 @@ def review(canonical: Path, shadow: Path, journal: Path, token_file: Path,
         raise DivergenceError("Fresh S4 record has different original source provenance")
     if live["record"]["version"] < base["remote_version"]:
         raise DivergenceError("Cloud revision regressed after the approved checkpoint")
+    if live["cutoff"] < base["remote_change_cutoff"]:
+        raise DivergenceError("Cloud change-feed cutoff regressed after the checkpoint")
     local_changed = checkpoint._common_hash(local) != base["local_common_sha256"]
     remote_changed = checkpoint._common_hash(live["record"]) != base["local_common_sha256"]
     local_graph_changed = edges != staged["depends_on"]
@@ -122,7 +124,8 @@ def review(canonical: Path, shadow: Path, journal: Path, token_file: Path,
     tombstone = local["deleted_at"] is not None or live["record"]["deleted_at"] is not None
     revision_suspicious = (
         (local_changed and local["version"] == base["local_version"])
-        or (remote_changed and live["record"]["version"] == base["remote_version"])
+        or (live["record"]["version"] == base["remote_version"]
+            and live["record"] != staged["record"])
     )
     if tombstone:
         status = "delete_conflict"
@@ -145,9 +148,10 @@ def review(canonical: Path, shadow: Path, journal: Path, token_file: Path,
     # and must not masquerade as a changed version of this specific record.
     only_global_cutoff_advanced = (
         status == "aligned_at_current_owner_read"
-        and live["record_sha256"] != base["remote_record_sha256"]
-        and live["record"]["version"] == base["remote_version"]
-        and not local_graph_changed and not remote_graph_changed
+        and live["record"] == staged["record"]
+        and live["depends_on"] == staged["depends_on"]
+        and live["source_import"] == staged["source_import"]
+        and live["cutoff"] > staged["cutoff"]
     )
     return {
         "status": status,
