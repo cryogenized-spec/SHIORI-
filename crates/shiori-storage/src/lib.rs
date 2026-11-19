@@ -35,6 +35,8 @@ pub enum StorageError {
     InvalidSpatialSchema,
     #[error("task was changed by another writer")]
     RevisionConflict,
+    #[error("remote common-field apply requires explicit owner approval")]
+    RemoteApplyApprovalRequired,
     #[error("unsupported SQLite schema version {found} (latest supported: {supported})")]
     UnsupportedSchemaVersion { found: i64, supported: i64 },
     #[error("unversioned SQLite database has an incompatible task schema")]
@@ -393,6 +395,41 @@ impl SqliteStore {
             return Err(StorageError::RevisionConflict);
         }
         if task.apply_patch(patch)? {
+            self.update_existing(&task)?;
+        }
+        Ok(task)
+    }
+
+    /// Apply only common task fields from an *already verified and reviewed*
+    /// remote snapshot, preserving Rust-only local fields in one revision.
+    ///
+    /// This is a guarded storage primitive, NOT a sync client. A higher-layer
+    /// workflow must independently verify the original S2 source receipt,
+    /// exact S4 snapshot digest and fresh server revision, create a backup,
+    /// and obtain owner consent before calling it. No endpoint calls this yet.
+    pub fn apply_remote_common_fields_if_version(
+        &self,
+        id: &str,
+        expected_local_version: i64,
+        title: &str,
+        notes: &str,
+        project: &str,
+        priority: Priority,
+        status: TaskStatus,
+        owner_approved: bool,
+    ) -> Result<Task, StorageError> {
+        if !owner_approved {
+            return Err(StorageError::RemoteApplyApprovalRequired);
+        }
+        let mut task = self.get(id)?;
+        if task.version != expected_local_version {
+            return Err(StorageError::RevisionConflict);
+        }
+        if task.apply_reviewed_remote_common_fields(
+            title, notes, project, priority, status,
+        )? {
+            // Existing SQL CAS enforces version and active-tombstone guard.
+            // It commits all five fields atomically in a single UPDATE.
             self.update_existing(&task)?;
         }
         Ok(task)
