@@ -43,7 +43,10 @@ pub fn apply(
         return Err("Reviewed task identity or prerequisite budget disagrees".into());
     }
     if parsed.depends_on.windows(2).any(|two| two[0] >= two[1])
-        || parsed.depends_on.iter().any(|id| id == task_id || id.is_empty())
+        || parsed
+            .depends_on
+            .iter()
+            .any(|id| id == task_id || id.is_empty())
     {
         return Err("Reviewed prerequisites are not strictly ordered".into());
     }
@@ -64,9 +67,8 @@ pub fn apply(
     // Backup is made before any possible write; its creation fails closed if
     // the destination already exists, is a symlink or cannot be verified.
     store.backup_private_copy(backup, true)?;
-    let result = store.apply_remote_common_fields_if_version(
-        task_id, local_version, &fields, true,
-    )?;
+    let result =
+        store.apply_remote_common_fields_if_version(task_id, local_version, &fields, true)?;
     Ok(result.version)
 }
 
@@ -81,7 +83,8 @@ mod tests {
             "id": id, "title": "Remote title", "notes": notes,
             "project": "Cloud", "priority": "urgent",
             "status": "done", "depends_on": depends_on
-        })).unwrap()
+        }))
+        .unwrap()
     }
 
     #[test]
@@ -144,7 +147,9 @@ mod tests {
         store.insert(&task).unwrap();
         store.insert(&dependency).unwrap();
         let mut store = store;
-        store.set_dependencies(&task.id, &[dependency.id.clone()]).unwrap();
+        store
+            .set_dependencies(&task.id, &[dependency.id.clone()])
+            .unwrap();
         let backup = dir.path().join("before.shiori-backup.sqlite3");
         let local_version = store.get(&task.id).unwrap().version;
         let body = task_json(&task.id, "Changed", &[]);
