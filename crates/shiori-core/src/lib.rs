@@ -348,7 +348,10 @@ mod tests {
         let created_at = task.created_at;
         let changed = task
             .apply_reviewed_remote_common_fields(
-                "Remote title", "Remote note", "SHIORI", Priority::High,
+                "Remote title",
+                "Remote note",
+                "SHIORI",
+                Priority::High,
                 TaskStatus::Done,
             )
             .unwrap();
@@ -364,18 +367,27 @@ mod tests {
         assert_eq!(task.assignee_id.as_deref(), Some("local"));
         assert_eq!(task.created_at, created_at);
         let completed_at = task.completed_at;
-        assert!(!task
-            .apply_reviewed_remote_common_fields(
-                "Remote title", "Remote note", "SHIORI", Priority::High,
-                TaskStatus::Done,
-            )
-            .unwrap());
+        assert!(
+            !task
+                .apply_reviewed_remote_common_fields(
+                    "Remote title",
+                    "Remote note",
+                    "SHIORI",
+                    Priority::High,
+                    TaskStatus::Done,
+                )
+                .unwrap()
+        );
         assert_eq!(task.version, 2, "Exact replay must be a no-op");
         assert_eq!(task.completed_at, completed_at);
         task.apply_reviewed_remote_common_fields(
-            "Remote title", "Remote note", "SHIORI", Priority::High,
+            "Remote title",
+            "Remote note",
+            "SHIORI",
+            Priority::High,
             TaskStatus::Todo,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(task.version, 3);
         assert!(task.completed_at.is_none());
     }
@@ -384,13 +396,26 @@ mod tests {
     fn invalid_common_field_projection_changes_nothing() {
         let mut task = Task::new("Original", "Personal", Priority::Low, None).unwrap();
         let before = task.clone();
-        assert_eq!(task.apply_reviewed_remote_common_fields(
-            "", "notes", "SHIORI", Priority::High, TaskStatus::Done,
-        ), Err(TaskError::EmptyTitle));
-        assert_eq!(task.apply_reviewed_remote_common_fields(
-            "Good", &"n".repeat(8193), "SHIORI", Priority::High,
-            TaskStatus::Done,
-        ), Err(TaskError::SyncedNotesTooLong));
+        assert_eq!(
+            task.apply_reviewed_remote_common_fields(
+                "",
+                "notes",
+                "SHIORI",
+                Priority::High,
+                TaskStatus::Done,
+            ),
+            Err(TaskError::EmptyTitle)
+        );
+        assert_eq!(
+            task.apply_reviewed_remote_common_fields(
+                "Good",
+                &"n".repeat(8193),
+                "SHIORI",
+                Priority::High,
+                TaskStatus::Done,
+            ),
+            Err(TaskError::SyncedNotesTooLong)
+        );
         assert_eq!(task.version, before.version);
         assert_eq!(task.title, before.title);
         assert_eq!(task.notes, before.notes);
