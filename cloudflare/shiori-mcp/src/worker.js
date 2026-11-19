@@ -451,8 +451,19 @@ async function run(id,arg,env){
       db.prepare(
         "UPDATE remote_tasks SET title=?,notes=?,project=?,status=?,priority=?, "+
         "version=version+1,updated_at=? "+
-        "WHERE workspace_id=? AND id=? AND version=? AND deleted_at IS NULL"
-      ).bind(title,notes,project,status,priority,now,w,a.task_id,a.expected_revision),
+        "WHERE workspace_id=? AND id=? AND version=? AND deleted_at IS NULL "+
+        // Close the gap between the separate verified snapshot read and the
+        // actual transaction. A revoke, changed origin receipt, or any logged
+        // task/dependency event MUST invalidate that original owner review.
+        "AND (SELECT COALESCE(MAX(seq),0) FROM remote_change_log)=? "+
+        "AND EXISTS (SELECT 1 FROM sync_devices d WHERE d.workspace_id=? "+
+        "AND d.device_id=? AND d.revoked_at IS NULL) "+
+        "AND EXISTS (SELECT 1 FROM sync_imports i WHERE i.workspace_id=? "+
+        "AND i.task_id=? AND i.event_id=? AND i.payload_sha256=? "+
+        "AND i.source_version=1)"
+      ).bind(title,notes,project,status,priority,now,w,a.task_id,
+        a.expected_revision,current.cutoff,w,a.device_id,w,a.task_id,
+        a.source_event_id,a.source_payload_sha256),
       db.prepare(
         "INSERT INTO idempotency(workspace_id,operation_id,token,request_hash,result_json,created_at) "+
         "SELECT ?,?,?,?,?,? WHERE changes()=1"
@@ -466,7 +477,7 @@ async function run(id,arg,env){
   if(writes[0].meta.changes!==1||writes[1].meta.changes!==1){
     const done=await duplicate(db,w,id,a.idempotency_key,fingerprint);
     if(done)return done;
-    E(409,"CONFLICT","Task version changed before compare-and-swap committed");
+    E(409,"CONFLICT","Task, source, pairing, or change-feed cutoff changed before compare-and-swap committed");
   }
   return result;
  }
