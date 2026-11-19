@@ -8,6 +8,7 @@ A historical S2 outbox receipt is not proof of current remote freshness.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -54,7 +55,7 @@ def _read_only(path: Path) -> sqlite3.Connection:
 def _preview_snapshot(shadow: Path, task_id: str) -> dict:
     if not shadow.name.endswith(".pull-preview.sqlite3"):
         raise ReconciliationError("Expected isolated S4 pull-preview, not a task database")
-    with _read_only(shadow) as db:
+    with closing(_read_only(shadow)) as db:
         db.execute("PRAGMA query_only=ON")
         if db.execute("PRAGMA user_version").fetchone()[0] != 1:
             raise ReconciliationError("Unsupported S4 preview schema")
@@ -113,7 +114,7 @@ def _source_check(journal: Path, snapshot: dict, task_id: str,
 
 
 def _local_view(canonical: Path, task_id: str) -> tuple[dict | None, list[str]]:
-    with _read_only(canonical) as db:
+    with closing(_read_only(canonical)) as db:
         db.execute("PRAGMA query_only=ON")
         if db.execute("PRAGMA user_version").fetchone()[0] != 3:
             raise ReconciliationError("Canonical Rust task schema must be version 3")
