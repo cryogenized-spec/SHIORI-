@@ -104,6 +104,18 @@ class OwnerApplyTests(unittest.TestCase):
         for secret in (PRIVATE_TITLE, PRIVATE_NOTES, TASK, EVENT, RECEIPT):
             self.assertNotIn(secret, json.dumps(result))
 
+    def test_owner_can_explicitly_display_exact_reviewed_content(self):
+        handler, calls, data = self.network()
+        with patch.object(pilot, "api_call", side_effect=handler):
+            output = owner.run(**self.args(show_review_content=True))
+        self.assertIn("reviewed_remote_content", output)
+        self.assertEqual(output["reviewed_remote_content"]["title"], PRIVATE_TITLE)
+        self.assertEqual(output["reviewed_remote_content"]["notes"], PRIVATE_NOTES)
+        self.assertEqual(output["remote_observation_sha256_to_approve"],
+                         data["record_sha256"])
+        self.assertFalse(output["local_apply_committed"])
+        self.assertEqual(len(calls), 2)
+
     def test_approval_without_exact_digest_is_rejected_before_apply(self):
         self.fixture.stage_remote(version=2, notes="Remote changed")
         handler, calls, data = self.network(revision=2, notes="Remote changed")
