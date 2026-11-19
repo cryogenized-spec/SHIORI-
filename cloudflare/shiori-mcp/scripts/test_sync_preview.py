@@ -126,6 +126,29 @@ class RemoteManifestTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,"Manifest not strictly ordered"):
                         load_remote_manifest("https://example.invalid","synthetic-token")
 
+    def test_remote_manifest_rejects_cross_page_cursor_regression(self):
+        def row(task_id):
+            return {"id":task_id,"version":1,"status":"todo",
+                    "updated_at":"2026-11-19T00:00:00Z","deleted_at":None}
+
+        requests = []
+        def fake_urlopen(request, timeout):
+            cursor = json.loads(request.data).get("cursor")
+            requests.append(cursor)
+            if cursor is None:
+                items, next_cursor = [row("b")], "b"
+            else:
+                items, next_cursor = [row("a")], None
+            payload={"ok":True,"operation_id":"sync.manifest.read","data":{
+                "items":items,"next_cursor":next_cursor,
+                "consistent_snapshot":False,"local_rust_sync":False}}
+            return io.BytesIO(json.dumps(payload).encode())
+
+        with patch("sync_preview.urlopen", side_effect=fake_urlopen):
+            with self.assertRaisesRegex(ValueError,"Manifest not strictly ordered"):
+                load_remote_manifest("https://example.invalid","synthetic-token")
+        self.assertEqual(requests,[None,"b"])
+
     def test_remote_manifest_refuses_task_content_or_false_sync_claims(self):
         bad={"ok":True,"operation_id":"sync.manifest.read","data":{
             "items":[{"id":"a","version":1,"status":"todo",
