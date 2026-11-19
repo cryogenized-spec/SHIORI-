@@ -203,6 +203,12 @@ def fingerprint(row:dict)->str:
 
 def compare(local:list[dict],remote:list[dict])->dict:
     """Do not infer task identity from titles: classify as potential only."""
+    # The legacy full-record preview must not hide repeated identities either.
+    # Never include task identifiers in errors or output.
+    for source, rows in (("local", local), ("remote", remote)):
+        ids = [row["id"] for row in rows]
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"Duplicate {source} task identities in preview")
     local_by={x["id"]:x for x in local}
     remote_by={x["id"]:x for x in remote}
     common=set(local_by)&set(remote_by)
