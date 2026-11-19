@@ -11,6 +11,8 @@ import hashlib
 import json
 from uuid import UUID
 
+import sync_pull_preview as preview
+
 FIELDS = {"title", "notes", "project", "status", "priority"}
 STATUSES = {"todo", "in_progress", "done"}
 PRIORITIES = {"low", "medium", "high", "urgent"}
@@ -30,22 +32,17 @@ def valid_uuid(raw: object) -> bool:
 
 
 def _schema(snapshot: object, name: str) -> dict:
-    if (not isinstance(snapshot, dict)
-            or snapshot.get("consistent_snapshot") is not True
-            or snapshot.get("automatic_apply") is not False
-            or snapshot.get("local_rust_sync") is not False
-            or not isinstance(snapshot.get("record"), dict)
-            or not isinstance(snapshot.get("record_sha256"), str)
-            or len(snapshot["record_sha256"]) != 64
-            or not isinstance(snapshot.get("depends_on"), list)
-            or type(snapshot.get("cutoff")) is not int):
-        raise ConflictError(f"{name} has invalid or unverified snapshot metadata")
-    record = snapshot["record"]
-    if (not valid_uuid(record.get("id"))
-            or type(record.get("version")) is not int
-            or record["version"] < 1
-            or any(field not in record for field in FIELDS | {"deleted_at"})):
-        raise ConflictError(f"{name} has invalid task identity or revision")
+    """Verify the complete atomic S4 observation before planning any CAS edit."""
+    if not isinstance(snapshot, dict):
+        raise ConflictError(f"{name} has invalid snapshot metadata")
+    record = snapshot.get("record")
+    task_id = record.get("id") if isinstance(record, dict) else None
+    if not valid_uuid(task_id):
+        raise ConflictError(f"{name} has invalid task identity")
+    try:
+        preview.validate_snapshot(snapshot, task_id)
+    except preview.PullPreviewError as exc:
+        raise ConflictError(f"{name} has invalid or unverified snapshot: {exc}") from exc
     return record
 
 
