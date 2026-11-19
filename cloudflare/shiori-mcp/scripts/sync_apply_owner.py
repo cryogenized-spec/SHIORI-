@@ -171,7 +171,8 @@ def _local_apply(cli: Path, canonical: Path, backup: Path,
 def run(canonical: Path, shadow: Path, outbox: Path, token_file: Path,
         task_id: str, event_id: str, *, confirmed_content: bool,
         approved_digest: str | None = None, owner_approved: bool = False,
-        backup: Path | None = None, cli: Path | None = None) -> dict:
+        backup: Path | None = None, cli: Path | None = None,
+        show_review_content: bool = False) -> dict:
     if not confirmed_content:
         raise ApplyError("Explicit --confirm-read-content is required")
     if owner_approved and (
@@ -198,6 +199,13 @@ def run(canonical: Path, shadow: Path, outbox: Path, token_file: Path,
         "cloudflare_mutated": False,
         "local_rust_sync": False,
     }
+    if show_review_content:
+        # Private title/notes are printed ONLY on explicit additional request
+        # to help the owner genuinely inspect the exact digest being approved.
+        # Do not include task IDs, journal event IDs or owner token.
+        result["reviewed_remote_content"] = {
+            key: live["record"][key] for key in SOURCE_COMMON
+        }
     if not owner_approved:
         # This first phase is useful by itself; the owner can independently
         # inspect the selected remote content, then approve its exact digest.
@@ -241,6 +249,7 @@ def main() -> int:
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--event-id", required=True)
     parser.add_argument("--confirm-read-content", action="store_true")
+    parser.add_argument("--show-review-content", action="store_true")
     parser.add_argument("--approve-digest")
     parser.add_argument("--confirm-apply", action="store_true")
     parser.add_argument("--backup-to", type=Path)
@@ -254,6 +263,7 @@ def main() -> int:
             approved_digest=args.approve_digest,
             owner_approved=args.confirm_apply, backup=args.backup_to,
             cli=args.cli,
+            show_review_content=args.show_review_content,
         )
         print(json.dumps(report, sort_keys=True, indent=2))
         return 0
