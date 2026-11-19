@@ -213,3 +213,6 @@
 .native-tag-editor p{font-size:11px;line-height:1.5;color:var(--muted)}
 .native-tag-editor button{min-height:44px;justify-self:start}
 .native-tag-editor :focus-visible{outline:2px solid var(--plum);outline-offset:2px}
+
+/* Mobile FAB taps must not be delayed/converted to a scroll gesture. */
+.mobile-fab{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
