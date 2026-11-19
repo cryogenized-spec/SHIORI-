@@ -64,6 +64,16 @@ pub struct TaskFilter<'a> {
     pub include_deleted: bool,
 }
 
+/// Validated common task fields from a *separately verified* remote record.
+/// Local-only scheduling, assignment and dependency fields are intentionally absent.
+pub struct RemoteCommonFields<'a> {
+    pub title: &'a str,
+    pub notes: &'a str,
+    pub project: &'a str,
+    pub priority: Priority,
+    pub status: TaskStatus,
+}
+
 pub struct SqliteStore {
     db: Connection,
 }
@@ -411,11 +421,7 @@ impl SqliteStore {
         &self,
         id: &str,
         expected_local_version: i64,
-        title: &str,
-        notes: &str,
-        project: &str,
-        priority: Priority,
-        status: TaskStatus,
+        fields: &RemoteCommonFields<'_>,
         owner_approved: bool,
     ) -> Result<Task, StorageError> {
         if !owner_approved {
@@ -425,7 +431,13 @@ impl SqliteStore {
         if task.version != expected_local_version {
             return Err(StorageError::RevisionConflict);
         }
-        if task.apply_reviewed_remote_common_fields(title, notes, project, priority, status)? {
+        if task.apply_reviewed_remote_common_fields(
+            fields.title,
+            fields.notes,
+            fields.project,
+            fields.priority,
+            fields.status,
+        )? {
             // Existing SQL CAS enforces version and active-tombstone guard.
             // It commits all five fields atomically in a single UPDATE.
             self.update_existing(&task)?;
@@ -621,17 +633,15 @@ mod tests {
         task.estimate_minutes = Some(40);
         task.assignee_id = Some("local".to_owned());
         store.insert(&task).unwrap();
+        let fields = RemoteCommonFields {
+            title: "Cloud title",
+            notes: "Cloud notes",
+            project: "Remote",
+            priority: Priority::High,
+            status: TaskStatus::Done,
+        };
         let changed = store
-            .apply_remote_common_fields_if_version(
-                &task.id,
-                1,
-                "Cloud title",
-                "Cloud notes",
-                "Remote",
-                Priority::High,
-                TaskStatus::Done,
-                true,
-            )
+            .apply_remote_common_fields_if_version(&task.id, 1, &fields, true)
             .unwrap();
         assert_eq!(changed.version, 2);
         let read = store.get(&task.id).unwrap();
@@ -646,16 +656,7 @@ mod tests {
         assert_eq!(read.created_at, task.created_at);
         assert_eq!(
             store
-                .apply_remote_common_fields_if_version(
-                    &task.id,
-                    2,
-                    "Cloud title",
-                    "Cloud notes",
-                    "Remote",
-                    Priority::High,
-                    TaskStatus::Done,
-                    true,
-                )
+                .apply_remote_common_fields_if_version(&task.id, 2, &fields, true)
                 .unwrap()
                 .version,
             2,
@@ -668,17 +669,15 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
         let task = Task::new("Important", "SHIORI", Priority::Medium, None).unwrap();
         store.insert(&task).unwrap();
+        let fields = RemoteCommonFields {
+            title: "Cloud edit",
+            notes: "notes",
+            project: "Cloud",
+            priority: Priority::Urgent,
+            status: TaskStatus::Done,
+        };
         let update = |version, approved| {
-            store.apply_remote_common_fields_if_version(
-                &task.id,
-                version,
-                "Cloud edit",
-                "notes",
-                "Cloud",
-                Priority::Urgent,
-                TaskStatus::Done,
-                approved,
-            )
+            store.apply_remote_common_fields_if_version(&task.id, version, &fields, approved)
         };
         assert!(matches!(
             update(1, false),
@@ -690,17 +689,9 @@ mod tests {
         ));
         assert_eq!(store.get(&task.id).unwrap().version, 1);
         assert_eq!(store.get(&task.id).unwrap().title, "Important");
+        let invalid = RemoteCommonFields { title: "", ..fields };
         assert!(matches!(
-            store.apply_remote_common_fields_if_version(
-                &task.id,
-                1,
-                "",
-                "notes",
-                "Cloud",
-                Priority::Urgent,
-                TaskStatus::Done,
-                true,
-            ),
+            store.apply_remote_common_fields_if_version(&task.id, 1, &invalid, true),
             Err(StorageError::Domain(TaskError::EmptyTitle))
         ));
         assert_eq!(store.get(&task.id).unwrap().version, 1);
