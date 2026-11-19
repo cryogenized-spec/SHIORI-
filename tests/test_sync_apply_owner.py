@@ -1,5 +1,6 @@
 """S8 owner-controlled live S2/S4-to-Rust apply, synthetic proof checks only."""
 import json
+import hashlib
 from pathlib import Path
 import sqlite3
 import sys
@@ -23,6 +24,20 @@ class OwnerApplyTests(unittest.TestCase):
         )
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
+        # S6's intentionally minimal source envelope omitted fields that a
+        # genuine Rust Task serialization always contains. Upgrade only this
+        # S8 fixture to the full five-field original S2 common projection.
+        original = json.loads(self.fixture.payload)
+        original["task"]["project"] = "Personal"
+        original["task"]["priority"] = "medium"
+        self.fixture.payload = json.dumps(original, separators=(",", ":"))
+        self.fixture.source_hash = hashlib.sha256(
+            self.fixture.payload.encode("utf8")
+        ).hexdigest()
+        with sqlite3.connect(self.fixture.journal) as db:
+            db.execute("UPDATE sync_outbox SET payload_json=? WHERE event_id=?",
+                       (self.fixture.payload, EVENT))
+        self.fixture.stage_remote()
         self.token = self.fixture.root / "owner-token"
         self.token.write_text("TEST_ONLY_OWNER_TOKEN", encoding="utf8")
         self.token.chmod(0o600)
