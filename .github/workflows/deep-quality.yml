@@ -25,7 +25,7 @@ jobs:
         run: cargo +nightly fuzz run validate_title -- -max_total_time=45
       - name: Preserve crashing inputs
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: shiori-fuzz-crashes
           path: fuzz/artifacts/
@@ -48,7 +48,7 @@ jobs:
         run: cargo mutants --package shiori-core --timeout 90 --jobs 2 --output mutants-out
       - name: Archive mutation results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: shiori-mutation-report
           path: mutants-out/
@@ -69,7 +69,7 @@ jobs:
         run: cargo run --release --locked -p shiori-perf -- --rows 30000 > rust-stress.json
       - name: Save measurements
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: shiori-30k-stress-metrics
           path: rust-stress.json
