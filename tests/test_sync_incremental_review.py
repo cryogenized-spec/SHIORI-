@@ -149,6 +149,30 @@ class IncrementalReviewTests(unittest.TestCase):
         report, _ = self.run_review(version=2, notes="Silent remote edit")
         self.assertEqual(report["status"], "unversioned_mutation_conflict")
 
+    def test_remote_timestamp_change_without_version_is_untrusted(self):
+        handler, _, data = self.remote()
+        data["record"]["updated_at"] = "2026-11-19T23:00:00Z"
+        observation = {
+            key: data[key] for key in (
+                "record", "depends_on", "source_import", "cutoff"
+            )
+        }
+        data["record_sha256"] = hashlib.sha256(json.dumps(
+            observation, ensure_ascii=False, separators=(",", ":")
+        ).encode()).hexdigest()
+        with patch.object(pilot, "api_call", side_effect=handler):
+            report = incremental.review(**self.args())
+        self.assertEqual(report["status"], "unversioned_mutation_conflict")
+        self.assertFalse(report["only_global_changefeed_cutoff_advanced"])
+
+    def test_regressed_global_cutoff_rejected_even_without_field_changes(self):
+        handler, _, _ = self.remote(cutoff=1)
+        with patch.object(pilot, "api_call", side_effect=handler):
+            with self.assertRaisesRegex(
+                incremental.DivergenceError, "cutoff regressed"
+            ):
+                incremental.review(**self.args())
+
     def test_revision_advanced_without_common_field_change_requires_review(self):
         with sqlite3.connect(self.canonical) as db:
             db.execute("UPDATE tasks SET estimate_minutes=41,version=3 WHERE id=?",
@@ -165,13 +189,7 @@ class IncrementalReviewTests(unittest.TestCase):
             with self.assertRaises(incremental.DivergenceError):
                 incremental.review(**self.args())
             remote.assert_not_called()
-        with sqlite3.connect(self.checkpoint) as db:
-            db.execute("UPDATE checkpoints SET local_common_sha256=? WHERE task_id=?",
-                       (self.fx.fx.fixture.sample(
-                           version=2, notes="Reviewed new cloud note"
-                       )[1], TASK))
-        # Restore checkpoint source data from original fixture rather than
-        # relying on a full-observation digest for a common-fields digest.
+        # Restore the source common-fields digest, never the full S4 observation.
         import sync_revision_checkpoint as ck
         with sqlite3.connect(self.checkpoint) as db:
             db.execute("UPDATE checkpoints SET local_common_sha256=? WHERE task_id=?",
