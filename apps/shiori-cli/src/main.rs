@@ -143,6 +143,16 @@ enum Command {
         #[arg(long)]
         journal: Option<PathBuf>,
     },
+    /// Create a new private, integrity-checked canonical SQLite snapshot.
+    /// Never uploads, overwrites an old backup, or changes any task.
+    SyncBackup {
+        /// A NEW private filename ending in .shiori-backup.sqlite3
+        #[arg(long)]
+        to: PathBuf,
+        /// Explicitly consent to a second copy containing task titles/notes.
+        #[arg(long)]
+        confirm_private_copy: bool,
+    },
     /// Update only a task's visual placement, guarded by its view revision.
     #[command(hide = true)]
     SpatialSet {
@@ -596,6 +606,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 })
                 .collect::<Result<_, shiori_storage::StorageError>>()?;
             bridge_rows(b"SHIORI-MANIFEST-1\n", &rows)?;
+        }
+        Command::SyncBackup {
+            to,
+            confirm_private_copy,
+        } => {
+            store.backup_private_copy(&to, confirm_private_copy)?;
+            println!("Private SQLite snapshot created and verified. Canonical tasks unchanged.");
         }
         Command::SpatialSet {
             id,
