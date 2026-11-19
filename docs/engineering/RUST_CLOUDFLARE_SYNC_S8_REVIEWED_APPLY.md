@@ -7,7 +7,7 @@ This workflow **does write canonical Rust task data when and only when its secon
 ## Preconditions
 
 - A canonical Rust SQLite v3 task exists, is active, and has a previously **acknowledged original S2 first-import** in the private journal.
-- A private \`.pull-preview.sqlite3\` file already holds an explicit owner-selected S4 snapshot for that very task.
+- A private `.pull-preview.sqlite3` file already holds an explicit owner-selected S4 snapshot for that very task.
 - All four inputs (Rust DB, preview, S2 journal, owner token file) are existing regular private 0600 files; no symlinks, hardlink aliases or insecure files. The CLI binary and backup destination are local to a trusted workstation.
 - The owner has inspected the selected cloud record's title, notes, project, priority and status in a trusted SHIORI view **before approving**. Only five common fields are eligible.
 - The local task's five common fields must still exactly match the original S2 source. If a different offline device or local editing changed one of these fields, **stop for manual three-way conflict resolution** rather than overwrite it. Local-only due dates, effort estimates, assignees and completion semantics remain Rust-owned.
@@ -17,7 +17,7 @@ This workflow **does write canonical Rust task data when and only when its secon
 
 Run the following with the desired *original* task and event IDs (do not share token content or private task files):
 
-\`\`\`bash
+```bash
 python3 cloudflare/shiori-mcp/scripts/sync_apply_owner.py \
   --canonical "$HOME/.local/share/shiori/tasks.sqlite3" \
   --outbox "$HOME/.local/share/shiori/tasks.sync.sqlite3" \
@@ -26,24 +26,26 @@ python3 cloudflare/shiori-mcp/scripts/sync_apply_owner.py \
   --task-id '<ORIGINAL-TASK-UUID>' \
   --event-id 'sync1:<DEVICE-UUID>:<ORIGINAL-TASK-UUID>:1' \
   --confirm-read-content
-\`\`\`
+```
 
 It checks original S2 acknowledgement, exact S4 staged-record hash, local source/common fields and dependencies, then makes **two owner-authenticated HTTPS reads**: the original import receipt and an atomic current remote S4 task observation. It requires the fresh observation to match the private staging hash, original receipt identity, current remote revision and graph. The stdout report contains revision numbers, mismatch counts and the SHA-256 of the selected remote observation, **never titles or notes**. A changed cloud revision requires a newly staged preview and another review.
 
-The SHA-256 printed as \`remote_observation_sha256_to_approve\` is the **exact observed record to approve**, not a capability token or a substitute for inspecting its content. Do not approve a hash just because it appears in a report.
+For direct inspection on a trusted local terminal, add `--show-review-content`. This separate opt-in prints the selected task's **five common field values**, including potentially sensitive title and notes, next to the observation SHA-256. Without it, the script does not print private task content. Do not use this flag in shared recordings or logs.
+
+The SHA-256 printed as `remote_observation_sha256_to_approve` is the **exact observed record to approve**, not a capability token or a substitute for inspecting its content. Do not approve a hash just because it appears in a report.
 
 ## Phase 2 — One reviewed local apply
 
 After inspecting the cloud task and verifying phase 1, run the same command with these additional options:
 
-\`\`\`bash
+```bash
   --approve-digest '<REVIEWED_REMOTE_OBSERVATION_SHA256>' \
   --confirm-apply \
   --backup-to "$HOME/.local/share/shiori/pre-apply-unique.shiori-backup.sqlite3" \
   --cli /trusted/path/to/shiori
-\`\`\`
+```
 
-The owner CLI call uses JSON supplied **only through stdin**, never through process arguments or its success output. It rechecks the specific local task's expected revision and prerequisites. It creates a new private, verified SQLite backup via the already merged S7 \`VACUUM INTO\` implementation before it attempts the one-task conditional CAS update. The final Rust store method preserves local-only fields and bumps revision once. An existing backup path, missing approval, unsafe input or changed version/graph fails closed. The Python orchestrator reads the local task back to confirm the five agreed fields and expected revision. Its report does not assert \`automatic_sync=true\` or mutate Cloudflare.
+The owner CLI call uses JSON supplied **only through stdin**, never through process arguments or its success output. It rechecks the specific local task's expected revision and prerequisites. It creates a new private, verified SQLite backup via the already merged S7 `VACUUM INTO` implementation before it attempts the one-task conditional CAS update. The final Rust store method preserves local-only fields and bumps revision once. An existing backup path, missing approval, unsafe input or changed version/graph fails closed. The Python orchestrator reads the local task back to confirm the five agreed fields and expected revision. Its report does not assert `automatic_sync=true` or mutate Cloudflare.
 
 **Crash/retry semantics:** if the local CLI times out, is interrupted after commit, or post-apply verification is inconclusive, the outcome is *unknown*, not proven false. Inspect the local task revision and preserved pre-apply backup **before any retry**. Never reuse an existing backup filename. Rollback remains a separate future recovery workflow; the program will not silently revert possibly newer offline edits.
 
@@ -51,12 +53,12 @@ The owner CLI call uses JSON supplied **only through stdin**, never through proc
 
 ## Validation
 
-\`\`\`bash
+```bash
 python3 -m unittest discover -s tests -p 'test_sync_apply_owner.py' -v
 cargo test -p shiori-cli
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-\`\`\`
+```
 
 The tests exercise synthetic original S2 receipt and S4 content, owner approval/digest mismatch, simultaneous local offline edits, remote content changes, tombstones, dependency differences, missing/unsafe inputs, existing backup, post-apply uncertainty and Rust single-revision CAS/backup. **No real account or task data is touched by CI.**
 
