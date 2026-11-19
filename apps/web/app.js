@@ -999,13 +999,41 @@
       closeEdit();
     });
   });
-  // The persistent mobile New Task FAB gets a direct handler instead of
-  // relying on a document-level bubbling click in Android WebView. The
-  // delegated fallback below remains for newly-rendered add buttons.
+  // Persistent New Task buttons use a direct click handler. Android 15
+  // occasionally delivers genuine touch pointerdown/up yet WebView emits no
+  // synthesized click. Fall back ONLY to a short, trusted primary touch
+  // release that began inside the same enabled button and did not drag.
+  // Never synthesize click(), replay a task action or consume browser tests.
   document.querySelectorAll('button[data-add]').forEach(button=>{
+    let nativePress=null;
+    let nativeOpenedAt=-Infinity;
+    button.addEventListener('pointerdown',event=>{
+      if(!event.isTrusted||event.pointerType!=='touch'||!event.isPrimary||button.disabled)return;
+      nativePress={id:event.pointerId,x:event.clientX,y:event.clientY,at:performance.now()};
+    });
+    button.addEventListener('pointercancel',()=>{nativePress=null;});
+    button.addEventListener('pointerup',event=>{
+      const press=nativePress;
+      nativePress=null;
+      if(!press||button.disabled||!event.isTrusted||
+          event.pointerType!=='touch'||!event.isPrimary||event.pointerId!==press.id)return;
+      const duration=performance.now()-press.at;
+      const distance=Math.hypot(event.clientX-press.x,event.clientY-press.y);
+      const bounds=button.getBoundingClientRect();
+      if(duration<0||duration>650||distance>14||
+         event.clientX<bounds.left||event.clientX>bounds.right||
+         event.clientY<bounds.top||event.clientY>bounds.bottom)return;
+      nativeOpenedAt=performance.now();
+      event.preventDefault();
+      event.stopPropagation();
+      openModal();
+    });
     button.addEventListener('click',event=>{
       event.preventDefault();
       event.stopPropagation();
+      // Do not reopen the modal when the browser *also* synthesizes click
+      // after the trusted touch-up path already handled that same gesture.
+      if(performance.now()-nativeOpenedAt<950)return;
       openModal();
     });
   });
