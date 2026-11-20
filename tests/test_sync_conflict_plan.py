@@ -150,6 +150,21 @@ class ConflictPlanningTests(unittest.TestCase):
                 with self.assertRaisesRegex(sync.ConflictError, "Malformed approved plan"):
                     sync.approved_request(changed, A, owner_approved=True)
 
+    def test_approved_request_is_detached_from_mutable_plan(self):
+        planned = sync.plan(snap(), snap(), {"notes": "Reviewed note"})
+        request = sync.approved_request(planned, A, owner_approved=True)
+        planned["patch"]["notes"] = "Unreviewed change"
+        self.assertEqual(request["patch"], {"notes": "Reviewed note"})
+        refreshed = sync.approved_request(planned, A, owner_approved=True)
+        self.assertNotEqual(request["idempotency_key"], refreshed["idempotency_key"])
+
+    def test_approval_requires_literal_true(self):
+        planned = sync.plan(snap(), snap(), {"status": "done"})
+        for value in ("false", 1, None, False):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(sync.ConflictError, "approve"):
+                    sync.approved_request(planned, A, owner_approved=value)
+
     def test_repeated_owner_approval_generates_same_idempotency_key(self):
         planned = sync.plan(snap(), snap(), {"notes": "Sensitive private note"})
         req1 = sync.approved_request(planned, A, owner_approved=True)
