@@ -64,6 +64,16 @@ pub fn apply(
         priority: parsed.priority,
         status: parsed.status,
     };
+    // Validate the domain mutation on an isolated copy before creating a backup.
+    // The real storage operation repeats validation and revision checks.
+    let mut candidate = local.clone();
+    candidate.apply_reviewed_remote_common_fields(
+        fields.title,
+        fields.notes,
+        fields.project,
+        fields.priority,
+        fields.status,
+    )?;
     // Backup is made before any possible write; its creation fails closed if
     // the destination already exists, is a symlink or cannot be verified.
     store.backup_private_copy(backup, true)?;
@@ -130,6 +140,7 @@ mod tests {
             b"{\"id\":\"untrusted\",\"notes\":\"PRIVATE\"}".to_vec(),
             task_json(&task.id, "PRIVATE", &["z", "a"]),
             task_json(&task.id, "PRIVATE", &[&task.id]),
+            task_json(&task.id, &"x".repeat(9000), &[]),
             vec![b'a'; MAX_REVIEW_BYTES + 1],
         ] {
             assert!(apply(&store, &task.id, 1, &backup, true, &payload).is_err());
