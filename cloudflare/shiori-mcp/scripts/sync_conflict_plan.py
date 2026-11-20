@@ -118,7 +118,7 @@ def plan(base: dict, remote: dict, local_fields: dict) -> dict:
 
 def approved_request(result: dict, device_id: str, *, owner_approved: bool) -> dict:
     """Construct but NEVER send a bounded version/hash pinned write proposal."""
-    if not owner_approved:
+    if owner_approved is not True:
         raise ConflictError("Owner must explicitly review and approve the proposed changed fields")
     if not valid_uuid(device_id):
         raise ConflictError("Paired device ID must be a canonical UUID")
@@ -144,6 +144,9 @@ def approved_request(result: dict, device_id: str, *, owner_approved: bool) -> d
                 or (field == "status" and value not in STATUSES)
                 or (field == "priority" and value not in PRIORITIES)):
             raise ConflictError("Malformed approved plan field")
+    # Freeze the validated values so subsequent caller edits cannot change
+    # the request without also changing its idempotency key.
+    patch = dict(patch)
     canonical = json.dumps({
         "device": device_id, "task": result["remote_task_id"],
         "expected_revision": result["expected_remote_revision"],
