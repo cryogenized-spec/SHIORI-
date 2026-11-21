@@ -76,3 +76,9 @@ A November 15 authorization failure exposed an asynchronous error boundary: `fet
 ## 2026-11-15: authorization redirect header fix
 
 After Shiori had successfully accepted the owner code, Cloudflare returned a generic `Authorization service unavailable` page. The post-authorization handler constructed a redirect with `Response.redirect()`, then attempted to mutate its **immutable** headers to clear the approval cookie. That throws `TypeError` per the Fetch response-header guard, *after* the OAuth grant work. The `owner-redirect.js` helper now constructs a `new Response(null, {status:302, headers:{...}})` with `Location`, secure cookie expiration, and no-store already attached. The pending KV record is deleted only after response creation. Regression tests reproduce the original `TypeError` and verify the correct 302/cookie response. Full owner pairing was subsequently completed; no existing tokens or approval secret were changed by this specific redirect fix.
+
+### S4/S5 OAuth rollout requirement
+
+`shiori_sync_record_snapshot_read` needs `mcp:read` only, but is an explicitly requested *content-bearing* operation; `include_content=true` remains mandatory. `shiori_sync_record_apply` is an owner-approved mutation and must retain `mcp:write`. Unknown tools always require write scope and still fail independently if not implemented.
+
+**Deployment:** The checked-in `dist/shiori-resource.js` is generated output and may lag the latest `src/worker.js`. Run `npm ci && npm run check` from this OAuth directory, then upload the **freshly built** `dist/shiori-resource.js` to `shiori-mcp-oauth`, preserving its existing `AUTH_SERVER` service, D1 and workspace bindings. Never deploy an old compiled 31-operation bundle while claiming 33 exposed MCP tools. GitHub CI passing verifies the source/build, not a live resource deployment.
