@@ -28,8 +28,10 @@ const nheight=n=>(state.z<.48?76:(n.kind==='document'?65:(n.kind==='folder'?80:(
 let nodeIndex=new Map(state.nodes.map(n=>[n.id,n]));
 const byId=id=>nodeIndex.get(id)||state.nodes.find(x=>x.id===id);
 let visibleElements=new Map(),paintRAF=0,renderRevision=-1,minimapRevision=-1,edgeStamp=null,lodCompact=null;
-const PERF={visibleNodes:0,visibleEdges:0,edgeDraws:0,cameraUpdates:0};
-function invalidateLayout(){state.sceneRevision++;edgeStamp=null;minimapRevision=-1}
+const edgePathCache=new Map();
+let smoothMode=true;
+const PERF={visibleNodes:0,visibleEdges:0,edgeDraws:0,cameraUpdates:0,edgeCacheHits:0,edgeCacheMisses:0};
+function invalidateLayout(){state.sceneRevision++;edgeStamp=null;minimapRevision=-1;edgePathCache.clear()}
 function worldBounds(padding=240){const st=$('stage'),left=(-state.x)/state.z,top=(-state.y)/state.z;return {l:left-padding/state.z,r:left+(st.clientWidth/state.z)+padding/state.z,t:top-padding/state.z,b:top+(st.clientHeight/state.z)+padding/state.z};}
 function syncVisibleNodes(reset=false){const host=$('nodes'),bounds=worldBounds(),keep=new Set();if(reset){host.replaceChildren();visibleElements.clear();}for(const n of state.nodes){if(n.x>bounds.r||n.y>bounds.b||n.x+nwidth(n)<bounds.l||n.y+nheight(n)<bounds.t)continue;keep.add(n.id);let el=visibleElements.get(n.id);if(!el){el=makeNode(n);visibleElements.set(n.id,el);host.append(el);}else{el.classList.toggle('selected',n.id===state.selected);el.classList.toggle('locked',state.locked);}}for(const [id,el] of visibleElements){if(keep.has(id)||(state.dragging?.type==='node'&&state.dragging.id===id))continue;el.remove();visibleElements.delete(id)}PERF.visibleNodes=visibleElements.size;}
 function schedulePaint(){if(paintRAF)return;paintRAF=requestAnimationFrame(()=>{paintRAF=0;syncVisibleNodes();const b=worldBounds(140);const sig=state.sceneRevision+'|'+state.route+'|'+(state.z<.48);if(!edgeStamp||edgeStamp.sig!==sig||b.l<edgeStamp.b.l||b.r>edgeStamp.b.r||b.t<edgeStamp.b.t||b.b>edgeStamp.b.b){drawEdges();}if(minimapRevision!==state.sceneRevision){drawMinimap();minimapRevision=state.sceneRevision;}})}
@@ -84,7 +86,15 @@ function drawEdges(){
  root.replaceChildren();root.setAttribute('width',4000);root.setAttribute('height',2600);const defs=edgeEl('defs',{});const marker=edgeEl('marker',{id:'arrow',viewBox:'0 0 10 10',refX:8,refY:5,markerWidth:5,markerHeight:5,orient:'auto-start-reverse'});marker.append(edgeEl('path',{d:'M0 0 L10 5 L0 10 z',fill:'#9ebcda'}));defs.append(marker);root.append(defs);
  const dense=state.nodes.length>250;
  for(const [edge,a,b] of visible){const ax=a.x+nwidth(a)/2,ay=a.y+nheight(a)/2,bx=b.x+nwidth(b)/2,by=b.y+nheight(b)/2;const dx=bx-ax,dy=by-ay;const horizontal=Math.abs(dx)>Math.abs(dy);const sx=horizontal?ax+Math.sign(dx)*nwidth(a)/2:ax;const sy=horizontal?ay:ay+Math.sign(dy)*nheight(a)/2;const tx=horizontal?bx-Math.sign(dx)*nwidth(b)/2:bx;const ty=horizontal?by:by-Math.sign(dy)*nheight(b)/2;
- const d=dense&&state.route==='circuit'?`M${sx} ${sy} L${(sx+tx)/2} ${sy} L${(sx+tx)/2} ${ty} L${tx} ${ty}`:connectorPath(sx,sy,tx,ty,horizontal,dx,dy);const path=edgeEl('path',{d,class:`edge ${edge.kind==='reference'?'ref':''}`});if(edge.kind==='dependency')path.setAttribute('marker-end','url(#arrow)');root.append(path);}
+ const key=`${edge.from}\u0000${edge.to}\u0000${edge.kind}\u0000${state.route}\u0000${state.z<.48}`;
+  let d=smoothMode?edgePathCache.get(key):undefined;
+  if(d!==undefined)PERF.edgeCacheHits++;
+  else{
+   PERF.edgeCacheMisses++;
+   d=dense&&state.route==='circuit'? `M${sx} ${sy} L${(sx+tx)/2} ${sy} L${(sx+tx)/2} ${ty} L${tx} ${ty}` :connectorPath(sx,sy,tx,ty,horizontal,dx,dy);
+   if(smoothMode){if(edgePathCache.size>=1200)edgePathCache.clear();edgePathCache.set(key,d);}
+  }
+  const path=edgeEl('path',{d,class:`edge ${edge.kind==='reference'?'ref':''}`});if(edge.kind==='dependency')path.setAttribute('marker-end','url(#arrow)');root.append(path);}
  PERF.edgeDraws++;PERF.visibleEdges=visible.length;const b=worldBounds(750);edgeStamp={sig:state.sceneRevision+'|'+state.route+'|'+(state.z<.48),b};
 }
 function cancelLongPress(){if(state.longPress){clearTimeout(state.longPress);state.longPress=null;}}
@@ -194,11 +204,48 @@ $('linkForm').addEventListener('submit',e=>{e.preventDefault();const from=$('lin
 $('assistantBtn').onclick=showAssistant;$('assistantClose').onclick=()=>$('assistantDialog').close();$('assistantDismiss').onclick=()=>$('assistantDialog').close();
 $('assistantCopy').onclick=async()=>{const context={schema:'shiori.isw.prompt-context',version:1,scope:'display-only fixture',selected:state.selected,mode:state.mode,view:{connectorStyle:state.route},nodes:state.nodes.slice(0,40).map(n=>({id:n.id,title:n.title,kind:n.kind,status:n.status})),edges:state.edges.slice(0,80)};const prompt='Here is a read-only Shiori scene snapshot. Analyse or propose visual modifications as an explicit plan. Do not assume permission to modify canonical tasks or connected services.\n'+JSON.stringify(context,null,2);try{await navigator.clipboard.writeText(prompt);statusNote('Scene context prompt copied. No data was sent to a model.')}catch(_){statusNote('Clipboard unavailable: open from localhost/HTTPS or export Scene JSON instead.')}};
 // Escape dismisses the menu even when no dialog is open. Keyboard context key opens on canvas centre.
-window.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu();if((e.key==='F10'&&e.shiftKey)||e.key==='ContextMenu'){if(document.activeElement===stage){e.preventDefault();const r=stageRect();openMenu(r.left+r.width/2,r.top+r.height/2);}}});
+
+function setCanvasOnly(on){
+ document.body.classList.toggle('canvas-only',on);
+ $('canvasRestore').hidden=!on;
+ $('immersiveToggle').setAttribute('aria-pressed',String(on));
+ $('immersiveToggle').textContent=on?'↩ Restore UI':'⛶ Canvas only';
+ closeMenu();
+ if(on){$('importbox').classList.remove('active');$('aiDock').hidden=true;}
+ edgeStamp=null;schedulePaint();
+}
+$('immersiveToggle').addEventListener('click',()=>setCanvasOnly(true));
+$('canvasRestore').addEventListener('click',()=>setCanvasOnly(false));
+window.addEventListener('shiori-native-back',e=>{if(document.body.classList.contains('canvas-only')){e.preventDefault();setCanvasOnly(false);}},true);
+function setSmooth(on){
+ smoothMode=on;$('stage').classList.toggle('smooth-mode',on);
+ $('smoothToggle').setAttribute('aria-pressed',String(on));
+ $('smoothToggle').textContent=on?'Smooth: on':'Smooth: off';
+ edgePathCache.clear();edgeStamp=null;schedulePaint();
+ try{localStorage.setItem('shiori.isw.smooth.v1',on?'1':'0')}catch(_){}
+}
+$('smoothToggle').addEventListener('click',()=>setSmooth(!smoothMode));
+let portraitMode='auto';
+$('orientationBtn').addEventListener('click',()=>{
+ const next=portraitMode==='auto'?'landscape':'auto';
+ if(location.hostname==='appassets.androidplatform.net'){
+  // Android's allowlisted shiori-ui command adjusts Activity orientation in place.
+  window.location.href='shiori-ui://orientation/'+next;
+ }else if(next==='landscape'){
+  statusNote('Landscape layout is ready. Rotate the device to preview it in a browser.');
+ }
+ portraitMode=next;
+ $('orientationBtn').setAttribute('aria-pressed',String(next==='landscape'));
+ $('orientationBtn').textContent=next==='landscape'?'↻ Auto rotate':'↔ Landscape';
+});
+try{setSmooth(localStorage.getItem('shiori.isw.smooth.v1')!=='0')}catch(_){setSmooth(true)}
+window.addEventListener('resize',()=>{edgeStamp=null;cam();});
+
+window.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('canvas-only')){e.preventDefault();setCanvasOnly(false);}if(e.key==='Escape')closeMenu();if((e.key==='F10'&&e.shiftKey)||e.key==='ContextMenu'){if(document.activeElement===stage){e.preventDefault();const r=stageRect();openMenu(r.left+r.width/2,r.top+r.height/2);}}});
 
 window.addEventListener('keydown',e=>{if(e.target.matches('input'))return;if(e.key==='0'){e.preventDefault();fit()}if(e.key==='+'||e.key==='='){e.preventDefault();zoom(state.z*1.2)}if(e.key==='-'){e.preventDefault();zoom(state.z/1.2)}});
 setMode('derrick');if(window.matchMedia('(max-width: 750px)').matches)$('legend').hidden=true;stage.tabIndex=0;setTool('select');setLocked(true);
-window.__iswDebug={select:(id)=>{if(byId(id)){state.selected=id;render();}},loadLive:(scene)=>{state.mode='live';state.nodes=scene.nodes.map(n=>({...n}));state.edges=scene.edges.map(e=>({...e}));state.selected=state.nodes[0]?.id||null;state.x=30;state.y=40;state.z=.8;$('offshoreBtn').setAttribute('aria-pressed','false');$('githubBtn').setAttribute('aria-pressed','false');$('viewTitle').textContent='My spatial workspace';$('viewSub').textContent=scene.nodes.length+' real SQLite tasks · '+scene.edges.length+' verified dependencies';$('crumbLabel').textContent='LIVE RUST / SQLITE';const footer=document.querySelector('.inspector footer');if(footer)footer.textContent='LIVE RUST TASKS / VIEW POSITIONS · NO LIVE AI';if(state.nodes.length)fit();else render();},getNodes:()=>state.nodes,getSelected:()=>state.selected,getStats:()=>({...PERF,totalNodes:state.nodes.length,totalEdges:state.edges.length,locked:state.locked}),getCamera:()=>({x:state.x,y:state.y,z:state.z}),
+window.__iswDebug={select:(id)=>{if(byId(id)){state.selected=id;render();}},loadLive:(scene)=>{state.mode='live';state.nodes=scene.nodes.map(n=>({...n}));state.edges=scene.edges.map(e=>({...e}));state.selected=state.nodes[0]?.id||null;state.x=30;state.y=40;state.z=.8;$('offshoreBtn').setAttribute('aria-pressed','false');$('githubBtn').setAttribute('aria-pressed','false');$('viewTitle').textContent='My spatial workspace';$('viewSub').textContent=scene.nodes.length+' real SQLite tasks · '+scene.edges.length+' verified dependencies';$('crumbLabel').textContent='LIVE RUST / SQLITE';const footer=document.querySelector('.inspector footer');if(footer)footer.textContent='LIVE RUST TASKS / VIEW POSITIONS · NO LIVE AI';if(state.nodes.length)fit();else render();},getNodes:()=>state.nodes,getSelected:()=>state.selected,getStats:()=>({...PERF,totalNodes:state.nodes.length,totalEdges:state.edges.length,locked:state.locked,smoothMode,canvasOnly:document.body.classList.contains('canvas-only')}),getCamera:()=>({x:state.x,y:state.y,z:state.z}),
  populateFixture:(count=500)=>{const n=clamp(Math.floor(count),1,5000);state.nodes=Array.from({length:n},(_,i)=>({id:'bench-'+i,title:'Sample artefact '+i,kind:'task',status:i%11===0?'blocked':i%4===0?'review':'active',x:140+(i%70)*300,y:150+Math.floor(i/70)*190,role:'Synthetic benchmark',glyph:'▤'}));state.edges=state.nodes.slice(1).map((node,i)=>({from:'bench-'+i,to:node.id,kind:'dependency'}));state.selected='bench-0';state.mode='synthetic';state.x=25;state.y=5;state.z=.7;render();return state.nodes.length;},
  setCamera:(x,y,z)=>{state.x=x;state.y=y;state.z=clamp(z,.16,2.2);cam()},
  forceFlush:()=>{syncVisibleNodes();drawEdges();drawMinimap()}};

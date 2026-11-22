@@ -118,6 +118,46 @@ def run(report: Path):
                     results["views"][label] = {**perf, "calendar_toggle_p95_ms": round(render_times[37], 3),
                                                 "horizontal_overflow_px": max(0, widths["width"] - widths["viewport"])}
                     page.close()
+
+                # The spatial canvas keeps the demo scene and camera across UI hiding
+                # and portrait/landscape viewport reflows. No network or task writes.
+                canvas = browser.new_page(viewport={"width": 390, "height": 844})
+                canvas_errors = []
+                canvas.on("pageerror", lambda exc: canvas_errors.append(str(exc)))
+                canvas.goto(url + "isw.html", wait_until="load")
+                canvas.locator("#stage .node").first.wait_for()
+                initial_ids = canvas.evaluate("() => window.__iswDebug.getNodes().map(n => n.id)")
+                initial_camera = canvas.evaluate("() => window.__iswDebug.getCamera()")
+                require("T-004" in initial_ids, "Derrick fixture disappeared")
+                canvas.locator("#immersiveToggle").click()
+                require(canvas.locator("body").evaluate("(el) => el.classList.contains('canvas-only')"),
+                        "Canvas-only mode was not enabled")
+                require(canvas.locator(".top").is_hidden(), "Canvas-only mode still shows header")
+                require(canvas.locator("#canvasRestore").is_visible(), "Canvas restore control missing")
+                require(canvas.locator("#stage .node").count() > 0,
+                        "Canvas-only mode hid the spatial nodes")
+                canvas.locator("#canvasRestore").click()
+                require(canvas.locator(".top").is_visible(), "Workspace chrome was not restored")
+                require(canvas.evaluate("() => window.__iswDebug.getCamera()") == initial_camera,
+                        "Hiding chrome unexpectedly changed the saved camera")
+                canvas.locator("#smoothToggle").click()
+                require(canvas.locator("#smoothToggle").get_attribute("aria-pressed") == "false",
+                        "Smooth toggle did not disable")
+                canvas.locator("#smoothToggle").click()
+                require(canvas.locator("#smoothToggle").get_attribute("aria-pressed") == "true",
+                        "Smooth toggle did not re-enable")
+                canvas.set_viewport_size({"width": 844, "height": 390})
+                require(canvas.evaluate("() => window.__iswDebug.getNodes().map(n => n.id)") == initial_ids,
+                        "Landscape resize modified the scene")
+                require(canvas.evaluate("() => window.__iswDebug.getCamera()") == initial_camera,
+                        "Landscape resize modified the camera")
+                require(canvas.locator("#stage").bounding_box()["height"] > 250,
+                        "Landscape workspace became too short")
+                require(not canvas_errors, f"ISW canvas browser errors: {canvas_errors}")
+                results["views"]["isw_landscape"] = {"scene_nodes": len(initial_ids),
+                                                       "camera_preserved": True,
+                                                       "canvas_only": True}
+                canvas.close()
                 browser.close()
             finally:
                 if browser.is_connected():
