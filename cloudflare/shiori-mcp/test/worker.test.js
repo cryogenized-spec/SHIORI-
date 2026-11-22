@@ -1244,3 +1244,53 @@ test("S5 CAS rejects import lineage replacement between source read and transact
  assert.equal(e.DB.db.prepare("SELECT version FROM remote_tasks WHERE id=?").get(f.task_id).version,1);
  assert.equal(e.DB.db.prepare("SELECT COUNT(*) AS n FROM idempotency WHERE operation_id='sync.record.apply'").get().n,0);
 });
+
+test("one ChatGPT conversation can compose remote tasks, dependencies and a spatial diagram",async()=>{
+ const e=env();
+ const inspection=await call(e,"/api/v1/ops/tasks.create",request("mixed-create-inspection",{title:"Inspect equipment"}));
+ const handoff=await call(e,"/api/v1/ops/tasks.create",request("mixed-create-handoff",{title:"Handoff equipment"}));
+ assert.equal(inspection.status,200,JSON.stringify(inspection.data));
+ assert.equal(handoff.status,200,JSON.stringify(handoff.data));
+ const first=inspection.data.data.resource_id,second=handoff.data.data.resource_id;
+ assert.notEqual(first,second);
+ const linked=await call(e,"/api/v1/ops/tasks.dependencies.add",
+   request("mixed-link-handoff",{task_id:second,depends_on_id:first,expected_revision:1}));
+ assert.equal(linked.status,200,JSON.stringify(linked.data));
+ assert.equal(linked.data.data.revision,2);
+ const firstPosition=await call(e,"/api/v1/ops/spatial.node.position.set",
+   request("mixed-position-first",{node_id:first,x:120,y:180,expected_revision:0}));
+ const secondPosition=await call(e,"/api/v1/ops/spatial.node.position.set",
+   request("mixed-position-second",{node_id:second,x:580,y:180,expected_revision:0}));
+ assert.equal(firstPosition.status,200,JSON.stringify(firstPosition.data));
+ assert.equal(secondPosition.status,200,JSON.stringify(secondPosition.data));
+ const style=await call(e,"/api/v1/ops/spatial.edge.style.set",
+   request("mixed-style-circuit",{style:"circuit",expected_revision:0}));
+ assert.equal(style.status,200,JSON.stringify(style.data));
+ const scene=await call(e,"/api/v1/ops/spatial.scene.read",{workspace_id:"personal"});
+ assert.equal(scene.status,200);
+ const nodes=new Map(scene.data.data.scene.nodes.map(n=>[n.id,n]));
+ assert.equal(nodes.get(first).x,120);
+ assert.equal(nodes.get(second).x,580);
+ assert.equal(scene.data.data.scene.connector_style,"circuit");
+ assert(scene.data.data.scene.edges.some(edge=>
+   edge.from===first&&edge.to===second&&edge.kind==="blocks"));
+ assert.equal(scene.data.data.scene.synchronized_with_local_rust,false);
+ // Pure diagram movements never alter the task's canonical semantic revision.
+ const t1=await call(e,"/api/v1/ops/tasks.get",{workspace_id:"personal",task_id:first});
+ const t2=await call(e,"/api/v1/ops/tasks.get",{workspace_id:"personal",task_id:second});
+ assert.equal(t1.data.data.item.version,1);
+ assert.equal(t2.data.data.item.version,2);
+ // A stale assistant cannot overwrite a user's newer diagram edit.
+ const stale=await call(e,"/api/v1/ops/spatial.node.position.set",
+   request("mixed-stale-position",{node_id:first,x:900,y:900,expected_revision:0}));
+ assert.equal(stale.status,409);
+ // Mutating task status remains a separate, version-guarded operation.
+ const done=await call(e,"/api/v1/ops/tasks.status.set",
+   request("mixed-status-handoff",{task_id:second,status:"in_progress",expected_revision:2}));
+ assert.equal(done.status,200,JSON.stringify(done.data));
+ assert.equal(done.data.data.revision,3);
+ const end=await call(e,"/api/v1/ops/spatial.scene.read",{workspace_id:"personal"});
+ const endNode=end.data.data.scene.nodes.find(n=>n.id===second);
+ assert.equal(endNode.x,580);
+ assert.equal(endNode.status,"in_progress");
+});
