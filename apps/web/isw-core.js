@@ -215,6 +215,7 @@ function setCanvasOnly(on){
  edgeStamp=null;schedulePaint();
 }
 $('immersiveToggle').addEventListener('click',()=>setCanvasOnly(true));
+$('immersiveTool').addEventListener('click',()=>setCanvasOnly(true));
 $('canvasRestore').addEventListener('click',()=>setCanvasOnly(false));
 window.addEventListener('shiori-native-back',e=>{if(document.body.classList.contains('canvas-only')){e.preventDefault();setCanvasOnly(false);}},true);
 function setSmooth(on){
@@ -226,7 +227,7 @@ function setSmooth(on){
 }
 $('smoothToggle').addEventListener('click',()=>setSmooth(!smoothMode));
 let portraitMode='auto';
-$('orientationBtn').addEventListener('click',()=>{
+function toggleOrientation(){
  const next=portraitMode==='auto'?'landscape':'auto';
  if(location.hostname==='appassets.androidplatform.net'){
   // Android's allowlisted shiori-ui command adjusts Activity orientation in place.
@@ -237,7 +238,12 @@ $('orientationBtn').addEventListener('click',()=>{
  portraitMode=next;
  $('orientationBtn').setAttribute('aria-pressed',String(next==='landscape'));
  $('orientationBtn').textContent=next==='landscape'?'↻ Auto rotate':'↔ Landscape';
-});
+ $('rotateTool').textContent=next==='landscape'?'↻':'↔';
+ $('rotateTool').setAttribute('aria-label',next==='landscape'?'Return to automatic device rotation':'Switch to landscape layout');
+ $('rotateTool').setAttribute('aria-pressed',String(next==='landscape'));
+}
+$('orientationBtn').addEventListener('click',toggleOrientation);
+$('rotateTool').addEventListener('click',toggleOrientation);
 try{setSmooth(localStorage.getItem('shiori.isw.smooth.v1')!=='0')}catch(_){setSmooth(true)}
 window.addEventListener('resize',()=>{edgeStamp=null;cam();});
 
