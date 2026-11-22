@@ -211,7 +211,7 @@ function setCanvasOnly(on){
  $('immersiveToggle').setAttribute('aria-pressed',String(on));
  $('immersiveToggle').textContent=on?'↩ Restore UI':'⛶ Canvas only';
  closeMenu();
- if(on){$('importbox').classList.remove('active');$('aiDock').hidden=true;}
+ if(on){$('importbox').classList.remove('active');}
  edgeStamp=null;schedulePaint();
 }
 $('immersiveToggle').addEventListener('click',()=>setCanvasOnly(true));
