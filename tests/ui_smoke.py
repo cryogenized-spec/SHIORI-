@@ -129,7 +129,7 @@ def run(report: Path):
                 initial_ids = canvas.evaluate("() => window.__iswDebug.getNodes().map(n => n.id)")
                 initial_camera = canvas.evaluate("() => window.__iswDebug.getCamera()")
                 require("T-004" in initial_ids, "Derrick fixture disappeared")
-                canvas.locator("#immersiveToggle").click()
+                canvas.locator("#immersiveTool").click()
                 require(canvas.locator("body").evaluate("(el) => el.classList.contains('canvas-only')"),
                         "Canvas-only mode was not enabled")
                 require(canvas.locator(".top").is_hidden(), "Canvas-only mode still shows header")
@@ -140,6 +140,7 @@ def run(report: Path):
                 require(canvas.locator(".top").is_visible(), "Workspace chrome was not restored")
                 require(canvas.evaluate("() => window.__iswDebug.getCamera()") == initial_camera,
                         "Hiding chrome unexpectedly changed the saved camera")
+                require(canvas.locator("#rotateTool").is_visible(), "Landscape tool is not visible")
                 canvas.locator("#smoothToggle").click()
                 require(canvas.locator("#smoothToggle").get_attribute("aria-pressed") == "false",
                         "Smooth toggle did not disable")
