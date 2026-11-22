@@ -108,3 +108,6 @@ body.canvas-only .stage{height:100vh;height:100dvh}
  .ai-dock{max-height:calc(100dvh - 48px)}
  .hint{display:none}
 }
+
+/* Keep the two essential view controls visible without sideways scrolling. */
+@media(orientation:landscape) and (max-height:600px){.toolrail{grid-template-columns:repeat(2,33px);gap:3px}.toolrail button{height:32px}}
