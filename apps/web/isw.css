@@ -66,3 +66,48 @@
 .global-prefs{width:min(545px,calc(100vw - 18px));max-height:min(86vh,730px);padding:0;background:#161d2d;border:1px solid #616e8c;color:#f8f4ff;border-radius:15px;box-shadow:0 32px 110px #000d}.global-prefs::backdrop{background:#03040baa;backdrop-filter:blur(4px)}.global-head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #44506a;background:#20273b;padding:15px}.global-head button{border:0;background:#333d56;border-radius:8px;color:white;padding:7px 11px}.global-body{padding:17px;overflow:auto;max-height:calc(86vh - 65px)}.global-body h3{font-size:14px;margin:13px 0 8px}.global-body p,.global-body li{font-size:12px;line-height:1.7;color:#b8c5d9}.global-body code{font-size:11px;color:#ddc7ee}.global-body a{color:#a6d4ef}.global-body button{border:1px solid #566482;background:#303451;border-radius:9px;padding:8px 11px;color:#fff}.global-alert{border:1px solid #725c7d;background:#2c2740;border-radius:10px;padding:12px;color:#eddefd;font-size:12px;line-height:1.6}
 @media(max-width:740px){.ai-dock[data-side=right],.ai-dock[data-side=left]{top:58px;width:min(var(--ai-w),96vw)}.ad-thread-nav{flex-basis:120px;width:120px}.ad-head{gap:4px!important}.ai-dock .ad-head{padding:8px}.ai-orb{height:49px;width:49px}.ai-dock[data-side=bottom],.ai-dock[data-side=top]{height:min(var(--ai-h),78vh)}}
 
+
+
+/* Canvas-only mode deliberately hides chrome, never scene artefacts or their graph. */
+.canvas-restore[hidden]{display:none!important}
+.canvas-restore{position:absolute;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:30;display:block;min-width:44px;min-height:44px;padding:10px 14px;border:1px solid #897fa4;border-radius:12px;background:#1c1a2cee;color:#f5ecff;box-shadow:0 4px 16px #0007}
+.canvas-restore:focus-visible{outline:3px solid #a7def6;outline-offset:2px}
+body.canvas-only .top,body.canvas-only .toolrail,body.canvas-only .topinfo,body.canvas-only .inspector,body.canvas-only .minimap,body.canvas-only .legend,body.canvas-only .controls,body.canvas-only .hint,body.canvas-only .importbox,body.canvas-only .notice,body.canvas-only .ai-orb,body.canvas-only .ai-dock,body.canvas-only .ai-trash{display:none!important}
+body.canvas-only .stage{height:100vh;height:100dvh}
+.stage.smooth-mode .node{box-shadow:0 2px 8px #0005;background:#172338}
+.stage.smooth-mode .node.selected{box-shadow:0 0 0 3px #4ac3fa29}
+.stage.smooth-mode .grid-bg{opacity:.32}
+/* The native WebView allows landscape without reloading: keep the stage visible. */
+@media(max-width:800px){
+ .top{padding-inline:8px;gap:7px}
+ .brand{font-size:12px;letter-spacing:.1em;flex:none}
+ .top>a.pill-btn{flex:none}
+ .hdr-right{flex:1;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;white-space:nowrap}
+ .hdr-right::-webkit-scrollbar{display:none}
+ .hdr-right>*{flex:none}
+ .top .pill-btn{white-space:nowrap;min-height:37px}
+}
+@media(orientation:landscape) and (max-height:600px){
+ .top{height:48px}
+ .stage{height:calc(100vh - 48px);height:calc(100dvh - 48px)}
+ .inspector{top:8px;bottom:8px;left:auto;right:8px;width:min(238px,28vw);height:auto}
+ .inspector header{padding:8px}
+ .inspector article{padding:8px;overflow:auto}
+ .inspector h2{font-size:12px;margin:0 0 7px}
+ .minimap{right:calc(min(238px,28vw) + 17px);top:8px;width:110px;height:90px}
+ .minimap svg{height:56px}
+ .controls{right:calc(min(238px,28vw) + 17px);bottom:8px}
+ .legend{left:10px;bottom:8px;max-width:calc(100% - min(238px,28vw) - 90px);padding:5px 8px;gap:6px}
+ .topinfo{top:7px;left:62px;max-width:40vw}
+ .topinfo h1{font-size:15px;margin:3px 0}
+ .topinfo p{font-size:10px}
+ .toolrail{top:8px;left:8px;padding:4px}
+ .importbox{top:10px;right:calc(min(238px,28vw) + 17px);max-height:85%;overflow:auto}
+ .ai-dock[data-side=right],.ai-dock[data-side=left]{top:48px}
+ .ai-dock[data-side=top]{top:48px}
+ .ai-dock{max-height:calc(100dvh - 48px)}
+ .hint{display:none}
+}
+
+/* Keep the two essential view controls visible without sideways scrolling. */
+@media(orientation:landscape) and (max-height:600px){.toolrail{grid-template-columns:repeat(2,33px);gap:3px}.toolrail button{height:32px}}

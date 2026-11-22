@@ -1,6 +1,7 @@
 package dev.cryogenized.shiori
 
 import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.app.AlertDialog
 import android.util.Log
 import android.content.Intent
@@ -124,6 +125,15 @@ class MainActivity : Activity() {
                 // tap on New Task can be swallowed while the keyboard closes.
                 // Only the bundled offline page may navigate to this command.
                 if (uri.scheme == "shiori-ui") {
+                    if (request.isForMainFrame && uri.host == "orientation" &&
+                        view?.url?.startsWith("https://$HOST/") == true) {
+                        when (uri.path) {
+                            "/landscape" -> requestedOrientation =
+                                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            "/auto" -> requestedOrientation =
+                                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        }
+                    }
                     if (request.isForMainFrame && uri.host == "dismiss-ime") {
                         val input = getSystemService(Context.INPUT_METHOD_SERVICE)
                             as InputMethodManager
