@@ -17,6 +17,7 @@
 7. **Minimalist, progressively disclosed UX.** The basic app stays simple; complex views, rules, and integrations are optional.
 8. **Community-first.** No artificial premium restrictions on core features. AGPLv3 is the *proposed* licence, pending compatibility and legal review. Copyleft does not prohibit commercial activity.
 9. **Independent product.** Do not merge SHIORI with the CiRYVA Android assistant or the ELF//SHELL Firefox project. Integrations may be added later.
+10. **ChatGPT is a full operator, not a limited mode.** One authenticated conversation may combine task management and spatial diagram construction/editing through the same typed, permissioned MCP capabilities. Expand what it can do without artificial feature tiering; retain approvals, revocable scopes, honest local/cloud identity and visible provider costs. See [unified operator contract](docs/engineering/CHATGPT_DUAL_PLANE_OPERATOR.md).
 
 ## 2. Confirmed user-driven requirements
 
